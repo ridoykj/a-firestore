@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="status"
+     class="rounded border px-3 py-2 text-sm"
+     th:classappend="${type == 'success' ? ' border-emerald-300 bg-emerald-50 text-emerald-900' : (type == 'warning' ? ' border-amber-300 bg-amber-50 text-amber-900' : ' border-error bg-error-container text-on-error-container')}">
+    <strong class="font-semibold" th:text="${message}">Status message</strong>
+    <pre class="mt-2 overflow-x-auto rounded border border-outline-variant bg-surface px-2 py-1.5 font-code text-[13px] leading-[18px] text-on-surface"
+         th:if="${details != null and !#strings.isEmpty(details)}"
+         th:text="${details}"></pre>
+</div>
+
+<div th:fragment="authProjectSelector" class="grid gap-3">
+    <div th:if="${type != null and message != null}" th:replace="~{firestore/components/auth :: status}"></div>
+
+    <div th:if="${uploadedFileName != null}"
+         class="rounded border border-outline-variant bg-surface px-3 py-2 text-xs text-secondary">
+        <span class="font-semibold text-on-surface">Loaded file:</span>
+        <span class="ml-1 font-code text-on-surface" th:text="${uploadedFileName}">client_secrets.json</span>
+    </div>
+
+    <form
+            th:if="${projects != null and !#lists.isEmpty(projects)}"
+            hx-post="/ui/firestore/actions/auth/init"
+            hx-target="#auth-status"
+            hx-swap="innerHTML"
+            class="grid gap-3">
+        <label class="flex flex-col gap-1">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.05em] text-secondary">Project ID</span>
+            <select
+                    class="compact-input bg-surface-bright"
+                    name="projectId"
+                    required
+                    hx-post="/ui/firestore/actions/auth/databases"
+                    hx-trigger="change"
+                    hx-target="#auth-database-selector"
+                    hx-swap="outerHTML"
+                    hx-params="projectId">
+                <option value="" disabled
+                        th:selected="${selectedProjectId == null or #strings.isEmpty(selectedProjectId)}">Select a
+                    project
+                </option>
+                <option th:each="project : ${projects}"
+                        th:value="${project}"
+                        th:text="${project}"
+                        th:selected="${project == selectedProjectId}">project-id
+                </option>
+            </select>
+        </label>
+
+        <th:block th:replace="~{firestore/components/auth :: authDatabaseSelector}"></th:block>
+
+        <button class="compact-btn bg-primary text-on-primary hover:bg-primary/90" type="submit">
+            Authenticate and Open Manager
+        </button>
+    </form>
+</div>
+
+<div id="auth-database-selector" th:fragment="authDatabaseSelector" class="grid gap-1">
+    <label class="flex flex-col gap-1">
+        <span class="text-[11px] font-semibold uppercase tracking-[0.05em] text-secondary">Database ID</span>
+        <select class="compact-input bg-surface-bright" name="databaseId">
+            <option value="" th:selected="${selectedDatabase == null or #strings.isEmpty(selectedDatabase)}">(default)
+            </option>
+            <option
+                    th:each="database : ${databases}"
+                    th:value="${database}"
+                    th:text="${database}"
+                    th:selected="${database == selectedDatabase}">
+                database-id
+            </option>
+        </select>
+    </label>
+    <p class="text-[12px] text-secondary" th:if="${databaseHint != null and !#strings.isEmpty(databaseHint)}"
+       th:text="${databaseHint}">
+        No specific database IDs found. (default) is selected.
+    </p>
+</div>
+
+<div th:fragment="authInitResult" class="grid gap-2">
+    <div th:replace="~{firestore/components/auth :: status}"></div>
+    <script th:if="${authenticated}">
+        window.onFirestoreAuthenticated && window.onFirestoreAuthenticated();
+    </script>
+</div>
+</body>
+</html>

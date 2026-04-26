@@ -1,0 +1,10 @@
+spring:
+  application:
+    name: afirestore
+springdoc:
+  swagger-ui:
+    enabled: true
+    path: /docs
+  api-docs:
+    enabled: true
+    path: /v3/api-docs

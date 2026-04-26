@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<body>
+<th:block th:fragment="status" th:replace="~{firestore/components/auth :: status}"></th:block>
+<th:block th:fragment="authProjectSelector" th:replace="~{firestore/components/auth :: authProjectSelector}"></th:block>
+<th:block th:fragment="authDatabaseSelector" th:replace="~{firestore/components/auth :: authDatabaseSelector}"></th:block>
+<th:block th:fragment="authInitResult" th:replace="~{firestore/components/auth :: authInitResult}"></th:block>
+
+<th:block th:fragment="sidebarCollections" th:replace="~{firestore/components/browser :: sidebarCollections}"></th:block>
+<th:block th:fragment="nestedSidebar" th:replace="~{firestore/components/browser :: nestedSidebar}"></th:block>
+<th:block th:fragment="queryResults" th:replace="~{firestore/components/browser :: queryResults}"></th:block>
+<th:block th:fragment="exploreResult" th:replace="~{firestore/components/browser :: exploreResult}"></th:block>
+
+<th:block th:fragment="projects" th:replace="~{firestore/components/catalog :: projects}"></th:block>
+<th:block th:fragment="databases" th:replace="~{firestore/components/catalog :: databases}"></th:block>
+<th:block th:fragment="collections" th:replace="~{firestore/components/catalog :: collections}"></th:block>
+</body>
+</html>
