@@ -695,19 +695,22 @@ public class FirestoreHtmxController {
         return treeDocuments;
     }
 
-    private List<Map<String, String>> buildJsonDocuments(List<Map<String, Object>> documents) {
-        List<Map<String, String>> jsonDocuments = new ArrayList<>();
+    private List<Map<String, Object>> buildJsonDocuments(List<Map<String, Object>> documents) {
+        List<Map<String, Object>> jsonDocuments = new ArrayList<>();
         if (documents == null || documents.isEmpty()) {
             return jsonDocuments;
         }
 
         for (Map<String, Object> document : documents) {
-            Map<String, String> entry = new LinkedHashMap<>();
+            Map<String, Object> entry = new LinkedHashMap<>();
             Object idValue = document == null ? null : document.get("id");
             Object pathValue = document == null ? null : document.get("_path");
+            Map<String, Object> effectiveDocument = document == null ? Collections.emptyMap() : document;
             entry.put("id", idValue == null ? "" : String.valueOf(idValue));
             entry.put("path", pathValue == null ? "" : String.valueOf(pathValue));
-            entry.put("json", prettyJson(document == null ? Collections.emptyMap() : document));
+            entry.put("json", prettyJson(effectiveDocument));
+            entry.put("treeHtml", renderTreeHtmlForDocument(effectiveDocument));
+            entry.put("editableJson", prettyJson(extractEditablePayload(effectiveDocument)));
             jsonDocuments.add(entry);
         }
         return jsonDocuments;

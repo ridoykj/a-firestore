@@ -45,28 +45,33 @@
 </section>
 
 <div id="manager-shell" class="hidden h-screen w-full">
-    <nav class="fixed left-0 top-0 z-50 flex h-screen w-64 flex-col overflow-hidden border-r border-slate-800 bg-slate-900 py-4 text-sm text-blue-600">
+    <nav id="firebase-sidebar"
+         class="fixed left-0 top-0 z-50 flex h-screen flex-col overflow-hidden border-r border-slate-800 bg-slate-900 py-4 text-sm text-blue-600"
+         style="width: 16rem; transition: width 0.16s ease;">
         <div class="mb-6 shrink-0 px-4">
-            <div class="mb-2 flex items-center gap-3">
-                <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-gradient-to-br from-orange-400 to-yellow-500">
-                    <span class="material-symbols-outlined text-white" style="font-variation-settings: 'FILL' 1;">local_fire_department</span>
-                </div>
-                <div>
-                    <h1 class="text-lg font-bold tracking-tight text-white">Firebase Console</h1>
-                    <div class="text-xs text-slate-400">Production Cluster</div>
+            <div class="mb-2 flex items-center justify-between gap-2">
+                <div class="flex items-center gap-3">
+                    <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-gradient-to-br from-orange-400 to-yellow-500">
+                        <span class="material-symbols-outlined text-white" style="font-variation-settings: 'FILL' 1;">local_fire_department</span>
+                    </div>
+                    <div id="firebase-sidebar-brand" data-firebase-sidebar-detail>
+                        <h1 class="text-lg font-bold tracking-tight text-white">Firebase Console</h1>
+                        <div class="text-xs text-slate-400">Production Cluster</div>
+                    </div>
                 </div>
             </div>
         </div>
-        <div class="mb-4 shrink-0 px-4">
+        <div class="mb-4 shrink-0 px-4" data-firebase-sidebar-detail>
             <button class="flex w-full items-center justify-center gap-2 rounded bg-blue-600 py-2 font-medium text-white transition-colors hover:bg-blue-700">
                 <span class="material-symbols-outlined">add</span> New Project
             </button>
         </div>
-        <div class="mb-4 flex shrink-0 items-center gap-2 border-b border-slate-800 px-4 pb-4 text-xs text-slate-400">
+        <div class="mb-4 flex shrink-0 items-center gap-2 border-b border-slate-800 px-4 pb-4 text-xs text-slate-400"
+             data-firebase-sidebar-detail>
             <span class="material-symbols-outlined text-[14px]">account_circle</span>
             <span class="truncate">firefoodev@gm...</span>
         </div>
-        <div class="flex-1 overflow-y-auto">
+        <div class="flex-1 overflow-y-auto" data-firebase-sidebar-detail>
             <div class="mb-6">
                 <a class="flex items-center gap-3 border-l-2 border-blue-500 bg-blue-600/10 px-4 py-2 font-semibold text-blue-400"
                    href="#">
@@ -98,17 +103,27 @@
                 </div>
             </div>
         </div>
-        <div class="mt-4 shrink-0 border-t border-slate-800 px-4 pt-4">
+        <div class="mt-4 shrink-0 border-t border-slate-800 px-4 pt-4" data-firebase-sidebar-detail>
             <a class="flex items-center gap-3 py-2 text-slate-400 transition-colors hover:text-slate-200" href="/docs">
                 <span class="material-symbols-outlined text-[18px]">menu_book</span> Documentation
             </a>
         </div>
     </nav>
 
-    <main class="ml-64 flex h-screen min-w-0 flex-1 flex-col overflow-hidden bg-surface-container-low">
+    <main id="workspace-main"
+          class="flex h-screen min-w-0 flex-1 flex-col overflow-hidden bg-surface-container-low"
+          style="margin-left: 16rem; transition: margin-left 0.16s ease;">
         <header class="z-40 flex h-12 w-full shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6">
             <div class="flex items-center gap-2 text-sm font-semibold tracking-tight text-slate-900">
                 <span class="material-symbols-outlined text-blue-600">manage_search</span> Data Browser
+                <button id="firebase-sidebar-toggle"
+                        type="button"
+                        class="ml-2 flex h-8 shrink-0 items-center justify-center gap-1 rounded border border-slate-300 px-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                        aria-expanded="true"
+                        aria-label="Collapse Firebase Console sidebar">
+                    <span id="firebase-sidebar-toggle-icon" class="material-symbols-outlined text-[16px]">chevron_left</span>
+                    <span id="firebase-sidebar-toggle-label">Collapse</span>
+                </button>
             </div>
             <div class="flex items-center gap-3">
                 <button class="compact-btn border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:text-slate-900">
@@ -150,6 +165,14 @@
                                 <span class="w-16 text-right text-xs font-semibold uppercase tracking-wider text-secondary">Path</span>
                                 <input id="query-path" class="compact-input font-code flex-1 max-w-xl text-[13px]"
                                        type="text" name="path" value="" placeholder="/users"/>
+                                <button id="filter-order-sidebar-toggle"
+                                        type="button"
+                                        class="flex h-8 shrink-0 items-center justify-center gap-1 rounded border border-outline-variant px-2 text-xs font-medium text-secondary transition-colors hover:bg-surface-container-low hover:text-on-surface"
+                                        aria-expanded="true"
+                                        aria-label="Collapse Filter &amp; Order sidebar">
+                                    <span id="filter-order-sidebar-toggle-icon" class="material-symbols-outlined text-[16px]">chevron_right</span>
+                                    <span id="filter-order-sidebar-toggle-label">Collapse</span>
+                                </button>
                             </div>
                         </form>
                     </div>
@@ -264,18 +287,24 @@
                 </div>
 
                 <aside id="query-right-controls"
-                       class="flex h-full w-80 shrink-0 flex-col border-l border-outline-variant bg-surface-container-lowest">
+                       class="flex h-full shrink-0 flex-col border-l border-outline-variant bg-surface-container-lowest"
+                       style="width: 20rem; transition: width 0.16s ease;">
                     <div class="flex h-10 items-center gap-2 border-b border-outline-variant px-3">
                         <span class="material-symbols-outlined text-[16px] text-secondary">filter_alt</span>
-                        <span class="text-[11px] font-semibold uppercase tracking-[0.05em] text-secondary">Filter &amp; Order</span>
+                        <span class="text-[11px] font-semibold uppercase tracking-[0.05em] text-secondary"
+                              data-filter-order-sidebar-detail>
+                            Filter &amp; Order
+                        </span>
                         <button
+                                id="filter-order-sidebar-run"
                                 type="submit"
                                 form="query-form"
-                                class="compact-btn bg-primary text-on-primary hover:bg-primary/90">
+                                class="compact-btn bg-primary text-on-primary hover:bg-primary/90"
+                                data-filter-order-sidebar-detail>
                             <span class="material-symbols-outlined text-[16px]">play_arrow</span>Run Query
                         </button>
                     </div>
-                    <div class="flex-1 overflow-auto p-3">
+                    <div id="filter-order-sidebar-content" class="flex-1 overflow-auto p-3" data-filter-order-sidebar-detail>
                         <div class="flex flex-col gap-3">
                             <div class="grid gap-2">
                                 <p class="text-[11px] font-semibold uppercase tracking-[0.05em] text-secondary">
@@ -461,6 +490,218 @@
         });
     };
 
+    window.escapeJsonHtml = function (value) {
+        return String(value)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+    };
+
+    window.highlightJsonForEditor = function (value) {
+        const raw = typeof value === "string" ? value : "";
+        const escaped = window.escapeJsonHtml(raw);
+        const tokenRegex = /("(\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\btrue\b|\bfalse\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?)/g;
+        return escaped.replace(tokenRegex, function (token) {
+            let color = "#d4d4d4";
+            if (/^"/.test(token)) {
+                color = /:$/.test(token) ? "#9cdcfe" : "#ce9178";
+            } else if (token === "true" || token === "false" || token === "null") {
+                color = "#569cd6";
+            } else {
+                color = "#b5cea8";
+            }
+            return '<span style="color:' + color + ';">' + token + "</span>";
+        });
+    };
+
+    window.updateJsonEditorState = function (editor) {
+        if (!editor) {
+            return;
+        }
+        const input = editor.querySelector("[data-json-editor-input]");
+        const lines = editor.querySelector("[data-json-editor-lines]");
+        const highlight = editor.querySelector("[data-json-editor-highlight]");
+        const lineCountLabel = editor.querySelector("[data-json-editor-line-count]");
+        const validLabel = editor.querySelector("[data-json-editor-valid]");
+        if (!input || !lines || !highlight || !lineCountLabel || !validLabel) {
+            return;
+        }
+
+        const value = typeof input.value === "string" ? input.value : "";
+        const lineCount = value === "" ? 1 : value.split("\n").length;
+        const lineNumbers = [];
+        for (let i = 1; i <= lineCount; i += 1) {
+            lineNumbers.push(String(i));
+        }
+        lines.textContent = lineNumbers.join("\n");
+        lineCountLabel.textContent = lineCount + (lineCount === 1 ? " line" : " lines");
+        highlight.innerHTML = window.highlightJsonForEditor(value) + "\n";
+        highlight.scrollTop = input.scrollTop;
+        highlight.scrollLeft = input.scrollLeft;
+        lines.scrollTop = input.scrollTop;
+
+        let isValid = true;
+        try {
+            JSON.parse(value);
+        } catch (error) {
+            isValid = false;
+        }
+        validLabel.textContent = isValid ? "Valid JSON" : "Invalid JSON";
+        validLabel.style.color = isValid ? "#1d4ed8" : "#dc2626";
+    };
+
+    window.validateJsonEditor = function (editor) {
+        if (!editor) {
+            return false;
+        }
+        const input = editor.querySelector("[data-json-editor-input]");
+        if (!input) {
+            return false;
+        }
+        let isValid = true;
+        try {
+            JSON.parse(input.value);
+        } catch (error) {
+            isValid = false;
+        }
+        window.updateJsonEditorState(editor);
+        return isValid;
+    };
+
+    window.initializeJsonEditor = function (editor) {
+        if (!editor || editor.dataset.jsonEditorInitialized === "true") {
+            return;
+        }
+        const input = editor.querySelector("[data-json-editor-input]");
+        if (!input) {
+            return;
+        }
+
+        editor.dataset.jsonEditorInitialized = "true";
+        input.addEventListener("input", function () {
+            window.updateJsonEditorState(editor);
+        });
+        input.addEventListener("scroll", function () {
+            window.updateJsonEditorState(editor);
+        });
+        input.addEventListener("keyup", function () {
+            window.updateJsonEditorState(editor);
+        });
+        input.addEventListener("paste", function () {
+            window.updateJsonEditorState(editor);
+        });
+        window.updateJsonEditorState(editor);
+    };
+
+    window.initializeJsonEditors = function (scope) {
+        const root = scope || document;
+        root.querySelectorAll("[data-json-editor-id]").forEach(function (editor) {
+            window.initializeJsonEditor(editor);
+        });
+    };
+
+    window.runJsonEditorAction = function (editor, action) {
+        if (!editor) {
+            return;
+        }
+        const input = editor.querySelector("[data-json-editor-input]");
+        if (!input) {
+            return;
+        }
+
+        if (action === "format") {
+            try {
+                const parsed = JSON.parse(input.value);
+                input.value = JSON.stringify(parsed, null, 2);
+            } catch (error) {
+                window.updateJsonEditorState(editor);
+                return;
+            }
+            window.updateJsonEditorState(editor);
+            return;
+        }
+
+        if (action === "copy") {
+            const copyValue = input.value;
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(copyValue);
+            } else {
+                input.select();
+                document.execCommand("copy");
+                input.setSelectionRange(0, 0);
+            }
+            window.updateJsonEditorState(editor);
+        }
+    };
+
+    window.setFirebaseSidebarExpanded = function (expanded) {
+        const sidebar = document.getElementById("firebase-sidebar");
+        const workspaceMain = document.getElementById("workspace-main");
+        const toggleBtn = document.getElementById("firebase-sidebar-toggle");
+        const toggleIcon = document.getElementById("firebase-sidebar-toggle-icon");
+        const toggleLabel = document.getElementById("firebase-sidebar-toggle-label");
+        if (!sidebar || !workspaceMain || !toggleBtn || !toggleIcon || !toggleLabel) {
+            return;
+        }
+
+        const isExpanded = expanded !== false;
+        sidebar.dataset.expanded = isExpanded ? "true" : "false";
+        sidebar.style.width = isExpanded ? "16rem" : "4rem";
+        workspaceMain.style.marginLeft = isExpanded ? "16rem" : "4rem";
+        document.querySelectorAll("[data-firebase-sidebar-detail]").forEach(function (element) {
+            element.classList.toggle("hidden", !isExpanded);
+        });
+
+        toggleIcon.textContent = isExpanded ? "chevron_left" : "chevron_right";
+        toggleLabel.textContent = isExpanded ? "Collapse" : "Expand";
+        toggleBtn.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+        toggleBtn.setAttribute("aria-label", isExpanded
+            ? "Collapse Firebase Console sidebar"
+            : "Expand Firebase Console sidebar");
+    };
+
+    window.toggleFirebaseSidebar = function () {
+        const sidebar = document.getElementById("firebase-sidebar");
+        if (!sidebar) {
+            return;
+        }
+        const isExpanded = sidebar.dataset.expanded !== "false";
+        window.setFirebaseSidebarExpanded(!isExpanded);
+    };
+
+    window.setFilterOrderSidebarExpanded = function (expanded) {
+        const sidebar = document.getElementById("query-right-controls");
+        const toggleBtn = document.getElementById("filter-order-sidebar-toggle");
+        const toggleIcon = document.getElementById("filter-order-sidebar-toggle-icon");
+        const toggleLabel = document.getElementById("filter-order-sidebar-toggle-label");
+        if (!sidebar || !toggleBtn || !toggleIcon || !toggleLabel) {
+            return;
+        }
+
+        const isExpanded = expanded !== false;
+        sidebar.dataset.expanded = isExpanded ? "true" : "false";
+        sidebar.style.width = isExpanded ? "20rem" : "1rem";
+        document.querySelectorAll("[data-filter-order-sidebar-detail]").forEach(function (element) {
+            element.classList.toggle("hidden", !isExpanded);
+        });
+
+        toggleIcon.textContent = isExpanded ? "chevron_right" : "chevron_left";
+        toggleLabel.textContent = isExpanded ? "Collapse" : "Expand";
+        toggleBtn.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+        toggleBtn.setAttribute("aria-label", isExpanded
+            ? "Collapse Filter & Order sidebar"
+            : "Expand Filter & Order sidebar");
+    };
+
+    window.toggleFilterOrderSidebar = function () {
+        const sidebar = document.getElementById("query-right-controls");
+        if (!sidebar) {
+            return;
+        }
+        const isExpanded = sidebar.dataset.expanded !== "false";
+        window.setFilterOrderSidebarExpanded(!isExpanded);
+    };
+
     window.updateWhereFilterControls = function () {
         const rows = document.querySelectorAll("#where-filters .where-filter-row");
         rows.forEach(function (row) {
@@ -501,6 +742,26 @@
     });
 
     document.body.addEventListener("click", function (event) {
+        const firebaseSidebarToggleBtn = event.target.closest("#firebase-sidebar-toggle");
+        if (firebaseSidebarToggleBtn) {
+            window.toggleFirebaseSidebar();
+            return;
+        }
+
+        const filterOrderSidebarToggleBtn = event.target.closest("#filter-order-sidebar-toggle");
+        if (filterOrderSidebarToggleBtn) {
+            window.toggleFilterOrderSidebar();
+            return;
+        }
+
+        const jsonEditorActionBtn = event.target.closest("[data-json-editor-action]");
+        if (jsonEditorActionBtn) {
+            const editor = jsonEditorActionBtn.closest("[data-json-editor-id]");
+            const action = jsonEditorActionBtn.dataset ? jsonEditorActionBtn.dataset.jsonEditorAction : "";
+            window.runJsonEditorAction(editor, action);
+            return;
+        }
+
         const nestedQueryPathBtn = event.target.closest(".nested-query-path");
         if (nestedQueryPathBtn && nestedQueryPathBtn.dataset && nestedQueryPathBtn.dataset.queryPath) {
             window.setQueryPath("/" + nestedQueryPathBtn.dataset.queryPath);
@@ -547,6 +808,12 @@
 
     document.body.addEventListener("submit", function (event) {
         const form = event.target;
+        if (form && form.matches && form.matches("[data-json-editor-id]")) {
+            if (!window.validateJsonEditor(form)) {
+                event.preventDefault();
+            }
+            return;
+        }
         if (!form || form.id !== "query-form" || !event.isTrusted) {
             return;
         }
@@ -557,6 +824,7 @@
         if (!event.detail || !event.detail.target || event.detail.target.id !== "query-results") {
             return;
         }
+        window.initializeJsonEditors(event.detail.target);
         const input = document.getElementById("query-path");
         if (!input) {
             return;
@@ -573,6 +841,9 @@
 
     window.updateWhereFilterControls();
     window.setQueryViewMode("table");
+    window.setFirebaseSidebarExpanded(true);
+    window.setFilterOrderSidebarExpanded(true);
+    window.initializeJsonEditors(document);
 </script>
 </body>
 </html>

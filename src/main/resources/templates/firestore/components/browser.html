@@ -231,16 +231,70 @@
 
     <div th:if="${viewMode == 'json'}" class="grid gap-3 p-3">
         <article
-                th:each="doc : ${jsonDocuments}"
-                class="rounded border border-outline-variant bg-surface-container-lowest">
-            <header class="border-b border-outline-variant px-3 py-2">
-                <p class="truncate text-[13px] font-semibold text-on-surface" th:text="${doc['id']}">document-id</p>
-                <p class="truncate text-[11px] text-secondary" th:text="${doc['path']}">collection/document-id</p>
-            </header>
-            <div class="overflow-auto px-3 py-2">
-                <pre class="rounded border border-outline-variant bg-surface px-2 py-1.5 font-code text-[12px] leading-5 text-on-surface"
-                     th:text="${doc['json']}"></pre>
-            </div>
+                th:each="doc,iter : ${jsonDocuments}"
+                class="overflow-hidden rounded border border-outline-variant bg-surface-container-lowest">
+            <form
+                    class="grid"
+                    th:attr="data-json-editor-id=|json-editor-${iter.index}|"
+                    hx-post="/ui/firestore/actions/replace"
+                    hx-target="#action-panel"
+                    hx-swap="innerHTML"
+                    hx-on::after-request="if (event.detail.successful) { htmx.trigger('#query-form', 'submit'); }">
+                <input type="hidden" name="documentPath" th:value="${doc['path']}">
+
+                <header class="flex items-center justify-between gap-3 border-b border-slate-300 bg-slate-100 px-2 py-1">
+                    <div class="min-w-0">
+                        <p class="truncate text-[13px] font-semibold text-slate-900" th:text="${doc['id']}">document-id</p>
+                        <p class="truncate text-[11px] text-slate-500" th:text="${doc['path']}">collection/document-id</p>
+                    </div>
+                    <div class="flex shrink-0 items-center gap-2">
+                        <button
+                                type="button"
+                                class="compact-btn border border-slate-300 bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                data-json-editor-action="format">
+                            <span class="material-symbols-outlined text-[16px]">sort</span>
+                            Format JSON
+                        </button>
+                        <button
+                                type="button"
+                                class="compact-btn border border-slate-300 bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                data-json-editor-action="copy">
+                            <span class="material-symbols-outlined text-[16px]">content_copy</span>
+                            Copy
+                        </button>
+                        <button class="compact-btn bg-primary text-on-primary hover:bg-primary/90" type="submit">
+                            <span class="material-symbols-outlined text-[16px]">save</span>
+                            Save Changes
+                        </button>
+                    </div>
+                </header>
+
+                <div class="border-b border-slate-800 bg-[#1e1e1e] text-[#d4d4d4]">
+                    <div class="flex min-h-[260px] max-h-[52vh] overflow-hidden font-code text-[13px] leading-[23px]">
+                        <pre class="w-12 shrink-0 overflow-hidden border-r border-slate-800 bg-[#1a1a1a] px-2 py-2 text-right text-[#6e7681]"
+                             data-json-editor-lines>1</pre>
+                        <div class="relative min-w-0 flex-1">
+                            <pre class="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre px-3 py-2 text-[13px] leading-[23px]"
+                                 data-json-editor-highlight></pre>
+                            <textarea
+                                    class="relative z-[1] block h-full min-h-[260px] w-full resize-y overflow-auto border-0 bg-transparent px-3 py-2 font-code text-[13px] leading-[23px] text-transparent caret-white outline-none selection:bg-blue-500/35"
+                                    name="payloadJson"
+                                    spellcheck="false"
+                                    data-json-editor-input
+                                    th:text="${doc['editableJson']}"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <footer class="flex items-center justify-between bg-slate-100 px-3 py-1 text-[12px] text-slate-600">
+                    <span data-json-editor-line-count>1 line</span>
+                    <div class="flex items-center gap-4">
+                        <span data-json-editor-valid class="text-blue-700">Valid JSON</span>
+                        <span>UTF-8</span>
+                        <span>JSON</span>
+                    </div>
+                </footer>
+            </form>
         </article>
 
         <div th:if="${jsonDocuments == null or #lists.isEmpty(jsonDocuments)}"
@@ -296,6 +350,7 @@
 
     <script th:inline="javascript">
         window.setQueryViewMode && window.setQueryViewMode('[[${viewMode}]]');
+        window.initializeJsonEditors && window.initializeJsonEditors(document.getElementById('query-results'));
     </script>
 </div>
 
