@@ -202,7 +202,7 @@
                 </executions>
                 <configuration>
                     <nodeVersion>${node.version}</nodeVersion>
-                    <workingDirectory>src/main/frontend</workingDirectory>
+                    <workingDirectory>frontend</workingDirectory>
                     <installDirectory>target</installDirectory>
                 </configuration>
             </plugin>
