@@ -1,0 +1,63 @@
+{
+  "javascript.inlayHints.functionLikeReturnTypes.enabled": false,
+  "javascript.inlayHints.parameterNames.enabled": "all",
+  "javascript.inlayHints.parameterTypes.enabled": true,
+  "javascript.inlayHints.propertyDeclarationTypes.enabled": true,
+  "typescript.preferences.includePackageJsonAutoImports": "on",
+  "editor.formatOnSave": true,
+  "editor.linkedEditing": true,
+  "editor.defaultFormatter": "dbaeumer.vscode-eslint",
+  "files.associations": {
+    "*.css": "tailwindcss"
+  },
+  "files.readonlyInclude": {
+    "**/routeTree.gen.ts": true
+  },
+  "files.watcherExclude": {
+    "**/routeTree.gen.ts": true
+  },
+  "search.exclude": {
+    "**/routeTree.gen.ts": true
+  },
+  "[typescriptreact]": {
+    "editor.formatOnSave": false,
+    "editor.defaultFormatter": "vscode.typescript-language-features"
+  },
+  "[typescript]": {
+    "editor.formatOnSave": false,
+    "editor.defaultFormatter": "vscode.typescript-language-features"
+  },
+  "javascript.validate.enable": false, //disable all built-in syntax checking
+  "eslint.validate": [
+    "javascript",
+    "javascriptreact",
+    "typescript",
+    "typescriptreact"
+  ],
+  "editor.codeActionsOnSave": {
+    // "source.fixAll": "explicit",
+    // "source.fixAll.eslint": "explicit",
+    "source.fixAll.eslint": "explicit",
+    // "source.organizeImports": "always",
+    // "source.removeUnusedImports": "always"
+    "source.addMissingImports.ts": "explicit",
+    "source.sortMembers": "always"
+    // "source.fixAll": "always"
+  },
+  "emmet.triggerExpansionOnTab": true,
+  "emmet.includeLanguages": {
+    "javascript": "javascriptreact",
+    "typescript": "typescriptreact"
+  },
+  "eslint.format.enable": true,
+  "eslint.lintTask.enable": true,
+  "[json]": {
+    "editor.defaultFormatter": "vscode.json-language-features"
+  },
+  "[css]": {
+    "editor.defaultFormatter": "vscode.css-language-features"
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "vscode.json-language-features"
+  },
+}
