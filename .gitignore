@@ -1,9 +1,5 @@
 HELP.md
 target/
-src/main/frontend/node_modules/
-src/main/frontend2/node_modules/
-src/main/frontend2/.tanstack/
-src/main/frontend2/.vscode/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
@@ -34,4 +30,4 @@ build/
 !**/src/test/**/build/
 
 ### VS Code ###
-.vscode/
+/src/main/resources/static/assets/

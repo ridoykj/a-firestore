@@ -24,3 +24,5 @@ dist-ssr
 /.claude/
 /.agents/
 /.tanstack/
+/skills-lock.json
+/src/routeTree.gen.ts
