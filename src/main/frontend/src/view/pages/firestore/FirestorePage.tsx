@@ -866,31 +866,32 @@ export default function FirestorePage() {
           refreshCollections={refreshCollections}
           runCollectionQuery={runCollectionQuery}
           authLoadingProjects={authLoadingProjects}
-          authLoadingDatabases={authLoadingDatabases}
-          authInitializing={authInitializing}
           handleLoadProjects={handleLoadProjects}
-          handleLoadDatabases={handleLoadDatabases}
-          handleAuthenticate={handleAuthenticate}
         />
 
         {/* MAIN CRUD AREA */}
         <main className="flex min-w-0 flex-1 flex-col relative">
-          {!authenticated ? (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/50 backdrop-blur-sm">
-              <Card className="w-[350px] shadow-lg">
-                <CardHeader>
-                  <CardTitle className="text-lg">Authentication Required</CardTitle>
-                  <CardDescription>
-                    Please upload your JSON credentials and configure the project in the left sidebar to begin.
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-            </div>
-          ) : null}
+          <FirestoreHeader
+            authLoadingDatabases={authLoadingDatabases}
+            authInitializing={authInitializing}
+            handleLoadDatabases={handleLoadDatabases}
+            handleAuthenticate={handleAuthenticate}
+          />
 
-          <FirestoreHeader />
+          <div className="flex min-h-0 flex-1 relative">
+            {!authenticated ? (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/50 backdrop-blur-sm">
+                <Card className="w-87.5 shadow-lg">
+                  <CardHeader>
+                    <CardTitle className="text-lg">Authentication Required</CardTitle>
+                    <CardDescription>
+                      Please upload your JSON credentials and configure the project to begin.
+                    </CardDescription>
+                  </CardHeader>
+                </Card>
+              </div>
+            ) : null}
 
-          <div className="flex min-h-0 flex-1">
             <FirestoreNestedTraverse
               nestedLoading={nestedLoading}
               nestedResponse={nestedResponse}

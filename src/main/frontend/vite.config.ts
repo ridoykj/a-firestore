@@ -22,7 +22,7 @@ export default defineConfig({
     tailwindcss()
   ],
   build: {
-    outDir: '../src/main/resources/static/',
+    outDir: '../resources/static/',
     emptyOutDir: true,
   },
   resolve: {

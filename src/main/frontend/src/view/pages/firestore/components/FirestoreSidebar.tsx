@@ -1,7 +1,6 @@
 import { Button } from "@/shadcn/components/ui/button"
 import { Input } from "@/shadcn/components/ui/input"
 import { Spinner } from "@/shadcn/components/ui/spinner"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shadcn/components/ui/select"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/shadcn/components/ui/empty"
 import { cn } from "@/shadcn/lib/utils"
 import { Database, PanelLeftClose, PanelLeftOpen, RefreshCw, Table2 } from "lucide-react"
@@ -16,11 +15,7 @@ interface FirestoreSidebarProps {
   refreshCollections: () => void;
   runCollectionQuery: (collection: string) => void;
   authLoadingProjects: boolean;
-  authLoadingDatabases: boolean;
-  authInitializing: boolean;
   handleLoadProjects: () => void;
-  handleLoadDatabases: (projectId?: string) => void;
-  handleAuthenticate: (dbOverride?: string) => void;
 }
 
 export function FirestoreSidebar({
@@ -32,22 +27,14 @@ export function FirestoreSidebar({
   refreshCollections,
   runCollectionQuery,
   authLoadingProjects,
-  authLoadingDatabases,
-  authInitializing,
   handleLoadProjects,
-  handleLoadDatabases,
-  handleAuthenticate,
 }: FirestoreSidebarProps) {
   const {
     credentialsFile,
     setCredentialsFile,
-    projects,
     setProjects,
-    selectedProject,
-    setSelectedProject,
-    databases,
     setDatabases,
-    selectedDatabase,
+    setSelectedProject,
     setSelectedDatabase,
     authenticated,
     authStatus,
@@ -115,63 +102,6 @@ export function FirestoreSidebar({
                 {authLoadingProjects ? <Spinner className="w-3 h-3 mr-1" /> : null}
                 Load Projects
               </Button>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[10px] flex items-center justify-between font-semibold uppercase tracking-wide text-muted-foreground">
-                <span>Project ID</span>
-                {authLoadingDatabases && <Spinner className="w-3 h-3" />}
-              </label>
-              <Select
-                value={selectedProject || undefined}
-                onValueChange={(value) => {
-                  setSelectedProject(value)
-                  setDatabases([])
-                  setSelectedDatabase("")
-                  
-                  // Auto-fetch the databases for this new project value immediately
-                  void handleLoadDatabases(value)
-                }}
-              >
-                <SelectTrigger className="h-7 w-full text-xs">
-                  <SelectValue placeholder="Select a project" />
-                </SelectTrigger>
-                <SelectContent>
-                  {projects.map((project) => (
-                    <SelectItem key={project} value={project} className="text-xs">
-                      {project}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[10px] flex items-center justify-between font-semibold uppercase tracking-wide text-muted-foreground">
-                <span>Database ID</span>
-                {authInitializing && <Spinner className="w-3 h-3" />}
-              </label>
-              <Select
-                value={selectedDatabase || "__default__"}
-                onValueChange={(value) => {
-                  const dbVal = value === "__default__" ? "" : value;
-                  setSelectedDatabase(dbVal)
-                  void handleAuthenticate(dbVal)
-                }}
-                disabled={authLoadingDatabases || !selectedProject || authInitializing}
-              >
-                <SelectTrigger className="h-7 w-full text-xs">
-                  <SelectValue placeholder={authLoadingDatabases ? "Loading..." : "(default)"} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__default__" className="text-xs">(default)</SelectItem>
-                  {databases.map((database) => (
-                    <SelectItem key={database} value={database} className="text-xs">
-                      {database}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
 
             {authStatus ? (

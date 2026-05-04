@@ -83,23 +83,23 @@ export function FirestoreQueryResults({
         {!queryLoading && !queryError ? (
           <div className="h-full min-h-0 min-w-0 rounded-md border bg-card/20 [&_[data-slot=table-container]]:h-full [&_[data-slot=table-container]]:min-h-0 [&_[data-slot=table-container]]:overflow-auto">
             <Table className="w-max min-w-full text-left text-xs">
-              <TableHeader className="bg-muted/90 supports-[backdrop-filter]:bg-muted/75">
+              <TableHeader className="bg-muted">
                 <TableRow>
-                  <TableHead className="sticky top-0 z-20 min-w-44 bg-inherit py-2 font-semibold">
+                  <TableHead className="sticky top-0 z-20 min-w-44 py-2 font-semibold">
                     <div className="grid gap-0.5">
                       <span>ID</span>
                       <span className="text-[10px] font-normal text-muted-foreground">string</span>
                     </div>
                   </TableHead>
                   {dataColumns.map((column) => (
-                    <TableHead key={column.name} className="sticky top-0 z-20 min-w-44 bg-inherit py-2 font-semibold">
+                    <TableHead key={column.name} className="sticky top-0 z-20 min-w-44 py-2 font-semibold">
                       <div className="grid gap-0.5">
                         <span>{column.name}</span>
                         <span className="text-[10px] font-normal text-muted-foreground">{column.type}</span>
                       </div>
                     </TableHead>
                   ))}
-                  <TableHead className="sticky top-0 right-0 z-30 min-w-28 border-l bg-muted/90 py-2 text-right font-semibold supports-[backdrop-filter]:bg-muted/75">
+                  <TableHead className="sticky top-0 right-0 z-30 min-w-28 border-l bg-muted py-2 text-right font-semibold">
                     <span>Actions</span>
                   </TableHead>
                 </TableRow>
