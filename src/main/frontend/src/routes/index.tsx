@@ -15,8 +15,7 @@ export const Route = createFileRoute('/')({
 })
 
 function RouteComponent() {
-    const setCredentialsFile = useGcpStore(state => state.setCredentialsFile)
-    const credentialsFile = useGcpStore(state => state.credentialsFile)
+    const { setCredentialsFile, credentialsFile } = useGcpStore()
     const navigate = useNavigate()
 
     const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {

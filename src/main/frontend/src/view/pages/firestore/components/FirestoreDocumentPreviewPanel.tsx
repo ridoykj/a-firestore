@@ -3,6 +3,7 @@ import type {
   PreviewEditorTheme,
   PreviewValidationSummary,
   StatusMessage,
+  TransferFormat,
 } from "@/dto/firestore/FirestoreSchema"
 import { FirestoreJsonTreeViewer } from "@/view/pages/firestore/components/FirestoreJsonTreeViewer"
 import { FirestoreJsonGraphViewer } from "@/view/pages/firestore/components/FirestoreJsonGraphViewer"
@@ -21,6 +22,13 @@ import {
 import { Badge } from "@/shadcn/components/ui/badge"
 import { Button } from "@/shadcn/components/ui/button"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/shadcn/components/ui/dropdown-menu"
+import {
   Field,
   FieldError,
   FieldGroup,
@@ -36,7 +44,17 @@ import {
 import { Skeleton } from "@/shadcn/components/ui/skeleton"
 import { Spinner } from "@/shadcn/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shadcn/components/ui/tabs"
-import { CheckCircle2, FileJson, FolderTree, Network, Moon, Sun, WandSparkles } from "lucide-react"
+import {
+  CheckCircle2,
+  Download,
+  FileJson,
+  FolderTree,
+  Moon,
+  Network,
+  Sun,
+  Upload,
+  WandSparkles,
+} from "lucide-react"
 
 const FirestoreJsonCodeEditor = lazy(async () => {
   const module = await import("@/view/pages/firestore/components/FirestoreJsonCodeEditor")
@@ -63,6 +81,9 @@ type FirestoreDocumentPreviewPanelProps = {
   onOpenChange: (open: boolean) => void
   onUpdate: (formattedDraft: string) => void
   onDelete: () => void
+  onExportDocument: (format: TransferFormat) => void
+  onImportDocument: (format: TransferFormat) => void
+  transferBusy?: boolean
 }
 
 export function FirestoreDocumentPreviewPanel({
@@ -82,6 +103,9 @@ export function FirestoreDocumentPreviewPanel({
   onOpenChange,
   onUpdate,
   onDelete,
+  onExportDocument,
+  onImportDocument,
+  transferBusy = false,
 }: FirestoreDocumentPreviewPanelProps) {
   const [attemptedJsonSubmit, setAttemptedJsonSubmit] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
@@ -188,27 +212,89 @@ export function FirestoreDocumentPreviewPanel({
               <Badge variant="outline">
                 {activeTab === "json" ? "JSON Editor" : "Tree Preview"}
               </Badge>
-              <div className="flex items-center gap-1 rounded-md border bg-background p-1">
-                <Button
-                  type="button"
-                  size="xs"
-                  variant={editorTheme === "light" ? "secondary" : "ghost"}
-                  onClick={() => onEditorThemeChange("light")}
-                  disabled={isPending}
-                >
-                  <Sun data-icon="inline-start" />
-                  Light
-                </Button>
-                <Button
-                  type="button"
-                  size="xs"
-                  variant={editorTheme === "dark" ? "secondary" : "ghost"}
-                  onClick={() => onEditorThemeChange("dark")}
-                  disabled={isPending}
-                >
-                  <Moon data-icon="inline-start" />
-                  Dark
-                </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      disabled={isPending || transferBusy || pathIsInvalid}
+                    >
+                      <Download data-icon="inline-start" />
+                      Export
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onClick={() => onExportDocument("json")}
+                      disabled={pathIsInvalid || isPending || transferBusy}
+                    >
+                      Export JSON
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => onExportDocument("csv")}
+                      disabled={pathIsInvalid || isPending || transferBusy}
+                    >
+                      Export CSV
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      disabled={isPending || transferBusy || pathIsInvalid}
+                    >
+                      <Upload data-icon="inline-start" />
+                      Import
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onClick={() => onImportDocument("json")}
+                      disabled={pathIsInvalid || isPending || transferBusy}
+                    >
+                      Import JSON
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => onImportDocument("csv")}
+                      disabled={pathIsInvalid || isPending || transferBusy}
+                    >
+                      Import CSV
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem disabled>
+                      Full replace upsert mode
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <div className="flex items-center gap-1 rounded-md border bg-background p-1">
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant={editorTheme === "light" ? "secondary" : "ghost"}
+                    onClick={() => onEditorThemeChange("light")}
+                    disabled={isPending}
+                  >
+                    <Sun data-icon="inline-start" />
+                    Light
+                  </Button>
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant={editorTheme === "dark" ? "secondary" : "ghost"}
+                    onClick={() => onEditorThemeChange("dark")}
+                    disabled={isPending}
+                  >
+                    <Moon data-icon="inline-start" />
+                    Dark
+                  </Button>
+                </div>
               </div>
             </SheetTitle>
             <SheetDescription className="font-mono text-xs">

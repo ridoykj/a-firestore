@@ -1,13 +1,15 @@
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import {
+  Download,
   FilePlus2,
   PanelRightClose,
   PanelRightOpen,
   Play,
   Table2,
+  Upload,
 } from "lucide-react"
 import { toast } from "sonner"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import {
   AlertDialog,
@@ -20,7 +22,13 @@ import {
   AlertDialogTitle,
 } from "@/shadcn/components/ui/alert-dialog"
 import { Button } from "@/shadcn/components/ui/button"
-import { Card, CardDescription, CardHeader, CardTitle } from "@/shadcn/components/ui/card"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/shadcn/components/ui/dropdown-menu"
 import { Field, FieldLabel } from "@/shadcn/components/ui/field"
 import { Input } from "@/shadcn/components/ui/input"
 import {
@@ -37,17 +45,31 @@ import {
   type PreviewValidationSummary,
   type QueryResponse,
   type StatusMessage,
+  type TransferFormat,
   type WhereRow,
 } from "@/dto/firestore/FirestoreSchema"
 import {
-  extractApiMessage,
+  documentIdIsValid,
+  generateFirestoreDocumentId,
   getPayloadOnly,
   normalizePath,
   parseJsonPayload,
   pathIsCollection,
 } from "@/view/pages/firestore/lib/firestore-utils"
+import {
+  buildCollectionTransferJson,
+  buildDocumentTransferJson,
+  documentIdFromPath,
+  parseCollectionTransferJson,
+  parseDocumentTransferJson,
+  parseTransferCsv,
+  sanitizeFileNamePart,
+  serializeTransferRecordsToCsv,
+  toTransferRecord,
+  triggerTextDownload,
+} from "@/view/pages/firestore/lib/firestore-transfer-utils"
 import { firestoreService } from "@/services/api/firestore-service"
-import { FirestoreCrudPanel } from "@/view/pages/firestore/components/FirestoreCrudPanel"
+import { FirestoreCreateDrawer } from "@/view/pages/firestore/components/FirestoreCreateDrawer"
 import {
   FirestoreDocumentPreviewPanel,
   type PreviewBusy,
@@ -55,13 +77,11 @@ import {
 } from "@/view/pages/firestore/components/FirestoreDocumentPreviewPanel"
 import { FirestoreFilterPanel } from "@/view/pages/firestore/components/FirestoreFilterPanel"
 import { FirestoreQueryResults } from "@/view/pages/firestore/components/FirestoreQueryResults"
-import { useGcpStore } from "@/store/gcp-store"
-
 import { FirestoreSidebar } from "@/view/pages/firestore/components/FirestoreSidebar"
 import { FirestoreHeader } from "@/view/pages/firestore/components/FirestoreHeader"
 import { FirestoreNestedTraverse } from "@/view/pages/firestore/components/FirestoreNestedTraverse"
+import type { ProjectTab } from "@/store/gcp-store"
 
-type CrudAction = Exclude<CrudBusy, null>
 type PreviewDocumentSelection = {
   documentPath: string
   documentId: string
@@ -72,6 +92,11 @@ type PendingPreviewIntent =
   | { intent: "close" }
   | { intent: "switch"; nextSelection: PreviewDocumentSelection }
 
+type FirestorePageProps = {
+  tab: ProjectTab
+  onOpenAddTab: () => void
+}
+
 const PREVIEW_THEME_STORAGE_KEY = "firestore-preview-editor-theme"
 
 const EMPTY_PREVIEW_VALIDATION: PreviewValidationSummary = {
@@ -79,6 +104,7 @@ const EMPTY_PREVIEW_VALIDATION: PreviewValidationSummary = {
   warningCount: 0,
   firstErrorMessage: "",
 }
+const NESTED_PAGE_SIZE = 25
 
 function loadInitialPreviewTheme(): PreviewEditorTheme {
   if (typeof window === "undefined") {
@@ -92,32 +118,22 @@ function loadInitialPreviewTheme(): PreviewEditorTheme {
   return "dark"
 }
 
-export default function FirestorePage() {
+export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps) {
   const queryClient = useQueryClient()
-  
-  // Connect to Zustand store
-  const {
-    credentialsFile,
-    selectedProject,
-    setSelectedProject,
-    setDatabases,
-    selectedDatabase,
-    setSelectedDatabase,
-    authenticated,
-    setAuthenticated,
-    setProjects,
-    setAuthStatus
-  } = useGcpStore()
-
-  const [authLoadingProjects, setAuthLoadingProjects] = useState(false)
-  const [authLoadingDatabases, setAuthLoadingDatabases] = useState(false)
-  const [authInitializing, setAuthInitializing] = useState(false)
+  const context = useMemo(
+    () => ({
+      projectId: tab.projectId,
+      databaseId: tab.databaseId,
+    }),
+    [tab.projectId, tab.databaseId],
+  )
 
   const [leftSidebarExpanded, setLeftSidebarExpanded] = useState(true)
   const [rightSidebarExpanded, setRightSidebarExpanded] = useState(true)
 
   const [activeCollection, setActiveCollection] = useState("")
   const [queryPath, setQueryPath] = useState("")
+  const [nestedIdFilter, setNestedIdFilter] = useState("")
   const [orderField, setOrderField] = useState("")
   const [orderDirection, setOrderDirection] = useState<OrderDirection>("desc")
   const [limit, setLimit] = useState(50)
@@ -128,20 +144,12 @@ export default function FirestorePage() {
   const [queryLoading, setQueryLoading] = useState(false)
   const [queryError, setQueryError] = useState("")
 
-  const [nestedResponse, setNestedResponse] = useState<NestedResponse | null>(null)
-  const [nestedLoading, setNestedLoading] = useState(false)
-
   const [createCollectionPath, setCreateCollectionPath] = useState("")
+  const [createDocumentId, setCreateDocumentId] = useState("")
   const [createPayload, setCreatePayload] = useState(EMPTY_JSON_TEMPLATE)
-  const [updateDocumentPath, setUpdateDocumentPath] = useState("")
-  const [updatePayload, setUpdatePayload] = useState(EMPTY_JSON_TEMPLATE)
-  const [replaceDocumentPath, setReplaceDocumentPath] = useState("")
-  const [replacePayload, setReplacePayload] = useState(EMPTY_JSON_TEMPLATE)
-  const [deletePath, setDeletePath] = useState("")
+  const [createDrawerOpen, setCreateDrawerOpen] = useState(false)
   const [crudBusy, setCrudBusy] = useState<CrudBusy>(null)
   const [actionStatus, setActionStatus] = useState<StatusMessage | null>(null)
-  const [requestedCrudAction, setRequestedCrudAction] = useState<CrudAction | null>(null)
-  const [crudModalVersion, setCrudModalVersion] = useState(0)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewSelection, setPreviewSelection] = useState<PreviewDocumentSelection | null>(null)
   const [previewActiveTab, setPreviewActiveTab] = useState<PreviewTab>("tree")
@@ -158,15 +166,92 @@ export default function FirestorePage() {
   const [pendingPreviewIntent, setPendingPreviewIntent] = useState<PendingPreviewIntent | null>(
     null,
   )
+  const [transferBusy, setTransferBusy] = useState(false)
+  const collectionImportJsonInputRef = useRef<HTMLInputElement | null>(null)
+  const collectionImportCsvInputRef = useRef<HTMLInputElement | null>(null)
+  const documentImportJsonInputRef = useRef<HTMLInputElement | null>(null)
+  const documentImportCsvInputRef = useRef<HTMLInputElement | null>(null)
 
   const collectionsQuery = useQuery({
-    queryKey: ["firestore", "collections", authenticated],
-    queryFn: firestoreService.getCollections,
-    enabled: authenticated,
+    queryKey: ["firestore", "collections", tab.id],
+    queryFn: () => firestoreService.getCollections(context),
   })
 
   const collections = collectionsQuery.data ?? []
   const collectionsLoading = collectionsQuery.isFetching
+  const nestedPath = useMemo(() => normalizePath(queryPath), [queryPath])
+  const normalizedNestedIdFilter = useMemo(() => nestedIdFilter.trim(), [nestedIdFilter])
+  const nestedQuery = useInfiniteQuery({
+    queryKey: ["firestore", tab.id, "nested", nestedPath, NESTED_PAGE_SIZE, normalizedNestedIdFilter],
+    enabled: Boolean(nestedPath),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      firestoreService.getNested(
+        context,
+        nestedPath,
+        NESTED_PAGE_SIZE,
+        pageParam,
+        normalizedNestedIdFilter,
+      ),
+    getNextPageParam: (lastPage) =>
+      lastPage.pageInfo?.hasMore ? (lastPage.pageInfo.nextCursor ?? undefined) : undefined,
+  })
+
+  const nestedResponse = useMemo<NestedResponse | null>(() => {
+    if (!nestedPath) {
+      return { ...EMPTY_NESTED_RESPONSE }
+    }
+
+    const pages = nestedQuery.data?.pages ?? []
+    if (pages.length === 0) {
+      if (nestedQuery.isError) {
+        return {
+          currentPath: nestedPath,
+          parentPath: "",
+          nodeType: "empty",
+          documentNodes: [],
+          childCollectionNodes: [],
+          nestedHint: "",
+          nestedError:
+            nestedQuery.error instanceof Error
+              ? nestedQuery.error.message
+              : "Failed to load nested traversal.",
+          pageInfo: {
+            nextCursor: null,
+            hasMore: false,
+            returnedCount: 0,
+            limit: NESTED_PAGE_SIZE,
+          },
+        }
+      }
+      return null
+    }
+
+    const firstPage = pages[0]
+    if (firstPage.nodeType === "collection") {
+      const mergedDocumentNodes = pages.flatMap((pageData) => pageData.documentNodes)
+      const lastPage = pages[pages.length - 1] ?? firstPage
+      return {
+        ...firstPage,
+        documentNodes: mergedDocumentNodes,
+        pageInfo: lastPage.pageInfo,
+      }
+    }
+
+    if (firstPage.nodeType === "document") {
+      const mergedChildCollectionNodes = pages.flatMap((pageData) => pageData.childCollectionNodes)
+      const lastPage = pages[pages.length - 1] ?? firstPage
+      return {
+        ...firstPage,
+        childCollectionNodes: mergedChildCollectionNodes,
+        pageInfo: lastPage.pageInfo,
+      }
+    }
+
+    return firstPage
+  }, [nestedPath, nestedQuery.data, nestedQuery.error, nestedQuery.isError])
+
+  const nestedLoading = Boolean(nestedPath) && nestedQuery.isLoading
 
   function resolveDocumentPathFromRecord(document: FirestoreDocument): string {
     return typeof document._path === "string" ? normalizePath(document._path) : ""
@@ -205,6 +290,391 @@ export default function FirestorePage() {
     return `${queryResponse.resultCount} documents found in ${queryResponse.elapsedMs}ms`
   }, [queryResponse])
 
+  function resolveCollectionTransferPath(): string {
+    const normalizedQueryPath = normalizePath(queryPath)
+    if (pathIsCollection(normalizedQueryPath)) {
+      return normalizedQueryPath
+    }
+
+    const normalizedActiveCollection = normalizePath(activeCollection)
+    if (pathIsCollection(normalizedActiveCollection)) {
+      return normalizedActiveCollection
+    }
+
+    const queryRoot = normalizedQueryPath.split("/")[0] ?? ""
+    return pathIsCollection(queryRoot) ? queryRoot : ""
+  }
+
+  function transferControlsDisabled(): boolean {
+    return transferBusy || crudBusy !== null || previewBusy !== null || queryLoading
+  }
+
+  function collectionExportFileName(
+    collectionPath: string,
+    source: "current-page" | "full-collection",
+    format: TransferFormat,
+  ): string {
+    const safePath = sanitizeFileNamePart(collectionPath)
+    const safeSource = source === "full-collection" ? "full" : "page"
+    return `${safePath}_${safeSource}.${format}`
+  }
+
+  function documentExportFileName(documentPath: string, format: TransferFormat): string {
+    const safePath = sanitizeFileNamePart(documentPath)
+    return `${safePath}.${format}`
+  }
+
+  function resetFileInput(
+    inputRef: { current: HTMLInputElement | null },
+  ) {
+    if (inputRef.current) {
+      inputRef.current.value = ""
+    }
+  }
+
+  function normalizeCollectionImportRecord(
+    record: {
+      id: string
+      path?: string
+      payload: Record<string, unknown>
+    },
+    targetCollectionPath: string,
+    index: number,
+  ): { documentPath: string; payload: Record<string, unknown> } {
+    const normalizedCollectionPath = normalizePath(targetCollectionPath)
+    const normalizedId = record.id.trim()
+    if (!documentIdIsValid(normalizedId)) {
+      throw new Error(`Row ${index + 1} has an invalid document id.`)
+    }
+
+    const normalizedRecordPath = normalizePath(record.path ?? "")
+    if (!normalizedRecordPath) {
+      return {
+        documentPath: `${normalizedCollectionPath}/${normalizedId}`,
+        payload: record.payload,
+      }
+    }
+
+    const requiredPrefix = `${normalizedCollectionPath}/`
+    if (!normalizedRecordPath.startsWith(requiredPrefix)) {
+      throw new Error(
+        `Row ${index + 1} path must be under '${normalizedCollectionPath}'.`,
+      )
+    }
+
+    const tail = normalizedRecordPath.slice(requiredPrefix.length)
+    if (!tail || tail.includes("/")) {
+      throw new Error(
+        `Row ${index + 1} path must target a direct document under '${normalizedCollectionPath}'.`,
+      )
+    }
+
+    if (tail !== normalizedId) {
+      throw new Error(`Row ${index + 1} id does not match the path document id.`)
+    }
+
+    return {
+      documentPath: normalizedRecordPath,
+      payload: record.payload,
+    }
+  }
+
+  async function exportCollectionCurrentPage(format: TransferFormat) {
+    if (!queryResponse || queryResponse.documents.length === 0) {
+      toast.error("Run a query with results before exporting the current page.")
+      return
+    }
+
+    const collectionPath = normalizePath(queryResponse.path)
+    if (!pathIsCollection(collectionPath)) {
+      toast.error("Current query path is not a collection path.")
+      return
+    }
+
+    try {
+      const records = queryResponse.documents.map((document) =>
+        toTransferRecord(document, collectionPath),
+      )
+
+      if (format === "json") {
+        const jsonPayload = buildCollectionTransferJson(collectionPath, records)
+        triggerTextDownload(
+          collectionExportFileName(collectionPath, "current-page", format),
+          jsonPayload,
+          "application/json;charset=utf-8",
+        )
+      } else {
+        const csvPayload = serializeTransferRecordsToCsv(records)
+        triggerTextDownload(
+          collectionExportFileName(collectionPath, "current-page", format),
+          csvPayload,
+          "text/csv;charset=utf-8",
+        )
+      }
+      toast.success(`Exported ${records.length} document(s) from current page.`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Collection export failed."
+      toast.error(message)
+    }
+  }
+
+  async function exportCollectionFull(format: TransferFormat) {
+    const collectionPath = resolveCollectionTransferPath()
+    if (!collectionPath) {
+      toast.error("Set a collection path first to export the full collection.")
+      return
+    }
+
+    setTransferBusy(true)
+    try {
+      const documents = await firestoreService.getCollectionDocuments(context, collectionPath)
+      const records = documents.map((document) =>
+        toTransferRecord(document, collectionPath),
+      )
+
+      if (format === "json") {
+        const jsonPayload = buildCollectionTransferJson(collectionPath, records)
+        triggerTextDownload(
+          collectionExportFileName(collectionPath, "full-collection", format),
+          jsonPayload,
+          "application/json;charset=utf-8",
+        )
+      } else {
+        const csvPayload = serializeTransferRecordsToCsv(records)
+        triggerTextDownload(
+          collectionExportFileName(collectionPath, "full-collection", format),
+          csvPayload,
+          "text/csv;charset=utf-8",
+        )
+      }
+      toast.success(`Exported ${records.length} document(s) from '${collectionPath}'.`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Full collection export failed."
+      toast.error(message)
+    } finally {
+      setTransferBusy(false)
+    }
+  }
+
+  function requestCollectionImport(format: TransferFormat) {
+    if (transferControlsDisabled()) {
+      return
+    }
+
+    if (format === "json") {
+      collectionImportJsonInputRef.current?.click()
+      return
+    }
+    collectionImportCsvInputRef.current?.click()
+  }
+
+  async function handleCollectionImportFile(file: File, format: TransferFormat) {
+    const targetCollectionPath = resolveCollectionTransferPath()
+    if (!targetCollectionPath) {
+      toast.error("Set a collection path first to import documents.")
+      return
+    }
+
+    setTransferBusy(true)
+    try {
+      const content = await file.text()
+      const importedRecords =
+        format === "json"
+          ? (() => {
+              const parsed = parseCollectionTransferJson(content)
+              if (normalizePath(parsed.path) !== normalizePath(targetCollectionPath)) {
+                throw new Error(
+                  `Import file path '${parsed.path}' does not match target collection '${targetCollectionPath}'.`,
+                )
+              }
+              return parsed.records
+            })()
+          : parseTransferCsv(content)
+
+      const upsertRecords = importedRecords.map((record, index) =>
+        normalizeCollectionImportRecord(record, targetCollectionPath, index),
+      )
+      const uniquePaths = new Set<string>()
+      for (const entry of upsertRecords) {
+        if (uniquePaths.has(entry.documentPath)) {
+          throw new Error(`Duplicate document path in import: '${entry.documentPath}'.`)
+        }
+        uniquePaths.add(entry.documentPath)
+      }
+
+      toast(`Import started: ${upsertRecords.length} document(s).`)
+      for (let index = 0; index < upsertRecords.length; index += 1) {
+        const item = upsertRecords[index]
+        await firestoreService.replaceDocument(context, item.documentPath, item.payload)
+        if ((index + 1) % 25 === 0 || index + 1 === upsertRecords.length) {
+          toast(`Imported ${index + 1}/${upsertRecords.length} document(s).`)
+        }
+      }
+
+      await refreshCollections()
+      await runQuery(0, targetCollectionPath)
+      await refreshNested(targetCollectionPath)
+      toast.success(`Import completed: ${upsertRecords.length} document(s) replaced/upserted.`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Collection import failed."
+      toast.error(message)
+    } finally {
+      setTransferBusy(false)
+    }
+  }
+
+  function requestDocumentImport(format: TransferFormat) {
+    if (transferControlsDisabled()) {
+      return
+    }
+
+    if (!previewSelection?.documentPath) {
+      toast.error("Open a document preview first.")
+      return
+    }
+
+    if (format === "json") {
+      documentImportJsonInputRef.current?.click()
+      return
+    }
+    documentImportCsvInputRef.current?.click()
+  }
+
+  async function exportDocument(format: TransferFormat) {
+    if (!previewSelection) {
+      toast.error("Open a document preview first.")
+      return
+    }
+
+    const normalizedDocumentPath = normalizePath(previewSelection.documentPath)
+    if (!normalizedDocumentPath || pathIsCollection(normalizedDocumentPath)) {
+      toast.error("Document path is invalid.")
+      return
+    }
+
+    const docId = previewSelection.documentId.trim() || documentIdFromPath(normalizedDocumentPath)
+    if (!docId) {
+      toast.error("Document id is missing.")
+      return
+    }
+
+    try {
+      if (format === "json") {
+        const jsonPayload = buildDocumentTransferJson(
+          normalizedDocumentPath,
+          docId,
+          previewSelection.payload,
+        )
+        triggerTextDownload(
+          documentExportFileName(normalizedDocumentPath, format),
+          jsonPayload,
+          "application/json;charset=utf-8",
+        )
+      } else {
+        const csvPayload = serializeTransferRecordsToCsv([
+          {
+            id: docId,
+            path: normalizedDocumentPath,
+            payload: previewSelection.payload,
+          },
+        ])
+        triggerTextDownload(
+          documentExportFileName(normalizedDocumentPath, format),
+          csvPayload,
+          "text/csv;charset=utf-8",
+        )
+      }
+
+      toast.success("Document exported.")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Document export failed."
+      toast.error(message)
+    }
+  }
+
+  async function handleDocumentImportFile(file: File, format: TransferFormat) {
+    if (!previewSelection) {
+      toast.error("Open a document preview first.")
+      return
+    }
+
+    const normalizedPreviewPath = normalizePath(previewSelection.documentPath)
+    const normalizedPreviewId =
+      previewSelection.documentId.trim() || documentIdFromPath(normalizedPreviewPath)
+    if (!normalizedPreviewPath || !normalizedPreviewId || pathIsCollection(normalizedPreviewPath)) {
+      toast.error("Document path is invalid.")
+      return
+    }
+
+    setTransferBusy(true)
+    try {
+      const content = await file.text()
+      const importedRecord =
+        format === "json"
+          ? parseDocumentTransferJson(content)
+          : (() => {
+              const rows = parseTransferCsv(content)
+              if (rows.length !== 1) {
+                throw new Error("Document CSV import must contain exactly one data row.")
+              }
+              return rows[0]
+            })()
+
+      const importedPath = normalizePath(importedRecord.path ?? "")
+      const importedId = importedRecord.id.trim()
+      if (importedId !== normalizedPreviewId) {
+        throw new Error(
+          `Imported id '${importedId}' does not match the selected document id '${normalizedPreviewId}'.`,
+        )
+      }
+      if (importedPath && documentIdFromPath(importedPath) !== importedId) {
+        throw new Error("Imported path and id are inconsistent.")
+      }
+      const resolvedPath = importedPath || `${normalizedPreviewPath.split("/").slice(0, -1).join("/")}/${importedId}`
+      const resolvedId = documentIdFromPath(resolvedPath)
+
+      if (resolvedPath !== normalizedPreviewPath) {
+        throw new Error(
+          `Imported path '${resolvedPath}' does not match the selected document '${normalizedPreviewPath}'.`,
+        )
+      }
+      if (resolvedId !== normalizedPreviewId) {
+        throw new Error(
+          `Imported id '${resolvedId}' does not match the selected document id '${normalizedPreviewId}'.`,
+        )
+      }
+
+      await firestoreService.replaceDocument(context, normalizedPreviewPath, importedRecord.payload)
+      toast.success("Document import completed.")
+
+      const refreshed = await runQuery(page)
+      await refreshNested(queryPath)
+
+      if (refreshed) {
+        const nextSelection = getDocumentPreviewSelection(refreshed, normalizedPreviewPath)
+        if (nextSelection) {
+          const nextDraft = JSON.stringify(nextSelection.payload, null, 2)
+          setPreviewSelection(nextSelection)
+          setPreviewDraft(nextDraft)
+          setPreviewSavedDraft(nextDraft)
+          setPreviewValidation(EMPTY_PREVIEW_VALIDATION)
+          setPreviewStatus({ tone: "success", message: "Document replaced from import." })
+        } else {
+          setPreviewStatus({
+            tone: "warning",
+            message: "Document replaced, but it is outside the current query results.",
+          })
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Document import failed."
+      setPreviewStatus({ tone: "error", message })
+      toast.error(message)
+    } finally {
+      setTransferBusy(false)
+    }
+  }
+
   async function refreshCollections() {
     const result = await collectionsQuery.refetch()
     if (result.error) {
@@ -219,31 +689,17 @@ export default function FirestorePage() {
   async function refreshNested(pathValue: string) {
     const normalized = normalizePath(pathValue)
     if (!normalized) {
-      setNestedResponse({ ...EMPTY_NESTED_RESPONSE })
+      setQueryPath("")
       return
     }
 
-    setNestedLoading(true)
-    try {
-      const response = await queryClient.fetchQuery({
-        queryKey: ["firestore", "nested", normalized],
-        queryFn: () => firestoreService.getNested(normalized),
-      })
-      setNestedResponse(response)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load nested traversal."
-      setNestedResponse({
-        currentPath: normalized,
-        parentPath: "",
-        nodeType: "empty",
-        documentNodes: [],
-        childCollectionNodes: [],
-        nestedHint: "",
-        nestedError: message,
-      })
-    } finally {
-      setNestedLoading(false)
+    const currentPath = normalizePath(queryPath)
+    if (currentPath !== normalized) {
+      setQueryPath(`/${normalized}`)
+      return
     }
+
+    await nestedQuery.refetch()
   }
 
   async function runQuery(nextPage: number, pathOverride?: string): Promise<QueryResponse | null> {
@@ -278,15 +734,14 @@ export default function FirestorePage() {
 
     try {
       const response = await queryClient.fetchQuery({
-        queryKey: ["firestore", "query", request],
-        queryFn: () => firestoreService.runQuery(request),
+        queryKey: ["firestore", tab.id, "query", request],
+        queryFn: () => firestoreService.runQuery(context, request),
       })
       setQueryResponse(response)
       setPage(response.pageIndex)
       setQueryPath(`/${response.path}`)
       const root = response.path.split("/")[0]
       setActiveCollection(root)
-      await refreshNested(response.path)
       return response
     } catch (error) {
       const message = error instanceof Error ? error.message : "Query failed."
@@ -300,12 +755,21 @@ export default function FirestorePage() {
 
   async function handleCreateDocument() {
     const normalizedPath = normalizePath(createCollectionPath)
+    const normalizedDocId = createDocumentId.trim()
+
     if (!normalizedPath) {
       setActionStatus({ tone: "warning", message: "Collection path is required." })
       return
     }
     if (!pathIsCollection(normalizedPath)) {
       setActionStatus({ tone: "warning", message: "Collection path must have odd path segments." })
+      return
+    }
+    if (!documentIdIsValid(normalizedDocId)) {
+      setActionStatus({
+        tone: "warning",
+        message: "Document ID cannot contain '/' and cannot be '.' or '..'.",
+      })
       return
     }
 
@@ -322,11 +786,18 @@ export default function FirestorePage() {
 
     setCrudBusy("create")
     try {
-      await firestoreService.createDocument(normalizedPath, payload)
+      await firestoreService.createDocument(
+        context,
+        normalizedPath,
+        payload,
+        normalizedDocId || undefined,
+      )
       setActionStatus({ tone: "success", message: "Document created successfully." })
       toast.success("Document created.")
       setCreateCollectionPath("")
+      setCreateDocumentId("")
       setCreatePayload(EMPTY_JSON_TEMPLATE)
+      setCreateDrawerOpen(false)
       await refreshCollections()
       await runQuery(0, normalizedPath)
     } catch (error) {
@@ -335,237 +806,6 @@ export default function FirestorePage() {
       toast.error(message)
     } finally {
       setCrudBusy(null)
-    }
-  }
-
-  async function handleUpdateDocument() {
-    const normalizedPath = normalizePath(updateDocumentPath)
-    if (!normalizedPath) {
-      setActionStatus({ tone: "warning", message: "Document path is required." })
-      return
-    }
-    if (pathIsCollection(normalizedPath)) {
-      setActionStatus({ tone: "warning", message: "Document path must have even path segments." })
-      return
-    }
-
-    let payload: Record<string, unknown>
-    try {
-      payload = parseJsonPayload(updatePayload)
-    } catch (error) {
-      setActionStatus({
-        tone: "error",
-        message: error instanceof Error ? error.message : "Invalid update payload.",
-      })
-      return
-    }
-
-    setCrudBusy("update")
-    try {
-      await firestoreService.updateDocument(normalizedPath, payload)
-      setActionStatus({ tone: "success", message: "Document updated successfully (merge)." })
-      toast.success("Document updated.")
-      setUpdateDocumentPath("")
-      setUpdatePayload(EMPTY_JSON_TEMPLATE)
-      await runQuery(page)
-      await refreshNested(queryPath)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Update failed."
-      setActionStatus({ tone: "error", message })
-      toast.error(message)
-    } finally {
-      setCrudBusy(null)
-    }
-  }
-
-  async function handleReplaceDocument(pathOverride?: string, payloadOverride?: string) {
-    const normalizedPath = normalizePath(pathOverride ?? replaceDocumentPath)
-    if (!normalizedPath) {
-      setActionStatus({ tone: "warning", message: "Document path is required." })
-      return
-    }
-    if (pathIsCollection(normalizedPath)) {
-      setActionStatus({ tone: "warning", message: "Document path must have even path segments." })
-      return
-    }
-
-    let payload: Record<string, unknown>
-    try {
-      payload = parseJsonPayload(payloadOverride ?? replacePayload)
-    } catch (error) {
-      setActionStatus({
-        tone: "error",
-        message: error instanceof Error ? error.message : "Invalid replace payload.",
-      })
-      return
-    }
-
-    setCrudBusy("replace")
-    try {
-      await firestoreService.replaceDocument(normalizedPath, payload)
-      setActionStatus({ tone: "success", message: "Document replaced successfully." })
-      toast.success("Document replaced.")
-      setReplaceDocumentPath("")
-      setReplacePayload(EMPTY_JSON_TEMPLATE)
-      await runQuery(page)
-      await refreshNested(queryPath)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Replace failed."
-      setActionStatus({ tone: "error", message })
-      toast.error(message)
-    } finally {
-      setCrudBusy(null)
-    }
-  }
-
-  async function handleDeleteDocument(pathOverride?: string) {
-    const normalizedPath = normalizePath(pathOverride ?? deletePath)
-    if (!normalizedPath) {
-      setActionStatus({ tone: "warning", message: "Document path is required." })
-      return
-    }
-    if (pathIsCollection(normalizedPath)) {
-      setActionStatus({ tone: "warning", message: "Document path must have even path segments." })
-      return
-    }
-
-    setCrudBusy("delete")
-    try {
-      await firestoreService.deleteDocument(normalizedPath)
-      setActionStatus({ tone: "success", message: "Document deleted successfully." })
-      toast.success("Document deleted.")
-      setDeletePath("")
-      await runQuery(page)
-      await refreshNested(queryPath)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Delete failed."
-      setActionStatus({ tone: "error", message })
-      toast.error(message)
-    } finally {
-      setCrudBusy(null)
-    }
-  }
-
-  async function handleLoadProjects() {
-    if (!credentialsFile) {
-      setAuthStatus({ tone: "warning", message: "Choose a credentials JSON file first." })
-      return
-    }
-
-    setAuthLoadingProjects(true)
-    setProjects([])
-    setDatabases([])
-    setSelectedProject("")
-    setSelectedDatabase("")
-
-    try {
-      const response = await queryClient.fetchQuery({
-        queryKey: ["firestore", "projects", credentialsFile.name, credentialsFile.lastModified],
-        queryFn: () => firestoreService.loadProjects(credentialsFile),
-      })
-
-      if (!Array.isArray(response)) {
-        throw new Error(extractApiMessage(response))
-      }
-
-      const loadedProjects = response.filter((value): value is string => typeof value === "string")
-      setProjects(loadedProjects)
-
-      const initialProject = loadedProjects[0] ?? ""
-      setSelectedProject(initialProject)
-      if (initialProject) {
-        setAuthStatus({
-          tone: "success",
-          message: `Loaded ${loadedProjects.length} project ID(s).`,
-        })
-      } else {
-        setAuthStatus({
-          tone: "warning",
-          message: "No accessible project IDs found with the uploaded credentials.",
-        })
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load project IDs."
-      setAuthStatus({ tone: "error", message })
-      toast.error(message)
-    } finally {
-      setAuthLoadingProjects(false)
-    }
-  }
-
-  async function handleLoadDatabases(projectId?: string) {
-    const targetProject = projectId ?? selectedProject;
-    
-    if (!credentialsFile) {
-      setAuthStatus({ tone: "warning", message: "Choose a credentials JSON file first." })
-      return
-    }
-    if (!targetProject) {
-      setAuthStatus({ tone: "warning", message: "Select a project ID first." })
-      return
-    }
-
-    setAuthLoadingDatabases(true)
-
-    try {
-      const response = await queryClient.fetchQuery({
-        queryKey: [
-          "firestore",
-          "databases",
-          targetProject,
-          credentialsFile.name,
-          credentialsFile.lastModified,
-        ],
-        queryFn: () => firestoreService.loadDatabases(targetProject, credentialsFile),
-      })
-
-      if (!Array.isArray(response)) {
-        throw new Error(extractApiMessage(response))
-      }
-
-      const loadedDatabases = response.filter((value): value is string => typeof value === "string")
-      setDatabases(loadedDatabases)
-      setSelectedDatabase("")
-      setAuthStatus({
-        tone: "success",
-        message:
-          loadedDatabases.length > 0
-            ? `Loaded ${loadedDatabases.length} database ID(s).`
-            : "No explicit database IDs found. '(default)' will be used.",
-      })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load databases."
-      setAuthStatus({ tone: "error", message })
-      toast.error(message)
-    } finally {
-      setAuthLoadingDatabases(false)
-    }
-  }
-
-  async function handleAuthenticate(dbOverride?: string) {
-    const targetDatabase = dbOverride !== undefined ? dbOverride : selectedDatabase;
-    if (!credentialsFile) {
-      setAuthStatus({ tone: "warning", message: "Choose a credentials JSON file first." })
-      return
-    }
-    if (!selectedProject) {
-      setAuthStatus({ tone: "warning", message: "Select a project ID first." })
-      return
-    }
-
-    setAuthInitializing(true)
-    try {
-      await firestoreService.initFirestore(selectedProject, credentialsFile, targetDatabase)
-      setAuthenticated(true)
-      setAuthStatus({ tone: "success", message: "Firestore initialized successfully." })
-      toast.success("Authentication successful.")
-      await refreshCollections()
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to initialize Firestore."
-      setAuthStatus({ tone: "error", message })
-      toast.error(message)
-    } finally {
-      setAuthInitializing(false)
     }
   }
 
@@ -604,46 +844,39 @@ export default function FirestorePage() {
     void runQuery(0, normalized)
   }
 
-  function openCrudAction(action: CrudAction) {
-    setRequestedCrudAction(action)
-    setCrudModalVersion((value) => value + 1)
-  }
-
   function openCreateFromHeader() {
     const normalizedQueryPath = normalizePath(queryPath)
-    const normalizedCollection = normalizePath(activeCollection)
-    const nextCollectionPath = pathIsCollection(normalizedQueryPath)
-      ? normalizedQueryPath
-      : pathIsCollection(normalizedCollection)
-        ? normalizedCollection
-        : ""
+    const querySegments = normalizedQueryPath ? normalizedQueryPath.split("/") : []
+    let resolvedPath = ""
 
-    if (nextCollectionPath) {
-      setCreateCollectionPath(nextCollectionPath)
+    if (pathIsCollection(normalizedQueryPath)) {
+      resolvedPath = normalizedQueryPath
+    } else if (querySegments.length > 1) {
+      const parentCollectionPath = querySegments.slice(0, -1).join("/")
+      if (pathIsCollection(parentCollectionPath)) {
+        resolvedPath = parentCollectionPath
+      }
     }
+
+    if (!resolvedPath) {
+      const normalizedCollection = normalizePath(activeCollection)
+      resolvedPath = pathIsCollection(normalizedCollection) ? normalizedCollection : ""
+    }
+
+    setCreateCollectionPath(resolvedPath)
+    setActionStatus(null)
+    setCreateDrawerOpen(true)
+  }
+
+  function handleGenerateCreateDocumentId() {
+    setCreateDocumentId(generateFirestoreDocumentId())
+  }
+
+  function handleDiscardCreateDraft() {
+    setCreateCollectionPath("")
+    setCreateDocumentId("")
     setCreatePayload(EMPTY_JSON_TEMPLATE)
     setActionStatus(null)
-    openCrudAction("create")
-  }
-
-  function openUpdateFromRow(documentPath: string, payload: string) {
-    setUpdateDocumentPath(documentPath)
-    setUpdatePayload(payload)
-    setActionStatus(null)
-    openCrudAction("update")
-  }
-
-  function openReplaceFromRow(documentPath: string, payload: string) {
-    setReplaceDocumentPath(documentPath)
-    setReplacePayload(payload)
-    setActionStatus(null)
-    openCrudAction("replace")
-  }
-
-  function openDeleteFromRow(documentPath: string) {
-    setDeletePath(documentPath)
-    setActionStatus(null)
-    openCrudAction("delete")
   }
 
   function applyPreviewSelection(selection: PreviewDocumentSelection) {
@@ -727,6 +960,29 @@ export default function FirestorePage() {
     requestPreviewClose("switch", nextSelection)
   }
 
+  async function openPreviewFromNestedDocument(documentPath: string, documentId: string) {
+    const normalizedPath = normalizePath(documentPath)
+    if (!normalizedPath) {
+      toast.error("Document path is required to open preview.")
+      return
+    }
+    if (pathIsCollection(normalizedPath)) {
+      toast.error("Only document nodes can be previewed.")
+      return
+    }
+
+    try {
+      const details = await firestoreService.getDocumentDetails(context, normalizedPath)
+      const previewDocumentId = details.id.trim() || documentId
+      const previewPayload =
+        details.fields && typeof details.fields === "object" ? details.fields : {}
+      openPreviewFromRow(normalizedPath, previewDocumentId, previewPayload)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load document preview."
+      toast.error(message)
+    }
+  }
+
   function updatePreviewOpen(nextOpen: boolean) {
     if (nextOpen) {
       setPreviewOpen(true)
@@ -787,7 +1043,7 @@ export default function FirestorePage() {
 
     setPreviewBusy("update")
     try {
-      await firestoreService.updateDocument(normalizedPath, payload)
+      await firestoreService.updateDocument(context, normalizedPath, payload)
       toast.success("Document updated.")
       const persistedDraft = JSON.stringify(payload, null, 2)
       setPreviewDraft(persistedDraft)
@@ -838,7 +1094,7 @@ export default function FirestorePage() {
 
     setPreviewBusy("delete")
     try {
-      await firestoreService.deleteDocument(normalizedPath)
+      await firestoreService.deleteDocument(context, normalizedPath)
       toast.success("Document deleted.")
       await runQuery(page)
       await refreshNested(queryPath)
@@ -852,10 +1108,8 @@ export default function FirestorePage() {
     }
   }
 
-  const rowActionsDisabled = crudBusy !== null || previewBusy !== null
-
   return (
-    <div className="relative h-screen w-full overflow-hidden bg-muted/40">
+    <div className="relative h-full w-full overflow-hidden bg-muted/40">
       <div className="flex h-full w-full">
         <FirestoreSidebar
           leftSidebarExpanded={leftSidebarExpanded}
@@ -865,40 +1119,27 @@ export default function FirestorePage() {
           activeCollection={activeCollection}
           refreshCollections={refreshCollections}
           runCollectionQuery={runCollectionQuery}
-          authLoadingProjects={authLoadingProjects}
-          handleLoadProjects={handleLoadProjects}
         />
 
-        {/* MAIN CRUD AREA */}
         <main className="flex min-w-0 flex-1 flex-col relative">
-          <FirestoreHeader
-            authLoadingDatabases={authLoadingDatabases}
-            authInitializing={authInitializing}
-            handleLoadDatabases={handleLoadDatabases}
-            handleAuthenticate={handleAuthenticate}
-          />
+          <FirestoreHeader tab={tab} onOpenAddTab={onOpenAddTab} />
 
           <div className="flex min-h-0 flex-1 relative">
-            {!authenticated ? (
-              <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/50 backdrop-blur-sm">
-                <Card className="w-87.5 shadow-lg">
-                  <CardHeader>
-                    <CardTitle className="text-lg">Authentication Required</CardTitle>
-                    <CardDescription>
-                      Please upload your JSON credentials and configure the project to begin.
-                    </CardDescription>
-                  </CardHeader>
-                </Card>
-              </div>
-            ) : null}
-
             <FirestoreNestedTraverse
               nestedLoading={nestedLoading}
               nestedResponse={nestedResponse}
               queryPath={queryPath}
+              nestedIdFilter={nestedIdFilter}
+              setNestedIdFilter={setNestedIdFilter}
               setQueryPath={setQueryPath}
               runQuery={runQuery}
               refreshNested={refreshNested}
+              onOpenDocumentPreview={(documentPath, documentId) =>
+                void openPreviewFromNestedDocument(documentPath, documentId)
+              }
+              hasNextPage={Boolean(nestedQuery.hasNextPage)}
+              isFetchingNextPage={nestedQuery.isFetchingNextPage}
+              fetchNextPage={() => void nestedQuery.fetchNextPage({ cancelRefetch: false })}
             />
 
             <section className="flex min-w-0 flex-1 flex-col">
@@ -930,12 +1171,85 @@ export default function FirestorePage() {
                     </div>
 
                     <div className="flex items-center gap-2">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={transferControlsDisabled()}
+                          >
+                            <Download data-icon="inline-start" />
+                            Export
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => void exportCollectionCurrentPage("json")}
+                            disabled={transferControlsDisabled()}
+                          >
+                            JSON (current page)
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => void exportCollectionCurrentPage("csv")}
+                            disabled={transferControlsDisabled()}
+                          >
+                            CSV (current page)
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => void exportCollectionFull("json")}
+                            disabled={transferControlsDisabled()}
+                          >
+                            JSON (full collection)
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => void exportCollectionFull("csv")}
+                            disabled={transferControlsDisabled()}
+                          >
+                            CSV (full collection)
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={transferControlsDisabled()}
+                          >
+                            <Upload data-icon="inline-start" />
+                            Import
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => requestCollectionImport("json")}
+                            disabled={transferControlsDisabled()}
+                          >
+                            Import JSON
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => requestCollectionImport("csv")}
+                            disabled={transferControlsDisabled()}
+                          >
+                            Import CSV
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem disabled>
+                            Full replace upsert mode
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         onClick={openCreateFromHeader}
-                        disabled={crudBusy !== null || previewBusy !== null}
+                        disabled={crudBusy !== null || previewBusy !== null || transferBusy}
                       >
                         <FilePlus2 data-icon="inline-start" />
                         Create
@@ -965,41 +1279,84 @@ export default function FirestorePage() {
                     queryError={queryError}
                     queryResponse={queryResponse}
                     selectedPreviewPath={previewOpen ? previewSelection?.documentPath ?? "" : ""}
-                    crudActionsDisabled={rowActionsDisabled}
                     onRequestPreviewFromRow={openPreviewFromRow}
-                    onRequestUpdateFromRow={openUpdateFromRow}
-                    onRequestReplaceFromRow={openReplaceFromRow}
-                    onRequestDeleteFromRow={openDeleteFromRow}
                     page={page}
                     onRunPrevPage={() => void runQuery(Math.max(0, page - 1))}
                     onRunNextPage={() => void runQuery(page + 1)}
                     queryStats={queryStats}
                   />
 
-                  <FirestoreCrudPanel
-                    key={`crud-modal-${crudModalVersion}`}
-                    createCollectionPath={createCollectionPath}
-                    setCreateCollectionPath={setCreateCollectionPath}
-                    createPayload={createPayload}
-                    setCreatePayload={setCreatePayload}
-                    updateDocumentPath={updateDocumentPath}
-                    setUpdateDocumentPath={setUpdateDocumentPath}
-                    updatePayload={updatePayload}
-                    setUpdatePayload={setUpdatePayload}
-                    replaceDocumentPath={replaceDocumentPath}
-                    setReplaceDocumentPath={setReplaceDocumentPath}
-                    replacePayload={replacePayload}
-                    setReplacePayload={setReplacePayload}
-                    deletePath={deletePath}
-                    setDeletePath={setDeletePath}
-                    crudBusy={crudBusy}
-                    actionStatus={actionStatus}
-                    requestedAction={requestedCrudAction}
-                    onRequestedActionHandled={() => setRequestedCrudAction(null)}
-                    onCreate={() => void handleCreateDocument()}
-                    onUpdate={() => void handleUpdateDocument()}
-                    onReplace={() => void handleReplaceDocument()}
-                    onDelete={() => void handleDeleteDocument()}
+                  <input
+                    ref={collectionImportJsonInputRef}
+                    type="file"
+                    className="hidden"
+                    accept=".json,application/json"
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0]
+                      if (!file) {
+                        return
+                      }
+                      void handleCollectionImportFile(file, "json")
+                      resetFileInput(collectionImportJsonInputRef)
+                    }}
+                  />
+                  <input
+                    ref={collectionImportCsvInputRef}
+                    type="file"
+                    className="hidden"
+                    accept=".csv,text/csv"
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0]
+                      if (!file) {
+                        return
+                      }
+                      void handleCollectionImportFile(file, "csv")
+                      resetFileInput(collectionImportCsvInputRef)
+                    }}
+                  />
+                  <input
+                    ref={documentImportJsonInputRef}
+                    type="file"
+                    className="hidden"
+                    accept=".json,application/json"
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0]
+                      if (!file) {
+                        return
+                      }
+                      void handleDocumentImportFile(file, "json")
+                      resetFileInput(documentImportJsonInputRef)
+                    }}
+                  />
+                  <input
+                    ref={documentImportCsvInputRef}
+                    type="file"
+                    className="hidden"
+                    accept=".csv,text/csv"
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0]
+                      if (!file) {
+                        return
+                      }
+                      void handleDocumentImportFile(file, "csv")
+                      resetFileInput(documentImportCsvInputRef)
+                    }}
+                  />
+
+                  <FirestoreCreateDrawer
+                    open={createDrawerOpen}
+                    onOpenChange={setCreateDrawerOpen}
+                    collectionPath={createCollectionPath}
+                    onCollectionPathChange={setCreateCollectionPath}
+                    documentId={createDocumentId}
+                    onDocumentIdChange={setCreateDocumentId}
+                    payload={createPayload}
+                    onPayloadChange={setCreatePayload}
+                    status={actionStatus}
+                    isSubmitting={crudBusy === "create"}
+                    onGenerateDocumentId={handleGenerateCreateDocumentId}
+                    onSubmit={() => void handleCreateDocument()}
+                    onDiscardDraft={handleDiscardCreateDraft}
                   />
 
                   <FirestoreDocumentPreviewPanel
@@ -1020,6 +1377,9 @@ export default function FirestorePage() {
                     onValidationChange={setPreviewValidation}
                     onUpdate={(formattedDraft) => void handlePreviewUpdate(formattedDraft)}
                     onDelete={() => void handlePreviewDelete()}
+                    onExportDocument={(format) => void exportDocument(format)}
+                    onImportDocument={(format) => requestDocumentImport(format)}
+                    transferBusy={transferBusy}
                   />
                 </div>
 

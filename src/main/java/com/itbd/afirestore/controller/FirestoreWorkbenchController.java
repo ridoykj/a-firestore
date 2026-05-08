@@ -2,6 +2,8 @@ package com.itbd.afirestore.controller;
 
 import com.itbd.afirestore.FirestoreManagerService;
 import com.itbd.afirestore.service.GenericFirestoreService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -9,6 +11,7 @@ import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -27,6 +30,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/workbench")
 public class FirestoreWorkbenchController {
+    private static final Logger LOGGER = LoggerFactory.getLogger(FirestoreWorkbenchController.class);
 
     private final GenericFirestoreService genericFirestoreService;
     private final FirestoreManagerService firestoreManagerService;
@@ -40,6 +44,8 @@ public class FirestoreWorkbenchController {
 
     @GetMapping("/query")
     public Mono<ResponseEntity<Object>> query(
+            @RequestHeader("X-Project-Id") String projectId,
+            @RequestHeader(value = "X-Database-Id", required = false) String databaseId,
             @RequestParam("path") String path,
             @RequestParam(value = "whereField", required = false) List<String> whereFields,
             @RequestParam(value = "whereOperator", required = false) List<String> whereOperators,
@@ -57,6 +63,7 @@ public class FirestoreWorkbenchController {
             return Mono.just(ResponseEntity.badRequest().body((Object) Map.of("message", "Path must be a collection path.")));
         }
 
+        String normalizedDatabaseId = normalizeDatabaseId(databaseId);
         int safeLimit = Math.max(1, Math.min(limit == null ? 50 : limit, 500));
         int safePage = Math.max(0, page == null ? 0 : page);
         String normalizedOrderField = normalize(orderField);
@@ -70,6 +77,8 @@ public class FirestoreWorkbenchController {
         }
 
         return genericFirestoreService.queryCollection(
+                        projectId,
+                        normalizedDatabaseId,
                         normalizedPath,
                         whereClauses,
                         normalizedOrderField,
@@ -102,8 +111,24 @@ public class FirestoreWorkbenchController {
     }
 
     @GetMapping("/nested")
-    public Mono<ResponseEntity<Object>> nested(@RequestParam(value = "path", required = false) String path) {
+    public Mono<ResponseEntity<Object>> nested(
+            @RequestHeader("X-Project-Id") String projectId,
+            @RequestHeader(value = "X-Database-Id", required = false) String databaseId,
+            @RequestParam(value = "path", required = false) String path,
+            @RequestParam(value = "limit", defaultValue = "25") Integer limit,
+            @RequestParam(value = "cursor", required = false) String cursor,
+            @RequestParam(value = "idFilter", required = false) String idFilter) {
         String normalizedPath = normalize(path);
+        String normalizedDatabaseId = normalizeDatabaseId(databaseId);
+        int safeLimit = Math.max(1, Math.min(limit == null ? 25 : limit, 100));
+        String normalizedCursor = normalize(cursor);
+        String normalizedIdFilter = normalize(idFilter);
+        String cursorValue = normalizedCursor.isBlank() ? null : normalizedCursor;
+        if (cursorValue != null && cursorValue.contains("/")) {
+            return Mono.just(ResponseEntity.badRequest().body((Object) Map.of(
+                    "message", "cursor must be an item ID, not a full path.")));
+        }
+
         if (normalizedPath.isBlank()) {
             return Mono.just(ResponseEntity.ok((Object) new NestedResponse(
                     "",
@@ -112,26 +137,41 @@ public class FirestoreWorkbenchController {
                     List.of(),
                     List.of(),
                     "Run a collection query first, then traverse nested documents and subcollections here.",
-                    ""
+                    "",
+                    new PageInfo(null, false, 0, safeLimit)
             )));
         }
 
         String parentPath = parentPath(normalizedPath);
         if (isCollectionPath(normalizedPath)) {
-            return genericFirestoreService.getAllDocuments(normalizedPath)
-                    .map(documents -> {
-                        List<NodeItem> documentNodes = new ArrayList<>();
-                        for (Map<String, Object> document : documents) {
-                            String id = String.valueOf(document.getOrDefault("id", ""));
-                            String docPath = String.valueOf(document.getOrDefault("_path", ""));
-                            if (id.isBlank() || docPath.isBlank()) {
-                                continue;
-                            }
-                            documentNodes.add(new NodeItem(id, docPath));
-                        }
+            long startNanos = System.nanoTime();
+            return genericFirestoreService.listDocumentNodesPage(
+                            projectId,
+                            normalizedDatabaseId,
+                            normalizedPath,
+                            safeLimit,
+                            cursorValue,
+                            normalizedIdFilter)
+                    .map(page -> {
+                        List<NodeItem> documentNodes = page.nodes().stream()
+                                .map(node -> new NodeItem(node.id(), node.path()))
+                                .toList();
+
                         String hint = documentNodes.isEmpty()
+                                ? (normalizedIdFilter.isBlank()
                                 ? "No documents found under this collection."
-                                : "Select a document to inspect its child collections.";
+                                : "No matching document IDs found in this collection.")
+                                : "Scroll to load more.";
+
+                        long elapsedMs = Math.max(1L, (System.nanoTime() - startNanos) / 1_000_000L);
+                        LOGGER.info(
+                                "Nested collection page loaded path='{}' limit={} returnedCount={} hasMore={} elapsedMs={}",
+                                normalizedPath,
+                                safeLimit,
+                                documentNodes.size(),
+                                page.hasMore(),
+                                elapsedMs);
+
                         return ResponseEntity.ok((Object) new NestedResponse(
                                 normalizedPath,
                                 parentPath,
@@ -139,26 +179,43 @@ public class FirestoreWorkbenchController {
                                 documentNodes,
                                 List.of(),
                                 hint,
-                                ""
+                                "",
+                                new PageInfo(
+                                        page.nextCursor(),
+                                        page.hasMore(),
+                                        documentNodes.size(),
+                                        page.limit())
                         ));
                     })
                     .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().body(Map.of(
-                            "message", e.getMessage() == null ? "Failed to load nested node." : e.getMessage()))));
+                            "message", resolveNestedErrorMessage(e)))));
         }
 
-        return genericFirestoreService.listSubcollections(normalizedPath)
-                .map(subcollections -> {
-                    List<NodeItem> childCollectionNodes = new ArrayList<>();
-                    for (String collection : subcollections) {
-                        String child = normalize(collection);
-                        if (child.isBlank()) {
-                            continue;
-                        }
-                        childCollectionNodes.add(new NodeItem(child, normalizedPath + "/" + child));
-                    }
+        long startNanos = System.nanoTime();
+        return genericFirestoreService.listSubcollectionNodesPage(
+                        projectId,
+                        normalizedDatabaseId,
+                        normalizedPath,
+                        safeLimit,
+                        cursorValue,
+                        normalizedIdFilter)
+                .map(page -> {
+                    List<NodeItem> childCollectionNodes = page.nodes().stream()
+                            .map(node -> new NodeItem(node.id(), node.path()))
+                            .toList();
                     String hint = childCollectionNodes.isEmpty()
+                            ? (normalizedIdFilter.isBlank()
                             ? "No child collections found for this document."
+                            : "No matching child collection IDs found for this document.")
                             : "Select a child collection to run a query and continue traversal.";
+
+                    long elapsedMs = Math.max(1L, (System.nanoTime() - startNanos) / 1_000_000L);
+                    LOGGER.info(
+                            "Nested document collections loaded path='{}' returnedCount={} elapsedMs={}",
+                            normalizedPath,
+                            childCollectionNodes.size(),
+                            elapsedMs);
+
                     return ResponseEntity.ok((Object) new NestedResponse(
                             normalizedPath,
                             parentPath,
@@ -166,11 +223,16 @@ public class FirestoreWorkbenchController {
                             List.of(),
                             childCollectionNodes,
                             hint,
-                            ""
+                            "",
+                            new PageInfo(
+                                    page.nextCursor(),
+                                    page.hasMore(),
+                                    childCollectionNodes.size(),
+                                    page.limit())
                     ));
                 })
                 .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().body(Map.of(
-                        "message", e.getMessage() == null ? "Failed to load nested node." : e.getMessage()))));
+                        "message", resolveNestedErrorMessage(e)))));
     }
 
     @PostMapping(value = "/databases", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -192,13 +254,16 @@ public class FirestoreWorkbenchController {
     }
 
     @PostMapping("/replace")
-    public Mono<ResponseEntity<Object>> replace(@RequestBody ReplaceRequest request) {
+    public Mono<ResponseEntity<Object>> replace(
+            @RequestHeader("X-Project-Id") String projectId,
+            @RequestHeader(value = "X-Database-Id", required = false) String databaseId,
+            @RequestBody ReplaceRequest request) {
         String normalizedDocumentPath = normalize(request.documentPath());
         if (normalizedDocumentPath.isBlank()) {
             return Mono.just(ResponseEntity.badRequest().body((Object) Map.of("message", "documentPath is required.")));
         }
         Map<String, Object> payload = request.payload() == null ? Map.of() : request.payload();
-        return genericFirestoreService.replaceDocument(normalizedDocumentPath, payload)
+        return genericFirestoreService.replaceDocument(projectId, normalizeDatabaseId(databaseId), normalizedDocumentPath, payload)
                 .map(value -> ResponseEntity.ok((Object) value))
                 .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().body(Map.of(
                         "message", e.getMessage() == null ? "Replace failed." : e.getMessage()))));
@@ -290,6 +355,9 @@ public class FirestoreWorkbenchController {
             if (type == null || type.isBlank()) {
                 type = "string";
             }
+            if ("id".equalsIgnoreCase(field)) {
+                type = "string";
+            }
 
             String rawValue = valueAt(whereValues, i);
             Object typedValue = parseWhereValue(rawValue, type);
@@ -352,6 +420,13 @@ public class FirestoreWorkbenchController {
         return path.split("/").length % 2 != 0;
     }
 
+    private String normalizeDatabaseId(String databaseId) {
+        if (databaseId == null || databaseId.trim().isEmpty()) {
+            return "(default)";
+        }
+        return databaseId.trim();
+    }
+
     private String parentPath(String normalizedPath) {
         if (normalizedPath == null || normalizedPath.isBlank()) {
             return "";
@@ -361,6 +436,23 @@ public class FirestoreWorkbenchController {
             return "";
         }
         return String.join("/", Arrays.copyOf(segments, segments.length - 1));
+    }
+
+    private String resolveNestedErrorMessage(Throwable error) {
+        if (error == null) {
+            return "Failed to load nested node.";
+        }
+
+        Throwable current = error;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null && message.toLowerCase(Locale.ROOT).contains("query timed out")) {
+                return "Nested traversal query timed out. Please narrow your scope or continue with smaller pages.";
+            }
+            current = current.getCause();
+        }
+
+        return error.getMessage() == null ? "Failed to load nested node." : error.getMessage();
     }
 
     private Mono<String> readUploadedJsonFile(FilePart filePart) {
@@ -418,7 +510,15 @@ public class FirestoreWorkbenchController {
             List<NodeItem> documentNodes,
             List<NodeItem> childCollectionNodes,
             String nestedHint,
-            String nestedError) {
+            String nestedError,
+            PageInfo pageInfo) {
+    }
+
+    private record PageInfo(
+            String nextCursor,
+            boolean hasMore,
+            int returnedCount,
+            int limit) {
     }
 
     private record ReplaceRequest(String documentPath, Map<String, Object> payload) {

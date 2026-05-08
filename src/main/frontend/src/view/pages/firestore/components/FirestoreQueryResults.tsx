@@ -2,18 +2,11 @@ import type { QueryResponse } from "@/dto/firestore/FirestoreSchema"
 import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/alert"
 import { Badge } from "@/shadcn/components/ui/badge"
 import { Button } from "@/shadcn/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/shadcn/components/ui/dropdown-menu"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/shadcn/components/ui/empty"
 import { Skeleton } from "@/shadcn/components/ui/skeleton"
 import { Spinner } from "@/shadcn/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shadcn/components/ui/table"
-import { AlertCircle, ChevronLeft, ChevronRight, EllipsisVertical, PencilLine, Replace, Trash2 } from "lucide-react"
+import { AlertCircle, ChevronLeft, ChevronRight } from "lucide-react"
 import { getPayloadOnly, normalizePath, safePreviewValue } from "@/view/pages/firestore/lib/firestore-utils"
 import { useIsMobile } from "@/shadcn/hooks/use-mobile"
 import { cn } from "@/shadcn/lib/utils"
@@ -23,15 +16,11 @@ type FirestoreQueryResultsProps = {
   queryError: string
   queryResponse: QueryResponse | null
   selectedPreviewPath: string
-  crudActionsDisabled: boolean
   onRequestPreviewFromRow: (
     path: string,
     documentId: string,
     payload: Record<string, unknown>,
   ) => void
-  onRequestUpdateFromRow: (path: string, payload: string) => void
-  onRequestReplaceFromRow: (path: string, payload: string) => void
-  onRequestDeleteFromRow: (path: string) => void
   page: number
   onRunPrevPage: () => void
   onRunNextPage: () => void
@@ -43,11 +32,7 @@ export function FirestoreQueryResults({
   queryError,
   queryResponse,
   selectedPreviewPath,
-  crudActionsDisabled,
   onRequestPreviewFromRow,
-  onRequestUpdateFromRow,
-  onRequestReplaceFromRow,
-  onRequestDeleteFromRow,
   page,
   onRunPrevPage,
   onRunNextPage,
@@ -55,11 +40,11 @@ export function FirestoreQueryResults({
 }: FirestoreQueryResultsProps) {
   const isMobile = useIsMobile()
   const dataColumns = (queryResponse?.columns ?? []).filter((column) => column.name !== "id")
-  const emptyStateColumnSpan = dataColumns.length + 2
+  const emptyStateColumnSpan = dataColumns.length + 1
 
   return (
     <>
-      <div className="min-h-0 flex-1 bg-background p-3">
+      <div className="min-h-0 flex flex-1 flex-col bg-background p-3">
         {queryLoading ? (
           <div className="grid gap-3">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -81,145 +66,98 @@ export function FirestoreQueryResults({
         ) : null}
 
         {!queryLoading && !queryError ? (
-          <div className="h-full min-h-0 min-w-0 rounded-md border bg-card/20 [&_[data-slot=table-container]]:h-full [&_[data-slot=table-container]]:min-h-0 [&_[data-slot=table-container]]:overflow-auto">
-            <Table className="w-max min-w-full text-left text-xs">
-              <TableHeader className="bg-muted">
-                <TableRow>
-                  <TableHead className="sticky top-0 z-20 min-w-44 py-2 font-semibold">
-                    <div className="grid gap-0.5">
-                      <span>ID</span>
-                      <span className="text-[10px] font-normal text-muted-foreground">string</span>
-                    </div>
-                  </TableHead>
-                  {dataColumns.map((column) => (
-                    <TableHead key={column.name} className="sticky top-0 z-20 min-w-44 py-2 font-semibold">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col rounded-md border bg-card/20">
+            <div className="min-h-0 flex-1 overflow-auto [&_[data-slot=table-container]]:overflow-visible">
+              <Table className="w-max min-w-full text-left text-xs">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="sticky top-0 z-20 min-w-44 bg-muted py-2 font-semibold">
                       <div className="grid gap-0.5">
-                        <span>{column.name}</span>
-                        <span className="text-[10px] font-normal text-muted-foreground">{column.type}</span>
+                        <span>ID</span>
+                        <span className="text-[10px] font-normal text-muted-foreground">string</span>
                       </div>
                     </TableHead>
-                  ))}
-                  <TableHead className="sticky top-0 right-0 z-30 min-w-28 border-l bg-muted py-2 text-right font-semibold">
-                    <span>Actions</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(queryResponse?.documents ?? []).length === 0 ? (
-                  <TableRow>
-                    <TableCell className="py-6 text-center text-sm text-muted-foreground" colSpan={emptyStateColumnSpan}>
-                      <Empty className="border-none">
-                        <EmptyHeader>
-                          <EmptyTitle>No documents found</EmptyTitle>
-                          <EmptyDescription>Try changing the path, filters, or pagination settings.</EmptyDescription>
-                        </EmptyHeader>
-                      </Empty>
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-
-                {(queryResponse?.documents ?? []).map((doc, index) => {
-                  const documentPath = typeof doc._path === "string" ? doc._path : ""
-                  const normalizedDocumentPath = normalizePath(documentPath)
-                  const documentId = typeof doc.id === "string" ? doc.id : "(no-id)"
-                  const payloadObject = getPayloadOnly(doc)
-                  const payloadDraft = JSON.stringify(payloadObject, null, 2)
-                  const rowActionsDisabled = crudActionsDisabled || !documentPath
-                  const rowPreviewDisabled = !documentPath
-                  const rowIsSelected =
-                    !!selectedPreviewPath &&
-                    normalizePath(selectedPreviewPath) === normalizedDocumentPath
-                  const openRowPreview = () => {
-                    if (rowPreviewDisabled) {
-                      return
-                    }
-                    onRequestPreviewFromRow(documentPath, documentId, payloadObject)
-                  }
-                  return (
-                    <TableRow
-                      key={`${documentPath || documentId}-${index}`}
-                      className={cn(
-                        "group odd:bg-background even:bg-muted/20",
-                        rowIsSelected && "odd:bg-accent/60 even:bg-accent/60 hover:bg-accent/60",
-                      )}
-                      aria-selected={rowIsSelected}
-                      tabIndex={rowPreviewDisabled ? -1 : 0}
-                      onDoubleClick={() => {
-                        if (!isMobile) {
-                          openRowPreview()
-                        }
-                      }}
-                      onClick={() => {
-                        if (isMobile) {
-                          openRowPreview()
-                        }
-                      }}
-                      onKeyDown={(event) => {
-                        if (!rowPreviewDisabled && (event.key === "Enter" || event.key === " ")) {
-                          event.preventDefault()
-                          openRowPreview()
-                        }
-                      }}
-                    >
-                      <TableCell className="align-top font-medium">{documentId}</TableCell>
-                      {dataColumns.map((column) => (
-                        <TableCell key={`${documentPath}-${column.name}`} className="max-w-xs">
-                          <span className="line-clamp-2 text-muted-foreground">{safePreviewValue(doc[column.name])}</span>
-                        </TableCell>
-                      ))}
-                      <TableCell
-                        className={cn(
-                          "sticky right-0 z-10 min-w-28 border-l text-right align-top",
-                          rowIsSelected ? "bg-accent/60 group-hover:bg-accent/60" : "bg-inherit group-hover:bg-muted/50",
-                        )}
+                    {dataColumns.map((column) => (
+                      <TableHead
+                        key={column.name}
+                        className="sticky top-0 z-20 min-w-44 bg-muted py-2 font-semibold"
                       >
-                        <div className="flex justify-end">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                type="button"
-                                size="icon-xs"
-                                variant="outline"
-                                aria-label={`Open actions for ${documentId}`}
-                                disabled={rowActionsDisabled}
-                                onPointerDown={(event) => event.stopPropagation()}
-                                onClick={(event) => event.stopPropagation()}
-                                onDoubleClick={(event) => event.stopPropagation()}
-                              >
-                                <EllipsisVertical data-icon="inline-start" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuGroup>
-                                <DropdownMenuItem
-                                  onSelect={() => onRequestUpdateFromRow(documentPath, payloadDraft)}
-                                >
-                                  <PencilLine />
-                                  Update
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onSelect={() => onRequestReplaceFromRow(documentPath, payloadDraft)}
-                                >
-                                  <Replace />
-                                  Replace
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  variant="destructive"
-                                  onSelect={() => onRequestDeleteFromRow(documentPath)}
-                                >
-                                  <Trash2 />
-                                  Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuGroup>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                        <div className="grid gap-0.5">
+                          <span>{column.name}</span>
+                          <span className="text-[10px] font-normal text-muted-foreground">{column.type}</span>
                         </div>
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(queryResponse?.documents ?? []).length === 0 ? (
+                    <TableRow>
+                      <TableCell className="py-6 text-center text-sm text-muted-foreground" colSpan={emptyStateColumnSpan}>
+                        <Empty className="border-none">
+                          <EmptyHeader>
+                            <EmptyTitle>No documents found</EmptyTitle>
+                            <EmptyDescription>Try changing the path, filters, or pagination settings.</EmptyDescription>
+                          </EmptyHeader>
+                        </Empty>
                       </TableCell>
                     </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
+                  ) : null}
+
+                  {(queryResponse?.documents ?? []).map((doc, index) => {
+                    const documentPath = typeof doc._path === "string" ? doc._path : ""
+                    const normalizedDocumentPath = normalizePath(documentPath)
+                    const documentId = typeof doc.id === "string" ? doc.id : "(no-id)"
+                    const payloadObject = getPayloadOnly(doc)
+                    const rowPreviewDisabled = !documentPath
+                    const rowIsSelected =
+                      !!selectedPreviewPath &&
+                      normalizePath(selectedPreviewPath) === normalizedDocumentPath
+                    const openRowPreview = () => {
+                      if (rowPreviewDisabled) {
+                        return
+                      }
+                      onRequestPreviewFromRow(documentPath, documentId, payloadObject)
+                    }
+
+                    return (
+                      <TableRow
+                        key={`${documentPath || documentId}-${index}`}
+                        className={cn(
+                          "odd:bg-background even:bg-muted/20",
+                          rowIsSelected && "odd:bg-accent/60 even:bg-accent/60 hover:bg-accent/60",
+                        )}
+                        aria-selected={rowIsSelected}
+                        tabIndex={rowPreviewDisabled ? -1 : 0}
+                        onDoubleClick={() => {
+                          if (!isMobile) {
+                            openRowPreview()
+                          }
+                        }}
+                        onClick={() => {
+                          if (isMobile) {
+                            openRowPreview()
+                          }
+                        }}
+                        onKeyDown={(event) => {
+                          if (!rowPreviewDisabled && (event.key === "Enter" || event.key === " ")) {
+                            event.preventDefault()
+                            openRowPreview()
+                          }
+                        }}
+                      >
+                        <TableCell className="align-top font-medium">{documentId}</TableCell>
+                        {dataColumns.map((column) => (
+                          <TableCell key={`${documentPath}-${column.name}`} className="max-w-xs">
+                            <span className="line-clamp-2 text-muted-foreground">{safePreviewValue(doc[column.name])}</span>
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
           </div>
         ) : null}
       </div>

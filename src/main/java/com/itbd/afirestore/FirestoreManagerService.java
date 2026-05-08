@@ -14,11 +14,14 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class FirestoreManagerService {
 
-    private Firestore firestore;
+    private final Map<String, Firestore> firestoreConnections = new ConcurrentHashMap<>();
+    private volatile String activeConnectionKey;
 
     /**
      * Initializes the Firestore client dynamically using a provided Service Account JSON.
@@ -27,28 +30,33 @@ public class FirestoreManagerService {
      * @param serviceAccountJson The JSON string containing the service account credentials
      */
     public synchronized void initializeFirestore(String projectId, String databaseId, String serviceAccountJson) throws IOException {
+        String normalizedProjectId = normalizeProjectId(projectId);
+        String normalizedDatabaseId = normalizeDatabaseId(databaseId);
+        String connectionKey = connectionKey(normalizedProjectId, normalizedDatabaseId);
+
         ByteArrayInputStream credentialsStream = new ByteArrayInputStream(serviceAccountJson.getBytes(StandardCharsets.UTF_8));
 
         GoogleCredentials credentials = GoogleCredentials.fromStream(credentialsStream);
 
         FirestoreOptions.Builder optionsBuilder = FirestoreOptions.newBuilder()
                 .setCredentials(credentials)
-                .setProjectId(projectId);
+                .setProjectId(normalizedProjectId);
 
         // Explicitly set the databaseId if provided
-        if (databaseId != null && !databaseId.trim().isEmpty()) {
-            optionsBuilder.setDatabaseId(databaseId.trim());
+        if (!isDefaultDatabaseId(normalizedDatabaseId)) {
+            optionsBuilder.setDatabaseId(normalizedDatabaseId);
         }
 
-        if (this.firestore != null) {
+        Firestore replacement = optionsBuilder.build().getService();
+        Firestore previous = firestoreConnections.put(connectionKey, replacement);
+        this.activeConnectionKey = connectionKey;
+        if (previous != null) {
             try {
-                this.firestore.close();
-            } catch (Exception e) {
-                // Ignore or log closing error
+                previous.close();
+            } catch (Exception ignored) {
+                // ignore close failures
             }
         }
-
-        this.firestore = optionsBuilder.build().getService();
     }
 
     public List<String> listAvailableDatabases(String projectId, String serviceAccountJson) throws IOException {
@@ -77,9 +85,50 @@ public class FirestoreManagerService {
      * Returns the initialized Firestore instance.
      */
     public Firestore getFirestore() {
-        if (this.firestore == null) {
+        if (this.firestoreConnections.isEmpty()) {
             throw new IllegalStateException("Firestore has not been initialized yet. Call the initialization API first.");
         }
-        return this.firestore;
+        if (this.activeConnectionKey != null) {
+            Firestore activeFirestore = this.firestoreConnections.get(this.activeConnectionKey);
+            if (activeFirestore != null) {
+                return activeFirestore;
+            }
+        }
+        return this.firestoreConnections.values().iterator().next();
+    }
+
+    /**
+     * Returns the initialized Firestore instance for the given project and database.
+     */
+    public Firestore getFirestore(String projectId, String databaseId) {
+        String key = connectionKey(normalizeProjectId(projectId), normalizeDatabaseId(databaseId));
+        Firestore firestore = this.firestoreConnections.get(key);
+        if (firestore == null) {
+            throw new IllegalStateException("Firestore has not been initialized for project '" + projectId
+                    + "' and database '" + normalizeDatabaseId(databaseId) + "'.");
+        }
+        return firestore;
+    }
+
+    private String connectionKey(String projectId, String databaseId) {
+        return projectId + ":" + databaseId;
+    }
+
+    private String normalizeProjectId(String projectId) {
+        if (projectId == null || projectId.trim().isEmpty()) {
+            throw new IllegalArgumentException("projectId is required.");
+        }
+        return projectId.trim();
+    }
+
+    private String normalizeDatabaseId(String databaseId) {
+        if (databaseId == null || databaseId.trim().isEmpty()) {
+            return "(default)";
+        }
+        return databaseId.trim();
+    }
+
+    private boolean isDefaultDatabaseId(String databaseId) {
+        return "(default)".equals(databaseId);
     }
 }

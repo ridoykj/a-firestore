@@ -1,4 +1,4 @@
-import FirestorePage from '@/view/pages/firestore/FirestorePage'
+import { FirestoreTabsLayout } from '@/view/pages/firestore/components/FirestoreTabsLayout'
 import { createFileRoute } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/app/firestore')({
@@ -6,5 +6,5 @@ export const Route = createFileRoute('/app/firestore')({
 })
 
 function DocComponent() {
-  return <FirestorePage />
+  return <FirestoreTabsLayout />
 }

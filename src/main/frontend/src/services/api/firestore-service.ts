@@ -1,5 +1,6 @@
 import createAxiosInstance from "@/config/axios-config"
 import type {
+  FirestoreDocument,
   FirestoreQueryRequest,
   NestedResponse,
   QueryResponse,
@@ -14,23 +15,38 @@ import { AxiosError } from "axios"
 
 type FirestoreMutationError = Error
 type FirestoreDocumentPayload = Record<string, unknown>
+type FirestoreDocumentDetails = {
+  id: string
+  fields: Record<string, unknown>
+  collections: string[]
+}
+
+export type FirestoreContext = {
+  projectId: string
+  databaseId?: string
+}
 
 type CreateDocumentVariables = {
+  context: FirestoreContext
   collectionPath: string
+  docId?: string
   payload: FirestoreDocumentPayload
 }
 
 type UpdateDocumentVariables = {
+  context: FirestoreContext
   documentPath: string
   payload: FirestoreDocumentPayload
 }
 
 type ReplaceDocumentVariables = {
+  context: FirestoreContext
   documentPath: string
   payload: FirestoreDocumentPayload
 }
 
 type DeleteDocumentVariables = {
+  context: FirestoreContext
   documentPath: string
 }
 
@@ -50,13 +66,40 @@ type InitFirestoreVariables = {
 }
 
 type FirestoreImpl = {
-  getCollections: () => Promise<string[]>
-  getNested: (path: string) => Promise<NestedResponse>
-  runQuery: (request: FirestoreQueryRequest) => Promise<QueryResponse>
-  createDocument: (collectionPath: string, payload: FirestoreDocumentPayload) => Promise<FirestoreDocumentPayload>
-  updateDocument: (documentPath: string, payload: FirestoreDocumentPayload) => Promise<FirestoreDocumentPayload>
-  replaceDocument: (documentPath: string, payload: FirestoreDocumentPayload) => Promise<FirestoreDocumentPayload>
-  deleteDocument: (documentPath: string) => Promise<string>
+  getCollections: (context: FirestoreContext) => Promise<string[]>
+  getCollectionDocuments: (
+    context: FirestoreContext,
+    collectionPath: string,
+  ) => Promise<FirestoreDocument[]>
+  getDocumentDetails: (
+    context: FirestoreContext,
+    documentPath: string,
+  ) => Promise<FirestoreDocumentDetails>
+  getNested: (
+    context: FirestoreContext,
+    path: string,
+    limit?: number,
+    cursor?: string | null,
+    idFilter?: string,
+  ) => Promise<NestedResponse>
+  runQuery: (context: FirestoreContext, request: FirestoreQueryRequest) => Promise<QueryResponse>
+  createDocument: (
+    context: FirestoreContext,
+    collectionPath: string,
+    payload: FirestoreDocumentPayload,
+    docId?: string,
+  ) => Promise<FirestoreDocumentPayload>
+  updateDocument: (
+    context: FirestoreContext,
+    documentPath: string,
+    payload: FirestoreDocumentPayload,
+  ) => Promise<FirestoreDocumentPayload>
+  replaceDocument: (
+    context: FirestoreContext,
+    documentPath: string,
+    payload: FirestoreDocumentPayload,
+  ) => Promise<FirestoreDocumentPayload>
+  deleteDocument: (context: FirestoreContext, documentPath: string) => Promise<string>
   loadProjects: (credentialsFile: File) => Promise<string[]>
   loadDatabases: (projectId: string, credentialsFile: File) => Promise<string[]>
   initFirestore: (projectId: string, credentialsFile: File, databaseId?: string) => Promise<string>
@@ -85,13 +128,40 @@ type FirestoreImpl = {
 }
 
 type FirestoreServiceApi = {
-  getCollections: () => Promise<string[]>
-  getNested: (path: string) => Promise<NestedResponse>
-  runQuery: (request: FirestoreQueryRequest) => Promise<QueryResponse>
-  createDocument: (collectionPath: string, payload: FirestoreDocumentPayload) => Promise<FirestoreDocumentPayload>
-  updateDocument: (documentPath: string, payload: FirestoreDocumentPayload) => Promise<FirestoreDocumentPayload>
-  replaceDocument: (documentPath: string, payload: FirestoreDocumentPayload) => Promise<FirestoreDocumentPayload>
-  deleteDocument: (documentPath: string) => Promise<string>
+  getCollections: (context: FirestoreContext) => Promise<string[]>
+  getCollectionDocuments: (
+    context: FirestoreContext,
+    collectionPath: string,
+  ) => Promise<FirestoreDocument[]>
+  getDocumentDetails: (
+    context: FirestoreContext,
+    documentPath: string,
+  ) => Promise<FirestoreDocumentDetails>
+  getNested: (
+    context: FirestoreContext,
+    path: string,
+    limit?: number,
+    cursor?: string | null,
+    idFilter?: string,
+  ) => Promise<NestedResponse>
+  runQuery: (context: FirestoreContext, request: FirestoreQueryRequest) => Promise<QueryResponse>
+  createDocument: (
+    context: FirestoreContext,
+    collectionPath: string,
+    payload: FirestoreDocumentPayload,
+    docId?: string,
+  ) => Promise<FirestoreDocumentPayload>
+  updateDocument: (
+    context: FirestoreContext,
+    documentPath: string,
+    payload: FirestoreDocumentPayload,
+  ) => Promise<FirestoreDocumentPayload>
+  replaceDocument: (
+    context: FirestoreContext,
+    documentPath: string,
+    payload: FirestoreDocumentPayload,
+  ) => Promise<FirestoreDocumentPayload>
+  deleteDocument: (context: FirestoreContext, documentPath: string) => Promise<string>
   loadProjects: (credentialsFile: File) => Promise<string[]>
   loadDatabases: (projectId: string, credentialsFile: File) => Promise<string[]>
   initFirestore: (projectId: string, credentialsFile: File, databaseId?: string) => Promise<string>
@@ -102,9 +172,19 @@ const axiosInstance = createAxiosInstance(baseUrl)
 
 const firestoreQueryKeys = {
   root: ["firestore"] as const,
-  collections: () => [...firestoreQueryKeys.root, "collections"] as const,
-  nested: (path: string) => [...firestoreQueryKeys.root, "nested", path] as const,
-  query: (request: FirestoreQueryRequest) => [...firestoreQueryKeys.root, "query", request] as const,
+  contextRoot: (context: FirestoreContext) =>
+    [...firestoreQueryKeys.root, contextKey(context)] as const,
+  collections: (context: FirestoreContext) =>
+    [...firestoreQueryKeys.contextRoot(context), "collections"] as const,
+  nested: (
+    context: FirestoreContext,
+    path: string,
+    limit: number,
+    cursor: string | null,
+    idFilter: string,
+  ) => [...firestoreQueryKeys.contextRoot(context), "nested", path, limit, cursor, idFilter] as const,
+  query: (context: FirestoreContext, request: FirestoreQueryRequest) =>
+    [...firestoreQueryKeys.contextRoot(context), "query", request] as const,
   projects: (fileKey: string) => [...firestoreQueryKeys.root, "projects", fileKey] as const,
   databases: (projectId: string, fileKey: string) =>
     [...firestoreQueryKeys.root, "databases", projectId, fileKey] as const,
@@ -136,6 +216,36 @@ function toStringArray(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string")
 }
 
+function toDocumentArray(value: unknown): FirestoreDocument[] {
+  if (!Array.isArray(value)) {
+    throw new Error(extractApiMessage(value))
+  }
+  return value
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
+    .map((item) => item as FirestoreDocument)
+}
+
+function toDocumentDetails(value: unknown): FirestoreDocumentDetails {
+  if (!value || typeof value !== "object") {
+    throw new Error(extractApiMessage(value))
+  }
+
+  const payload = value as Record<string, unknown>
+  const id = typeof payload.id === "string" ? payload.id : ""
+
+  const rawFields = payload.fields
+  const fields =
+    rawFields && typeof rawFields === "object" && !Array.isArray(rawFields)
+      ? (rawFields as Record<string, unknown>)
+      : {}
+
+  const collections = Array.isArray(payload.collections)
+    ? payload.collections.filter((item): item is string => typeof item === "string")
+    : []
+
+  return { id, fields, collections }
+}
+
 function buildQueryParams(requestData: FirestoreQueryRequest): URLSearchParams {
   const params = new URLSearchParams()
   params.set("path", requestData.path)
@@ -160,28 +270,104 @@ function buildQueryParams(requestData: FirestoreQueryRequest): URLSearchParams {
   return params
 }
 
+function normalizedDatabaseId(databaseId?: string): string {
+  if (!databaseId || !databaseId.trim()) {
+    return "(default)"
+  }
+  return databaseId.trim()
+}
+
+function contextKey(context: FirestoreContext): string {
+  return `${context.projectId}::${normalizedDatabaseId(context.databaseId)}`
+}
+
+function firestoreHeaders(context: FirestoreContext): Record<string, string> {
+  return {
+    "X-Project-Id": context.projectId,
+    "X-Database-Id": normalizedDatabaseId(context.databaseId),
+  }
+}
+
 const firestoreApi: FirestoreServiceApi = {
-  getCollections: () => request(() => axiosInstance.get("/api/collections")),
+  getCollections: (context) =>
+    request(() => axiosInstance.get("/api/collections", { headers: firestoreHeaders(context) })),
 
-  getNested: (path) =>
-    request(() => axiosInstance.get(`/api/workbench/nested?path=${encodeURIComponent(path)}`)),
-
-  runQuery: (requestData) => {
-    const params = buildQueryParams(requestData)
-    return request(() => axiosInstance.get(`/api/workbench/query?${params.toString()}`))
+  getCollectionDocuments: async (context, collectionPath) => {
+    const response = await request<unknown>(() =>
+      axiosInstance.get(`/api/collections/${encodePath(collectionPath)}`, {
+        headers: firestoreHeaders(context),
+      }),
+    )
+    return toDocumentArray(response)
   },
 
-  createDocument: (collectionPath, payload) =>
-    request(() => axiosInstance.post(`/api/collections/${encodePath(collectionPath)}`, payload)),
+  getDocumentDetails: async (context, documentPath) => {
+    const response = await request<unknown>(() =>
+      axiosInstance.get(`/api/collections/${encodePath(documentPath)}`, {
+        headers: firestoreHeaders(context),
+      }),
+    )
+    return toDocumentDetails(response)
+  },
 
-  updateDocument: (documentPath, payload) =>
-    request(() => axiosInstance.put(`/api/collections/${encodePath(documentPath)}`, payload)),
+  getNested: (context, path, limit = 25, cursor = null, idFilter = "") => {
+    const params = new URLSearchParams({
+      path,
+      limit: String(Math.max(1, limit)),
+    })
+    if (cursor && cursor.trim()) {
+      params.set("cursor", cursor.trim())
+    }
+    if (idFilter.trim()) {
+      params.set("idFilter", idFilter.trim())
+    }
 
-  replaceDocument: (documentPath, payload) =>
-    request(() => axiosInstance.post("/api/workbench/replace", { documentPath, payload })),
+    return request(() =>
+      axiosInstance.get(`/api/workbench/nested?${params.toString()}`, {
+        headers: firestoreHeaders(context),
+      }),
+    )
+  },
 
-  deleteDocument: (documentPath) =>
-    request(() => axiosInstance.delete(`/api/collections/${encodePath(documentPath)}`)),
+  runQuery: (context, requestData) => {
+    const params = buildQueryParams(requestData)
+    return request(() =>
+      axiosInstance.get(`/api/workbench/query?${params.toString()}`, {
+        headers: firestoreHeaders(context),
+      }),
+    )
+  },
+
+  createDocument: (context, collectionPath, payload, docId) =>
+    request(() =>
+      axiosInstance.post(`/api/collections/${encodePath(collectionPath)}`, payload, {
+        headers: firestoreHeaders(context),
+        params: docId?.trim() ? { docId: docId.trim() } : undefined,
+      }),
+    ),
+
+  updateDocument: (context, documentPath, payload) =>
+    request(() =>
+      axiosInstance.put(`/api/collections/${encodePath(documentPath)}`, payload, {
+        headers: firestoreHeaders(context),
+      }),
+    ),
+
+  replaceDocument: (context, documentPath, payload) =>
+    request(() =>
+      axiosInstance.post(
+        "/api/workbench/replace",
+        { documentPath, payload },
+        { headers: firestoreHeaders(context) },
+      ),
+    ),
+
+  deleteDocument: (context, documentPath) =>
+    request(() =>
+      axiosInstance.delete(`/api/collections/${encodePath(documentPath)}`, {
+        headers: firestoreHeaders(context),
+      }),
+    ),
 
   loadProjects: async (credentialsFile) => {
     const form = new FormData()
@@ -212,57 +398,82 @@ const firestoreApi: FirestoreServiceApi = {
 export function useFirestoreService(): FirestoreImpl {
   const queryClient = useQueryClient()
 
-  async function getCollections(): Promise<string[]> {
+  async function getCollections(context: FirestoreContext): Promise<string[]> {
     return queryClient.fetchQuery({
-      queryKey: firestoreQueryKeys.collections(),
-      queryFn: firestoreApi.getCollections,
+      queryKey: firestoreQueryKeys.collections(context),
+      queryFn: () => firestoreApi.getCollections(context),
     })
   }
 
-  async function getNested(path: string): Promise<NestedResponse> {
+  async function getCollectionDocuments(
+    context: FirestoreContext,
+    collectionPath: string,
+  ): Promise<FirestoreDocument[]> {
     return queryClient.fetchQuery({
-      queryKey: firestoreQueryKeys.nested(path),
-      queryFn: () => firestoreApi.getNested(path),
+      queryKey: [...firestoreQueryKeys.contextRoot(context), "collection-documents", collectionPath],
+      queryFn: () => firestoreApi.getCollectionDocuments(context, collectionPath),
     })
   }
 
-  async function runQuery(requestData: FirestoreQueryRequest): Promise<QueryResponse> {
+  async function getDocumentDetails(
+    context: FirestoreContext,
+    documentPath: string,
+  ): Promise<FirestoreDocumentDetails> {
     return queryClient.fetchQuery({
-      queryKey: firestoreQueryKeys.query(requestData),
-      queryFn: () => firestoreApi.runQuery(requestData),
+      queryKey: [...firestoreQueryKeys.contextRoot(context), "document", documentPath],
+      queryFn: () => firestoreApi.getDocumentDetails(context, documentPath),
+    })
+  }
+
+  async function getNested(
+    context: FirestoreContext,
+    path: string,
+    limit = 25,
+    cursor: string | null = null,
+    idFilter = "",
+  ): Promise<NestedResponse> {
+    return queryClient.fetchQuery({
+      queryKey: firestoreQueryKeys.nested(context, path, limit, cursor, idFilter),
+      queryFn: () => firestoreApi.getNested(context, path, limit, cursor, idFilter),
+    })
+  }
+
+  async function runQuery(context: FirestoreContext, requestData: FirestoreQueryRequest): Promise<QueryResponse> {
+    return queryClient.fetchQuery({
+      queryKey: firestoreQueryKeys.query(context, requestData),
+      queryFn: () => firestoreApi.runQuery(context, requestData),
     })
   }
 
   const createDocumentMutation = useMutation({
-    mutationFn: ({ collectionPath, payload }: CreateDocumentVariables) =>
-      firestoreApi.createDocument(collectionPath, payload),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: firestoreQueryKeys.collections() })
-      await queryClient.invalidateQueries({ queryKey: firestoreQueryKeys.root })
+    mutationFn: ({ context, collectionPath, docId, payload }: CreateDocumentVariables) =>
+      firestoreApi.createDocument(context, collectionPath, payload, docId),
+    onSuccess: async (_, variables) => {
+      await queryClient.invalidateQueries({ queryKey: firestoreQueryKeys.contextRoot(variables.context) })
     },
   })
 
   const updateDocumentMutation = useMutation({
-    mutationFn: ({ documentPath, payload }: UpdateDocumentVariables) =>
-      firestoreApi.updateDocument(documentPath, payload),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: firestoreQueryKeys.root })
+    mutationFn: ({ context, documentPath, payload }: UpdateDocumentVariables) =>
+      firestoreApi.updateDocument(context, documentPath, payload),
+    onSuccess: async (_, variables) => {
+      await queryClient.invalidateQueries({ queryKey: firestoreQueryKeys.contextRoot(variables.context) })
     },
   })
 
   const replaceDocumentMutation = useMutation({
-    mutationFn: ({ documentPath, payload }: ReplaceDocumentVariables) =>
-      firestoreApi.replaceDocument(documentPath, payload),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: firestoreQueryKeys.root })
+    mutationFn: ({ context, documentPath, payload }: ReplaceDocumentVariables) =>
+      firestoreApi.replaceDocument(context, documentPath, payload),
+    onSuccess: async (_, variables) => {
+      await queryClient.invalidateQueries({ queryKey: firestoreQueryKeys.contextRoot(variables.context) })
     },
   })
 
   const deleteDocumentMutation = useMutation({
-    mutationFn: ({ documentPath }: DeleteDocumentVariables) => firestoreApi.deleteDocument(documentPath),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: firestoreQueryKeys.collections() })
-      await queryClient.invalidateQueries({ queryKey: firestoreQueryKeys.root })
+    mutationFn: ({ context, documentPath }: DeleteDocumentVariables) =>
+      firestoreApi.deleteDocument(context, documentPath),
+    onSuccess: async (_, variables) => {
+      await queryClient.invalidateQueries({ queryKey: firestoreQueryKeys.contextRoot(variables.context) })
     },
   })
 
@@ -278,25 +489,35 @@ export function useFirestoreService(): FirestoreImpl {
   const initFirestoreMutation = useMutation({
     mutationFn: ({ projectId, credentialsFile, databaseId }: InitFirestoreVariables) =>
       firestoreApi.initFirestore(projectId, credentialsFile, databaseId),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: firestoreQueryKeys.collections() })
-    },
   })
 
-  async function createDocument(collectionPath: string, payload: FirestoreDocumentPayload) {
-    return createDocumentMutation.mutateAsync({ collectionPath, payload })
+  async function createDocument(
+    context: FirestoreContext,
+    collectionPath: string,
+    payload: FirestoreDocumentPayload,
+    docId?: string,
+  ) {
+    return createDocumentMutation.mutateAsync({ context, collectionPath, docId, payload })
   }
 
-  async function updateDocument(documentPath: string, payload: FirestoreDocumentPayload) {
-    return updateDocumentMutation.mutateAsync({ documentPath, payload })
+  async function updateDocument(
+    context: FirestoreContext,
+    documentPath: string,
+    payload: FirestoreDocumentPayload,
+  ) {
+    return updateDocumentMutation.mutateAsync({ context, documentPath, payload })
   }
 
-  async function replaceDocument(documentPath: string, payload: FirestoreDocumentPayload) {
-    return replaceDocumentMutation.mutateAsync({ documentPath, payload })
+  async function replaceDocument(
+    context: FirestoreContext,
+    documentPath: string,
+    payload: FirestoreDocumentPayload,
+  ) {
+    return replaceDocumentMutation.mutateAsync({ context, documentPath, payload })
   }
 
-  async function deleteDocument(documentPath: string) {
-    return deleteDocumentMutation.mutateAsync({ documentPath })
+  async function deleteDocument(context: FirestoreContext, documentPath: string) {
+    return deleteDocumentMutation.mutateAsync({ context, documentPath })
   }
 
   async function loadProjects(credentialsFile: File) {
@@ -321,6 +542,8 @@ export function useFirestoreService(): FirestoreImpl {
 
   return {
     getCollections,
+    getCollectionDocuments,
+    getDocumentDetails,
     getNested,
     runQuery,
     createDocument,

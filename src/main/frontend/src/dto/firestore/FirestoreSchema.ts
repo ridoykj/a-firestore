@@ -6,6 +6,8 @@ export type WhereType = "string" | "number" | "boolean" | "null"
 
 export type StatusTone = "success" | "warning" | "error"
 
+export type TransferFormat = "json" | "csv"
+
 export type QueryColumn = {
   name: string
   type: string
@@ -36,6 +38,13 @@ export type NestedNode = {
   path: string
 }
 
+export type NestedPageInfo = {
+  nextCursor: string | null
+  hasMore: boolean
+  returnedCount: number
+  limit: number
+}
+
 export type NestedResponse = {
   currentPath: string
   parentPath: string
@@ -44,6 +53,7 @@ export type NestedResponse = {
   childCollectionNodes: NestedNode[]
   nestedHint: string
   nestedError: string
+  pageInfo?: NestedPageInfo
 }
 
 export type WhereRow = {
@@ -132,4 +142,10 @@ export const EMPTY_NESTED_RESPONSE: NestedResponse = {
   childCollectionNodes: [],
   nestedHint: EMPTY_NESTED_HINT,
   nestedError: "",
+  pageInfo: {
+    nextCursor: null,
+    hasMore: false,
+    returnedCount: 0,
+    limit: 25,
+  },
 }

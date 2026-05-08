@@ -1,5 +1,7 @@
 import type { FirestoreDocument } from "@/dto/firestore/FirestoreSchema"
 
+const FIRESTORE_AUTO_ID_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+
 export function normalizePath(path: string): string {
   return path.trim().replace(/^\/+|\/+$/g, "")
 }
@@ -47,6 +49,35 @@ export function parseJsonPayload(text: string): Record<string, unknown> {
   }
 
   return parsed as Record<string, unknown>
+}
+
+export function documentIdIsValid(docId: string): boolean {
+  const normalized = docId.trim()
+  if (!normalized) {
+    return true
+  }
+  if (normalized === "." || normalized === "..") {
+    return false
+  }
+  return !normalized.includes("/")
+}
+
+export function generateFirestoreDocumentId(length = 20): string {
+  const size = Math.max(1, Math.floor(length))
+  const alphabetSize = FIRESTORE_AUTO_ID_CHARS.length
+
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    const randomBytes = new Uint8Array(size)
+    crypto.getRandomValues(randomBytes)
+    return Array.from(randomBytes, (value) => FIRESTORE_AUTO_ID_CHARS[value % alphabetSize]).join("")
+  }
+
+  let generated = ""
+  for (let index = 0; index < size; index += 1) {
+    const value = Math.floor(Math.random() * alphabetSize)
+    generated += FIRESTORE_AUTO_ID_CHARS[value]
+  }
+  return generated
 }
 
 export function getPayloadOnly(document: FirestoreDocument): Record<string, unknown> {
