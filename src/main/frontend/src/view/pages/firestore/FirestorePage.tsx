@@ -44,7 +44,6 @@ import {
   type PreviewEditorTheme,
   type PreviewValidationSummary,
   type QueryResponse,
-  type StatusMessage,
   type TransferFormat,
   type WhereRow,
 } from "@/dto/firestore/FirestoreSchema"
@@ -80,6 +79,7 @@ import { FirestoreQueryResults } from "@/view/pages/firestore/components/Firesto
 import { FirestoreSidebar } from "@/view/pages/firestore/components/FirestoreSidebar"
 import { FirestoreHeader } from "@/view/pages/firestore/components/FirestoreHeader"
 import { FirestoreNestedTraverse } from "@/view/pages/firestore/components/FirestoreNestedTraverse"
+import { FirestoreToFirestoreImportDialog } from "@/view/pages/firestore/components/FirestoreToFirestoreImportDialog"
 import type { ProjectTab } from "@/store/gcp-store"
 
 type PreviewDocumentSelection = {
@@ -148,14 +148,14 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
   const [createDocumentId, setCreateDocumentId] = useState("")
   const [createPayload, setCreatePayload] = useState(EMPTY_JSON_TEMPLATE)
   const [createDrawerOpen, setCreateDrawerOpen] = useState(false)
+  const [firestoreImportDialogOpen, setFirestoreImportDialogOpen] = useState(false)
+
   const [crudBusy, setCrudBusy] = useState<CrudBusy>(null)
-  const [actionStatus, setActionStatus] = useState<StatusMessage | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewSelection, setPreviewSelection] = useState<PreviewDocumentSelection | null>(null)
   const [previewActiveTab, setPreviewActiveTab] = useState<PreviewTab>("tree")
   const [previewDraft, setPreviewDraft] = useState(EMPTY_JSON_TEMPLATE)
   const [previewSavedDraft, setPreviewSavedDraft] = useState(EMPTY_JSON_TEMPLATE)
-  const [previewStatus, setPreviewStatus] = useState<StatusMessage | null>(null)
   const [previewBusy, setPreviewBusy] = useState<PreviewBusy>(null)
   const [previewValidation, setPreviewValidation] =
     useState<PreviewValidationSummary>(EMPTY_PREVIEW_VALIDATION)
@@ -658,17 +658,13 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
           setPreviewDraft(nextDraft)
           setPreviewSavedDraft(nextDraft)
           setPreviewValidation(EMPTY_PREVIEW_VALIDATION)
-          setPreviewStatus({ tone: "success", message: "Document replaced from import." })
+          toast.success("Document replaced from import.")
         } else {
-          setPreviewStatus({
-            tone: "warning",
-            message: "Document replaced, but it is outside the current query results.",
-          })
+          toast.warning("Document replaced, but it is outside the current query results.")
         }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Document import failed."
-      setPreviewStatus({ tone: "error", message })
       toast.error(message)
     } finally {
       setTransferBusy(false)
@@ -758,18 +754,15 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
     const normalizedDocId = createDocumentId.trim()
 
     if (!normalizedPath) {
-      setActionStatus({ tone: "warning", message: "Collection path is required." })
+      toast.warning("Collection path is required.")
       return
     }
     if (!pathIsCollection(normalizedPath)) {
-      setActionStatus({ tone: "warning", message: "Collection path must have odd path segments." })
+      toast.warning("Collection path must have odd path segments.")
       return
     }
     if (!documentIdIsValid(normalizedDocId)) {
-      setActionStatus({
-        tone: "warning",
-        message: "Document ID cannot contain '/' and cannot be '.' or '..'.",
-      })
+      toast.warning("Document ID cannot contain '/' and cannot be '.' or '..'.")
       return
     }
 
@@ -777,10 +770,7 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
     try {
       payload = parseJsonPayload(createPayload)
     } catch (error) {
-      setActionStatus({
-        tone: "error",
-        message: error instanceof Error ? error.message : "Invalid create payload.",
-      })
+      toast.error(error instanceof Error ? error.message : "Invalid create payload.")
       return
     }
 
@@ -792,8 +782,7 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
         payload,
         normalizedDocId || undefined,
       )
-      setActionStatus({ tone: "success", message: "Document created successfully." })
-      toast.success("Document created.")
+      toast.success("Document created successfully.")
       setCreateCollectionPath("")
       setCreateDocumentId("")
       setCreatePayload(EMPTY_JSON_TEMPLATE)
@@ -802,7 +791,6 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
       await runQuery(0, normalizedPath)
     } catch (error) {
       const message = error instanceof Error ? error.message : "Create failed."
-      setActionStatus({ tone: "error", message })
       toast.error(message)
     } finally {
       setCrudBusy(null)
@@ -864,7 +852,6 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
     }
 
     setCreateCollectionPath(resolvedPath)
-    setActionStatus(null)
     setCreateDrawerOpen(true)
   }
 
@@ -876,7 +863,6 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
     setCreateCollectionPath("")
     setCreateDocumentId("")
     setCreatePayload(EMPTY_JSON_TEMPLATE)
-    setActionStatus(null)
   }
 
   function applyPreviewSelection(selection: PreviewDocumentSelection) {
@@ -886,7 +872,6 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
     setPreviewSavedDraft(nextDraft)
     setPreviewActiveTab("tree")
     setPreviewValidation(EMPTY_PREVIEW_VALIDATION)
-    setPreviewStatus(null)
     setPreviewOpen(true)
   }
 
@@ -897,7 +882,6 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
     setPreviewSavedDraft(EMPTY_JSON_TEMPLATE)
     setPreviewActiveTab("tree")
     setPreviewValidation(EMPTY_PREVIEW_VALIDATION)
-    setPreviewStatus(null)
     setPendingPreviewIntent(null)
     setPreviewDiscardOpen(false)
   }
@@ -1022,11 +1006,11 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
   async function handlePreviewUpdate(draftOverride?: string) {
     const normalizedPath = normalizePath(previewSelection?.documentPath ?? "")
     if (!normalizedPath) {
-      setPreviewStatus({ tone: "warning", message: "Document path is required." })
+      toast.warning("Document path is required.")
       return
     }
     if (pathIsCollection(normalizedPath)) {
-      setPreviewStatus({ tone: "warning", message: "Document path must have even path segments." })
+      toast.warning("Document path must have even path segments.")
       return
     }
 
@@ -1034,10 +1018,7 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
     try {
       payload = parseJsonPayload(draftOverride ?? previewDraft)
     } catch (error) {
-      setPreviewStatus({
-        tone: "error",
-        message: error instanceof Error ? error.message : "Invalid JSON payload.",
-      })
+      toast.error(error instanceof Error ? error.message : "Invalid JSON payload.")
       return
     }
 
@@ -1059,22 +1040,14 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
           setPreviewDraft(nextDraft)
           setPreviewSavedDraft(nextDraft)
           setPreviewValidation(EMPTY_PREVIEW_VALIDATION)
-          setPreviewStatus({ tone: "success", message: "Document updated successfully (merge)." })
         } else {
-          setPreviewStatus({
-            tone: "warning",
-            message: "Document updated, but it is outside the current query results.",
-          })
+          toast.warning("Document updated, but it is outside the current query results.")
         }
       } else {
-        setPreviewStatus({
-          tone: "warning",
-          message: "Document updated, but refreshed query results are unavailable.",
-        })
+        toast.warning("Document updated, but refreshed query results are unavailable.")
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Update failed."
-      setPreviewStatus({ tone: "error", message })
       toast.error(message)
     } finally {
       setPreviewBusy(null)
@@ -1084,11 +1057,11 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
   async function handlePreviewDelete() {
     const normalizedPath = normalizePath(previewSelection?.documentPath ?? "")
     if (!normalizedPath) {
-      setPreviewStatus({ tone: "warning", message: "Document path is required." })
+      toast.warning("Document path is required.")
       return
     }
     if (pathIsCollection(normalizedPath)) {
-      setPreviewStatus({ tone: "warning", message: "Document path must have even path segments." })
+      toast.warning("Document path must have even path segments.")
       return
     }
 
@@ -1101,7 +1074,6 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
       clearPreviewSelection()
     } catch (error) {
       const message = error instanceof Error ? error.message : "Delete failed."
-      setPreviewStatus({ tone: "error", message })
       toast.error(message)
     } finally {
       setPreviewBusy(null)
@@ -1238,8 +1210,8 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
                             Import CSV
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem disabled>
-                            Full replace upsert mode
+                          <DropdownMenuItem onClick={() => setFirestoreImportDialogOpen(true)}>
+                            Import Firestore
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -1352,7 +1324,6 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
                     onDocumentIdChange={setCreateDocumentId}
                     payload={createPayload}
                     onPayloadChange={setCreatePayload}
-                    status={actionStatus}
                     isSubmitting={crudBusy === "create"}
                     onGenerateDocumentId={handleGenerateCreateDocumentId}
                     onSubmit={() => void handleCreateDocument()}
@@ -1369,7 +1340,6 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
                     onDraftChange={setPreviewDraft}
                     activeTab={previewActiveTab}
                     onActiveTabChange={setPreviewActiveTab}
-                    status={previewStatus}
                     busyAction={previewBusy}
                     editorTheme={previewEditorTheme}
                     onEditorThemeChange={handlePreviewEditorThemeChange}
@@ -1429,6 +1399,13 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        
+        <FirestoreToFirestoreImportDialog
+          context={{ ...tab, activePath: queryPath }}
+          open={firestoreImportDialogOpen}
+          onOpenChange={setFirestoreImportDialogOpen}
+          onImportSuccess={() => void runQuery(page)}
+        />
       </div>
     </div>
   )

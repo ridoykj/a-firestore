@@ -125,6 +125,18 @@ type FirestoreImpl = {
   loadProjectsMutation: UseMutationResult<string[], FirestoreMutationError, LoadProjectsVariables, unknown>
   loadDatabasesMutation: UseMutationResult<string[], FirestoreMutationError, LoadDatabasesVariables, unknown>
   initFirestoreMutation: UseMutationResult<string, FirestoreMutationError, InitFirestoreVariables, unknown>
+
+  initTransfer: (file: File) => Promise<{ projectId: string; databases: string[]; serviceAccountJson: string }>
+  initSourceDb: (projectId: string, databaseId: string, serviceAccountJson: string) => Promise<unknown>
+  deepCopy: (payload: {
+    sourceProjectId: string
+    sourceDatabaseId: string
+    sourcePaths: string[]
+    targetProjectId: string
+    targetDatabaseId: string
+    targetBasePath: string
+    conflictResolution: "MERGE" | "OVERWRITE"
+  }) => Promise<{ success: boolean; copiedDocuments: number }>
 }
 
 type FirestoreServiceApi = {
@@ -165,6 +177,18 @@ type FirestoreServiceApi = {
   loadProjects: (credentialsFile: File) => Promise<string[]>
   loadDatabases: (projectId: string, credentialsFile: File) => Promise<string[]>
   initFirestore: (projectId: string, credentialsFile: File, databaseId?: string) => Promise<string>
+  
+  initTransfer: (file: File) => Promise<{ projectId: string; databases: string[]; serviceAccountJson: string }>
+  initSourceDb: (projectId: string, databaseId: string, serviceAccountJson: string) => Promise<unknown>
+  deepCopy: (payload: {
+    sourceProjectId: string
+    sourceDatabaseId: string
+    sourcePaths: string[]
+    targetProjectId: string
+    targetDatabaseId: string
+    targetBasePath: string
+    conflictResolution: "MERGE" | "OVERWRITE"
+  }) => Promise<{ success: boolean; copiedDocuments: number }>
 }
 
 const baseUrl: string = import.meta.env.VITE_BASE_URL || ""
@@ -393,6 +417,23 @@ const firestoreApi: FirestoreServiceApi = {
     form.append("file", credentialsFile)
     return request(() => axiosInstance.post("/api/firestore/init", form))
   },
+
+  initTransfer: (file: File) => {
+    const formData = new FormData()
+    formData.append("file", file)
+    return request(() =>
+      axiosInstance.post("/api/transfer/init", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      })
+    )
+  },
+
+  initSourceDb: (projectId: string, databaseId: string, serviceAccountJson: string) =>
+    request(() =>
+      axiosInstance.post("/api/transfer/init-source-db", { projectId, databaseId, serviceAccountJson })
+    ),
+
+  deepCopy: (payload) => request(() => axiosInstance.post("/api/transfer/deep-copy", payload)),
 }
 
 export function useFirestoreService(): FirestoreImpl {
@@ -553,6 +594,9 @@ export function useFirestoreService(): FirestoreImpl {
     loadProjects,
     loadDatabases,
     initFirestore,
+    initTransfer: firestoreApi.initTransfer,
+    initSourceDb: firestoreApi.initSourceDb,
+    deepCopy: firestoreApi.deepCopy,
     createDocumentMutation,
     updateDocumentMutation,
     replaceDocumentMutation,

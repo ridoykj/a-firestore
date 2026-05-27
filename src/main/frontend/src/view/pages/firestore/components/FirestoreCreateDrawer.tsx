@@ -1,5 +1,5 @@
 import { lazy, Suspense, useMemo, useState } from "react"
-import type { PreviewValidationSummary, StatusMessage } from "@/dto/firestore/FirestoreSchema"
+import type { PreviewValidationSummary } from "@/dto/firestore/FirestoreSchema"
 import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/alert"
 import { Button } from "@/shadcn/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/shadcn/components/ui/field"
@@ -36,7 +36,6 @@ type FirestoreCreateDrawerProps = {
   onDocumentIdChange: (value: string) => void
   payload: string
   onPayloadChange: (value: string) => void
-  status: StatusMessage | null
   isSubmitting: boolean
   onGenerateDocumentId: () => void
   onSubmit: () => void
@@ -52,7 +51,6 @@ export function FirestoreCreateDrawer({
   onDocumentIdChange,
   payload,
   onPayloadChange,
-  status,
   isSubmitting,
   onGenerateDocumentId,
   onSubmit,
@@ -92,19 +90,6 @@ export function FirestoreCreateDrawer({
     !docIdInvalid &&
     !jsonHasSyntaxErrors &&
     !semanticJsonErrorMessage
-
-  const statusAlert = status ? (
-    <Alert variant={status.tone === "error" ? "destructive" : "default"}>
-      <AlertTitle>
-        {status.tone === "success"
-          ? "Success"
-          : status.tone === "warning"
-            ? "Needs Attention"
-            : "Request Failed"}
-      </AlertTitle>
-      <AlertDescription>{status.message}</AlertDescription>
-    </Alert>
-  ) : null
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -221,8 +206,6 @@ export function FirestoreCreateDrawer({
                 </Alert>
               ) : null}
             </Field>
-
-            {statusAlert}
           </FieldGroup>
         </div>
 

@@ -32,7 +32,6 @@ export function FirestoreHeader({ tab, onOpenAddTab }: FirestoreHeaderProps) {
     credentialsFile,
     setCredentialsFile,
     clearTabs,
-    setAuthStatus,
     findTabByContext,
     setActiveTabId,
     updateTabContext,
@@ -67,62 +66,54 @@ export function FirestoreHeader({ tab, onOpenAddTab }: FirestoreHeaderProps) {
       return
     }
     const message = projectsQuery.error.message || "Failed to load project IDs."
-    setAuthStatus({ tone: "error", message })
     toast.error(message)
-  }, [projectsQuery.error, projectsQuery.errorUpdatedAt, setAuthStatus])
+  }, [projectsQuery.error, projectsQuery.errorUpdatedAt])
 
   useEffect(() => {
     if (projectsQuery.dataUpdatedAt === 0) {
       return
     }
-    setAuthStatus({
-      tone: projects.length > 0 ? "success" : "warning",
-      message:
-        projects.length > 0
-          ? `Loaded ${projects.length} project ID(s).`
-          : "No accessible project IDs found with the uploaded credentials.",
-    })
-  }, [projects, projectsQuery.dataUpdatedAt, setAuthStatus])
+    if (projects.length > 0) {
+      toast.success(`Loaded ${projects.length} project ID(s).`)
+    } else {
+      toast.warning("No accessible project IDs found with the uploaded credentials.")
+    }
+  }, [projects, projectsQuery.dataUpdatedAt])
 
   useEffect(() => {
     if (!databasesQuery.error || databasesQuery.errorUpdatedAt === 0) {
       return
     }
     const message = databasesQuery.error.message || "Failed to load databases."
-    setAuthStatus({ tone: "error", message })
     toast.error(message)
-  }, [databasesQuery.error, databasesQuery.errorUpdatedAt, setAuthStatus])
+  }, [databasesQuery.error, databasesQuery.errorUpdatedAt])
 
   useEffect(() => {
     if (databasesQuery.dataUpdatedAt === 0) {
       return
     }
-    setAuthStatus({
-      tone: "success",
-      message:
-        databases.length > 0
-          ? `Loaded ${databases.length} database ID(s).`
-          : "No explicit database IDs found. '(default)' will be used.",
-    })
-  }, [databases, databasesQuery.dataUpdatedAt, setAuthStatus])
+    toast.success(
+      databases.length > 0
+        ? `Loaded ${databases.length} database ID(s).`
+        : "No explicit database IDs found. '(default)' will be used.",
+    )
+  }, [databases, databasesQuery.dataUpdatedAt])
 
   function handleLogout() {
     setCredentialsFile(null)
     clearTabs()
-    setAuthStatus(null)
     navigate({ to: "/" })
   }
 
   async function loadProjects() {
     if (!credentialsFile) {
-      setAuthStatus({ tone: "warning", message: "Choose a credentials JSON file first." })
+      toast.warning("Choose a credentials JSON file first.")
       return
     }
 
     const result = await projectsQuery.refetch()
     if (result.error) {
       const message = result.error.message || "Failed to load project IDs."
-      setAuthStatus({ tone: "error", message })
       toast.error(message)
     }
   }
@@ -132,11 +123,11 @@ export function FirestoreHeader({ tab, onOpenAddTab }: FirestoreHeaderProps) {
     const normalizedDatabaseId = databaseId.trim()
 
     if (!credentialsFile) {
-      setAuthStatus({ tone: "warning", message: "Choose a credentials JSON file first." })
+      toast.warning("Choose a credentials JSON file first.")
       return
     }
     if (!normalizedProjectId) {
-      setAuthStatus({ tone: "warning", message: "Select a project ID first." })
+      toast.warning("Select a project ID first.")
       return
     }
 
@@ -149,18 +140,14 @@ export function FirestoreHeader({ tab, onOpenAddTab }: FirestoreHeaderProps) {
       const duplicateTab = findTabByContext(normalizedProjectId, normalizedDatabaseId)
       if (duplicateTab && duplicateTab.id !== tab.id) {
         setActiveTabId(duplicateTab.id)
-        setAuthStatus({ tone: "success", message: `Switched to existing tab: ${duplicateTab.label}.` })
+        toast.success(`Switched to existing tab: ${duplicateTab.label}.`)
         return
       }
 
       updateTabContext(tab.id, normalizedProjectId, normalizedDatabaseId)
-      setAuthStatus({
-        tone: "success",
-        message: `Switched context to ${normalizedProjectId} / ${normalizedDatabaseId || "(default)"}.`,
-      })
+      toast.success(`Switched context to ${normalizedProjectId} / ${normalizedDatabaseId || "(default)"}.`)
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to initialize Firestore."
-      setAuthStatus({ tone: "error", message })
       toast.error(message)
     }
   }

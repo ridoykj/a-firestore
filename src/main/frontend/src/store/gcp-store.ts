@@ -7,7 +7,6 @@ import {
   useState,
   type ReactNode,
 } from "react"
-import { type StatusMessage } from "@/dto/firestore/FirestoreSchema"
 
 export interface ProjectTab {
   id: string;
@@ -20,7 +19,6 @@ export interface GcpState {
   credentialsFile: File | null;
   openTabs: ProjectTab[];
   activeTabId: string;
-  authStatus: StatusMessage | null;
 
   setCredentialsFile: (file: File | null) => void;
   findTabByContext: (projectId: string, databaseId: string) => ProjectTab | undefined;
@@ -29,7 +27,6 @@ export interface GcpState {
   removeTab: (tabId: string) => void;
   setActiveTabId: (tabId: string) => void;
   clearTabs: () => void;
-  setAuthStatus: (status: StatusMessage | null) => void;
 }
 
 function normalizeDatabaseId(databaseId: string): string {
@@ -53,7 +50,6 @@ export function GcpStoreProvider({ children }: { children: ReactNode }) {
   const [credentialsFile, setCredentialsFile] = useState<File | null>(null)
   const [openTabs, setOpenTabs] = useState<ProjectTab[]>([])
   const [activeTabId, setActiveTabId] = useState("")
-  const [authStatus, setAuthStatus] = useState<StatusMessage | null>(null)
 
   const findTabByContext = useCallback(
     (projectId: string, databaseId: string) => {
@@ -115,7 +111,6 @@ export function GcpStoreProvider({ children }: { children: ReactNode }) {
       credentialsFile,
       openTabs,
       activeTabId,
-      authStatus,
       setCredentialsFile,
       findTabByContext,
       updateTabContext,
@@ -123,20 +118,17 @@ export function GcpStoreProvider({ children }: { children: ReactNode }) {
       removeTab,
       setActiveTabId,
       clearTabs,
-      setAuthStatus,
     }),
     [
       credentialsFile,
       openTabs,
       activeTabId,
-      authStatus,
       findTabByContext,
       updateTabContext,
       addTab,
       removeTab,
       setActiveTabId,
       clearTabs,
-      setAuthStatus,
     ],
   )
 

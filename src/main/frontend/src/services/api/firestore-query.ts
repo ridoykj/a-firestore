@@ -64,3 +64,30 @@ export function useFirestoreInitMutation() {
     }) => firestoreService.initFirestore(projectId, credentialsFile, databaseId),
   })
 }
+
+export function useFirestoreTransferInitMutation() {
+  return useMutation({
+    mutationFn: (file: File) => firestoreService.initTransfer(file),
+  })
+}
+
+export function useFirestoreTransferInitSourceMutation() {
+  return useMutation({
+    mutationFn: (args: { projectId: string; databaseId: string; serviceAccountJson: string }) =>
+      firestoreService.initSourceDb(args.projectId, args.databaseId, args.serviceAccountJson),
+  })
+}
+
+export function useFirestoreTransferDeepCopyMutation() {
+  return useMutation({
+    mutationFn: (payload: {
+      sourceProjectId: string
+      sourceDatabaseId: string
+      sourcePaths: string[]
+      targetProjectId: string
+      targetDatabaseId: string
+      targetBasePath: string
+      conflictResolution: "MERGE" | "OVERWRITE"
+    }) => firestoreService.deepCopy(payload),
+  })
+}

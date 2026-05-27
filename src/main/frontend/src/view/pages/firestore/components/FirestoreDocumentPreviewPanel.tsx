@@ -2,7 +2,6 @@ import { lazy, Suspense, useState } from "react"
 import type {
   PreviewEditorTheme,
   PreviewValidationSummary,
-  StatusMessage,
   TransferFormat,
 } from "@/dto/firestore/FirestoreSchema"
 import { FirestoreJsonTreeViewer } from "@/view/pages/firestore/components/FirestoreJsonTreeViewer"
@@ -72,7 +71,6 @@ type FirestoreDocumentPreviewPanelProps = {
   onDraftChange: (value: string) => void
   activeTab: PreviewTab
   onActiveTabChange: (value: PreviewTab) => void
-  status: StatusMessage | null
   busyAction: PreviewBusy
   editorTheme: PreviewEditorTheme
   onEditorThemeChange: (value: PreviewEditorTheme) => void
@@ -94,7 +92,6 @@ export function FirestoreDocumentPreviewPanel({
   onDraftChange,
   activeTab,
   onActiveTabChange,
-  status,
   busyAction,
   editorTheme,
   onEditorThemeChange,
@@ -111,28 +108,11 @@ export function FirestoreDocumentPreviewPanel({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [formatRequestVersion, setFormatRequestVersion] = useState(0)
   const isPending = busyAction !== null
-  const statusMessage = status?.message.toLowerCase() ?? ""
 
   const normalizedPath = normalizePath(documentPath)
   const pathIsInvalid = !normalizedPath || pathIsCollection(normalizedPath)
   const payloadMissing = attemptedJsonSubmit && !draft.trim()
-  const payloadInvalidByStatus =
-    status?.tone !== "success" &&
-    (statusMessage.includes("payload") || statusMessage.includes("json"))
   const jsonHasValidationErrors = validation.errorCount > 0
-
-  const statusAlert = status ? (
-    <Alert variant={status.tone === "error" ? "destructive" : "default"}>
-      <AlertTitle>
-        {status.tone === "success"
-          ? "Success"
-          : status.tone === "warning"
-            ? "Needs Attention"
-            : "Request Failed"}
-      </AlertTitle>
-      <AlertDescription>{status.message}</AlertDescription>
-    </Alert>
-  ) : null
 
   function closePanel() {
     if (isPending) {
@@ -326,9 +306,9 @@ export function FirestoreDocumentPreviewPanel({
 
                 <TabsContent
                   value="tree"
-                  className="min-h-0 flex-1"
+                  className="flex min-h-0 flex-1"
                 >
-                  <FirestoreJsonTreeViewer draft={draft} />
+                  <FirestoreJsonTreeViewer draft={draft} onDraftChange={onDraftChange} />
                 </TabsContent>
 
                 <TabsContent
@@ -341,7 +321,7 @@ export function FirestoreDocumentPreviewPanel({
                 <TabsContent value="json" className="flex min-h-0 flex-1 flex-col gap-3">
                   <Field
                     className="min-h-0 flex-1"
-                    data-invalid={payloadMissing || payloadInvalidByStatus || jsonHasValidationErrors}
+                    data-invalid={payloadMissing || jsonHasValidationErrors}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <FieldLabel htmlFor="preview-json-payload">JSON Payload</FieldLabel>
@@ -374,8 +354,6 @@ export function FirestoreDocumentPreviewPanel({
                   </Field>
                 </TabsContent>
               </Tabs>
-
-              {statusAlert}
             </FieldGroup>
           </div>
 

@@ -64,11 +64,6 @@ export type WhereRow = {
   type: WhereType
 }
 
-export type StatusMessage = {
-  tone: StatusTone
-  message: string
-}
-
 export type CrudBusy = "create" | "update" | "replace" | "delete" | null
 
 export type PreviewEditorTheme = "light" | "dark"

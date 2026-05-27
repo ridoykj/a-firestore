@@ -18,7 +18,6 @@ import {
 import { Input } from "@/shadcn/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shadcn/components/ui/select"
 import { Spinner } from "@/shadcn/components/ui/spinner"
-import { cn } from "@/shadcn/lib/utils"
 
 interface AddTabDialogProps {
   open: boolean
@@ -44,9 +43,7 @@ function buildTab(projectId: string, databaseId: string): ProjectTab {
 export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogProps) {
   const {
     credentialsFile,
-    authStatus,
     setCredentialsFile,
-    setAuthStatus,
   } = useGcpStore()
   const [selectedProject, setSelectedProject] = useState("")
   const [selectedDatabase, setSelectedDatabase] = useState("")
@@ -74,26 +71,23 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
       return
     }
     const message = databasesQuery.error.message || "Failed to load databases."
-    setAuthStatus({ tone: "error", message })
     toast.error(message)
-  }, [databasesQuery.error, databasesQuery.errorUpdatedAt, setAuthStatus])
+  }, [databasesQuery.error, databasesQuery.errorUpdatedAt])
 
   useEffect(() => {
     if (databasesQuery.dataUpdatedAt === 0) {
       return
     }
-    setAuthStatus({
-      tone: "success",
-      message:
-        databases.length > 0
-          ? `Loaded ${databases.length} database ID(s).`
-          : "No explicit database IDs found. '(default)' will be used.",
-    })
-  }, [databases, databasesQuery.dataUpdatedAt, setAuthStatus])
+    toast.success(
+      databases.length > 0
+        ? `Loaded ${databases.length} database ID(s).`
+        : "No explicit database IDs found. '(default)' will be used.",
+    )
+  }, [databases, databasesQuery.dataUpdatedAt])
 
   async function handleLoadProjects() {
     if (!credentialsFile) {
-      setAuthStatus({ tone: "warning", message: "Choose a credentials JSON file first." })
+      toast.warning("Choose a credentials JSON file first.")
       return
     }
 
@@ -102,7 +96,6 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
     const result = await projectsQuery.refetch()
     if (result.error) {
       const message = result.error.message || "Failed to load project IDs."
-      setAuthStatus({ tone: "error", message })
       toast.error(message)
       return
     }
@@ -110,21 +103,20 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
     const loadedProjects = result.data ?? []
     const initialProject = loadedProjects[0] ?? ""
     setSelectedProject(initialProject)
-    setAuthStatus({
-      tone: initialProject ? "success" : "warning",
-      message: initialProject
-        ? `Loaded ${loadedProjects.length} project ID(s).`
-        : "No accessible project IDs found with the uploaded credentials.",
-    })
+    if (initialProject) {
+      toast.success(`Loaded ${loadedProjects.length} project ID(s).`)
+    } else {
+      toast.warning("No accessible project IDs found with the uploaded credentials.")
+    }
   }
 
   async function handleCreateTab() {
     if (!credentialsFile) {
-      setAuthStatus({ tone: "warning", message: "Choose a credentials JSON file first." })
+      toast.warning("Choose a credentials JSON file first.")
       return
     }
     if (!selectedProject) {
-      setAuthStatus({ tone: "warning", message: "Select a project ID first." })
+      toast.warning("Select a project ID first.")
       return
     }
 
@@ -136,12 +128,10 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
       })
       const tab = buildTab(selectedProject, selectedDatabase)
       onTabCreated(tab)
-      setAuthStatus({ tone: "success", message: `Connected to ${tab.label}.` })
       toast.success(`Opened tab for ${tab.label}`)
       onOpenChange(false)
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to initialize Firestore."
-      setAuthStatus({ tone: "error", message })
       toast.error(message)
     }
   }
@@ -167,7 +157,6 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
                 setCredentialsFile(nextFile)
                 setSelectedProject("")
                 setSelectedDatabase("")
-                setAuthStatus(null)
               }}
             />
             <Button
@@ -231,21 +220,6 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
               </SelectContent>
             </Select>
           </div>
-
-          {authStatus ? (
-            <div
-              className={cn(
-                "text-xs px-2 py-1.5 rounded-md",
-                authStatus.tone === "error"
-                  ? "bg-destructive/10 text-destructive"
-                  : authStatus.tone === "warning"
-                    ? "bg-warning/10 text-warning"
-                    : "bg-success/10 text-success",
-              )}
-            >
-              {authStatus.message}
-            </div>
-          ) : null}
         </div>
 
         <DialogFooter>
