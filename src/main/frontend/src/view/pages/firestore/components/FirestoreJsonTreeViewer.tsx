@@ -1,6 +1,9 @@
-﻿import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import JsonView from "@microlink/react-json-view"
 import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/alert"
+import { Badge } from "@/shadcn/components/ui/badge"
+import { Button } from "@/shadcn/components/ui/button"
+import { useIsMobile } from "@/shadcn/hooks/use-mobile"
 import { useTheme } from "next-themes"
 
 type FirestoreJsonTreeViewerProps = {
@@ -8,8 +11,12 @@ type FirestoreJsonTreeViewerProps = {
   onDraftChange?: (newDraft: string) => void
 }
 
+type CollapseMode = "auto" | "expand" | "compact"
+
 export function FirestoreJsonTreeViewer({ draft, onDraftChange }: FirestoreJsonTreeViewerProps) {
   const { resolvedTheme } = useTheme()
+  const isMobile = useIsMobile()
+  const [collapseMode, setCollapseMode] = useState<CollapseMode>("auto")
 
   const parsedJson = useMemo(() => {
     try {
@@ -23,7 +30,7 @@ export function FirestoreJsonTreeViewer({ draft, onDraftChange }: FirestoreJsonT
 
   if (parsedJson.parseError) {
     return (
-      <Alert variant="destructive">
+      <Alert variant="destructive" className="wrap-break-word">
         <AlertTitle>Tree View Unavailable</AlertTitle>
         <AlertDescription>
           {`Current JSON draft is invalid: ${parsedJson.parseError}`}
@@ -32,42 +39,94 @@ export function FirestoreJsonTreeViewer({ draft, onDraftChange }: FirestoreJsonT
     )
   }
 
-  if (!parsedJson.data) {
+  if (parsedJson.data === null || typeof parsedJson.data === "undefined") {
     return (
-      <Alert>
+      <Alert className="wrap-break-word">
         <AlertTitle>No Data</AlertTitle>
         <AlertDescription>There is no JSON data to render in tree view.</AlertDescription>
       </Alert>
     )
   }
 
-  const handleEdit = onDraftChange 
-    ? (interaction: { updated_src: object }) => onDraftChange(JSON.stringify(interaction.updated_src, null, 2))
+  const handleEdit = onDraftChange
+    ? (interaction: { updated_src: unknown }) =>
+        onDraftChange(JSON.stringify(interaction.updated_src, null, 2))
     : undefined
+
+  const collapsedDepth =
+    collapseMode === "expand" ? false : collapseMode === "compact" ? 2 : isMobile ? 1 : false
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex items-center justify-between pb-3">
-        <h3 className="font-semibold text-sm">Tree View</h3>
+      <div className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-base font-semibold">Tree View</h3>
+          <p className="text-sm text-muted-foreground">
+            Browse and edit JSON structure with nested expansion controls.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={onDraftChange ? "secondary" : "outline"}>
+            {onDraftChange ? "Editable" : "Read only"}
+          </Badge>
+          <Button
+            type="button"
+            variant={collapseMode === "auto" ? "secondary" : "outline"}
+            size="sm"
+            className="h-10"
+            aria-pressed={collapseMode === "auto"}
+            onClick={() => setCollapseMode("auto")}
+          >
+            Auto
+          </Button>
+          <Button
+            type="button"
+            variant={collapseMode === "compact" ? "secondary" : "outline"}
+            size="sm"
+            className="h-10"
+            aria-pressed={collapseMode === "compact"}
+            onClick={() => setCollapseMode("compact")}
+          >
+            Compact
+          </Button>
+          <Button
+            type="button"
+            variant={collapseMode === "expand" ? "secondary" : "outline"}
+            size="sm"
+            className="h-10"
+            aria-pressed={collapseMode === "expand"}
+            onClick={() => setCollapseMode("expand")}
+          >
+            Expand All
+          </Button>
+        </div>
       </div>
 
-      <div className="min-h-0 min-w-0 flex-1 overflow-auto rounded-md p-4 border wrap-break-word">
-        <JsonView 
-          src={parsedJson.data as object} 
-          theme={resolvedTheme === 'dark' ? 'ashes' : 'rjv-default'} 
-          displayDataTypes={false}
-          displayObjectSize={true}
-          enableClipboard={true}
-          collapseStringsAfterLength={50}
-          groupArraysAfterLength={100}
-          onEdit={handleEdit}
-          onAdd={handleEdit}
-          onDelete={handleEdit}
-          style={{ backgroundColor: 'transparent' }}
-        />
+      <div className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain rounded-md border bg-muted/10 p-2 sm:p-3 md:p-4 touch-pan-x">
+        <div className="min-w-max">
+          <JsonView
+            src={parsedJson.data as object}
+            theme={resolvedTheme === "dark" ? "ashes" : "rjv-default"}
+            displayDataTypes={false}
+            displayObjectSize={true}
+            enableClipboard={true}
+            collapseStringsAfterLength={isMobile ? 30 : 50}
+            groupArraysAfterLength={isMobile ? 60 : 100}
+            collapsed={collapsedDepth}
+            iconStyle="triangle"
+            indentWidth={2}
+            onEdit={handleEdit}
+            onAdd={handleEdit}
+            onDelete={handleEdit}
+            style={{
+              backgroundColor: "transparent",
+              fontSize: isMobile ? "12px" : "13px",
+              lineHeight: 1.5,
+            }}
+          />
+        </div>
       </div>
     </div>
   )
 }
-
-

@@ -1,42 +1,43 @@
-import { cn } from '@/shadcn/lib/utils';
-import { Handle, Position } from '@xyflow/react';
-import { memo } from 'react';
-import type { DataNodeData } from './jsonToGraph';
+import { cn } from "@/shadcn/lib/utils"
+import { Handle, Position } from "@xyflow/react"
+import { memo } from "react"
+import type { DataNodeData } from "./jsonToGraph"
 
 export const DataNode = memo(({ data }: { data: DataNodeData }) => {
   return (
-    <div className="bg-[#1a1c23] border border-[#3a3f4e] rounded-md shadow-md max-w-[400px] overflow-hidden font-mono text-xs">
+    <div className="max-w-[420px] overflow-hidden rounded-md border bg-card text-card-foreground shadow-sm">
       <Handle type="target" position={Position.Left} className="opacity-0" />
-      
-      <div className="flex flex-col p-2 max-h-75 overflow-y-auto no-scrollbar">
+
+      <div className="max-h-80 overflow-y-auto p-2 font-mono text-sm">
         {data.items.map((item, idx) => {
-          const isComplex = item.type === 'object' || item.type === 'array';
-          
+          const isComplex = item.type === "object" || item.type === "array"
+
           return (
-            <div key={idx} className="flex leading-6 gap-2 hover:bg-white/5 px-1 rounded-sm min-w-0">
-              <span className="text-[#61afef] font-medium shrink-0 truncate max-w-56" title={item.key}>
+            <div key={idx} className="flex min-w-0 gap-2 rounded-sm px-1 leading-6 hover:bg-muted/50">
+              <span className="max-w-56 shrink-0 truncate font-medium text-blue-600 dark:text-blue-400" title={item.key}>
                 {item.key}
-                <span className="text-muted-foreground font-normal ml-0.5">:</span>
+                <span className="ml-0.5 font-normal text-muted-foreground">:</span>
               </span>
-              
-              <span 
+
+              <span
                 className={cn(
-                  "truncate min-w-0 flex-1",
-                  item.type === 'string' && "text-[#98c379]",
-                  item.type === 'number' && "text-[#d19a66]",
-                  (item.type === 'boolean' || item.type === 'null') && "text-[#56b6c2]",
-                  isComplex && "text-muted-foreground font-medium"
+                  "min-w-0 flex-1 truncate",
+                  item.type === "string" && "text-emerald-600 dark:text-emerald-400",
+                  item.type === "number" && "text-amber-600 dark:text-amber-400",
+                  (item.type === "boolean" || item.type === "null") &&
+                    "text-cyan-700 dark:text-cyan-400",
+                  isComplex && "font-medium text-muted-foreground",
                 )}
-                title={item.type === 'string' ? `"${item.value}"` : item.value}
+                title={item.type === "string" ? `"${item.value}"` : item.value}
               >
-                {item.type === 'string' ? `"${item.value}"` : item.value}
+                {item.type === "string" ? `"${item.value}"` : item.value}
               </span>
             </div>
-          );
+          )
         })}
       </div>
 
       <Handle type="source" position={Position.Right} className="opacity-0" />
     </div>
-  );
-});
+  )
+})

@@ -2,13 +2,16 @@ import { useMemo, useState } from "react"
 import { Plus, X } from "lucide-react"
 import { Button } from "@/shadcn/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shadcn/components/ui/tabs"
+import { cn } from "@/shadcn/lib/utils"
 import { AddTabDialog } from "@/view/pages/firestore/components/AddTabDialog"
 import FirestorePage from "@/view/pages/firestore/FirestorePage"
 import { useGcpStore, type ProjectTab } from "@/store/gcp-store"
+import { useIsMobile } from "@/shadcn/hooks/use-mobile"
 
 export function FirestoreTabsLayout() {
   const { openTabs, activeTabId, addTab, removeTab, setActiveTabId } = useGcpStore()
   const [addDialogOpen, setAddDialogOpen] = useState(false)
+  const isMobile = useIsMobile()
 
   const activeValue = useMemo(() => {
     if (activeTabId) {
@@ -23,7 +26,7 @@ export function FirestoreTabsLayout() {
   }
 
   return (
-    <div className="h-screen w-full bg-muted/30">
+    <div className="flex min-h-0 h-full w-full flex-1 flex-col overflow-hidden bg-muted/30">
       <AddTabDialog
         open={addDialogOpen}
         onOpenChange={setAddDialogOpen}
@@ -31,10 +34,10 @@ export function FirestoreTabsLayout() {
       />
 
       {openTabs.length === 0 ? (
-        <div className="flex h-full items-center justify-center">
-          <div className="rounded-lg border bg-card p-6 text-center shadow-sm">
+        <div className="flex min-h-full items-center justify-center px-4 py-6">
+          <div className="w-full max-w-lg rounded-xl border bg-card p-6 text-center shadow-sm">
             <h2 className="text-lg font-semibold">No Firestore tabs yet</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-2 text-sm text-muted-foreground">
               Open a project/database connection to start browsing data.
             </p>
             <Button className="mt-4" onClick={() => setAddDialogOpen(true)}>
@@ -47,25 +50,36 @@ export function FirestoreTabsLayout() {
         <Tabs
           value={activeValue}
           onValueChange={setActiveTabId}
-          className="h-full gap-0"
+          className="flex min-h-0 flex-1 gap-0 overflow-hidden"
         >
-          <div className="border-b bg-card px-2 py-1.5">
-            <div className="flex items-center gap-2">
-              <TabsList className="h-auto max-w-[calc(100%-80px)] overflow-x-auto" variant="line">
+          <div className="border-b bg-card px-3 py-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <TabsList
+                className="h-auto min-w-0 flex-1 justify-start overflow-x-auto rounded-md border bg-muted/40 p-1"
+                variant="line"
+              >
                 {openTabs.map((tab) => (
-                  <TabsTrigger key={tab.id} value={tab.id} className="gap-2">
-                    <span className="max-w-52 truncate text-xs">{tab.label}</span>
-                    <button
+                  <div key={tab.id} className="group relative shrink-0">
+                    <TabsTrigger value={tab.id} className="min-w-0 max-w-60 gap-1.5 rounded-md pr-6">
+                      <span className="truncate text-sm">
+                        {isMobile ? tab.projectId : tab.label}
+                      </span>
+                    </TabsTrigger>
+                    <Button
                       type="button"
-                      className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={`Close tab ${tab.label}`}
+                      title={`Close tab ${tab.label}`}
+                      className="absolute top-1/2 right-0.5 z-10 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                       onClick={(event) => {
                         event.stopPropagation()
                         removeTab(tab.id)
                       }}
                     >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </TabsTrigger>
+                      <X />
+                    </Button>
+                  </div>
                 ))}
               </TabsList>
               <Button
@@ -76,7 +90,7 @@ export function FirestoreTabsLayout() {
                 onClick={() => setAddDialogOpen(true)}
               >
                 <Plus data-icon="inline-start" />
-                Add Tab
+                {!isMobile ? "Add Tab" : null}
               </Button>
             </div>
           </div>
@@ -86,9 +100,9 @@ export function FirestoreTabsLayout() {
               key={tab.id}
               value={tab.id}
               forceMount
-              className={tab.id === activeValue ? "h-[calc(100%-52px)]" : "hidden"}
+              className={cn("min-h-0 flex-1 overflow-hidden", tab.id === activeValue ? "flex" : "hidden")}
             >
-              <FirestorePage tab={tab} onOpenAddTab={() => setAddDialogOpen(true)} />
+              <FirestorePage tab={tab} />
             </TabsContent>
           ))}
         </Tabs>

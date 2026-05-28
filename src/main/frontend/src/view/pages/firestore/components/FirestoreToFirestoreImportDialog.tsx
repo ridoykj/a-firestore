@@ -1,5 +1,8 @@
 import { useMemo, useState, type ChangeEvent, type ReactNode } from "react"
 import { toast } from "sonner"
+import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/alert"
+import { Badge } from "@/shadcn/components/ui/badge"
+import { Button } from "@/shadcn/components/ui/button"
 import {
   Dialog,
   DialogContent,
@@ -7,14 +10,26 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/shadcn/components/ui/dialog"
-import { Button } from "@/shadcn/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shadcn/components/ui/select"
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/shadcn/components/ui/empty"
 import { Input } from "@/shadcn/components/ui/input"
-import { Spinner } from "@/shadcn/components/ui/spinner"
-import { RadioGroup, RadioGroupItem } from "@/shadcn/components/ui/radio-group"
 import { Label } from "@/shadcn/components/ui/label"
-import { CheckSquare, ChevronDown, ChevronRight, FileText, FileUp, Folder, Square } from "lucide-react"
-import { useGcpStore, type ProjectTab } from "@/store/gcp-store"
+import { RadioGroup, RadioGroupItem } from "@/shadcn/components/ui/radio-group"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shadcn/components/ui/select"
+import { Spinner } from "@/shadcn/components/ui/spinner"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shadcn/components/ui/table"
+import {
+  AlertCircle,
+  CheckSquare,
+  ChevronDown,
+  ChevronRight,
+  CloudDownload,
+  FileText,
+  FileUp,
+  Folder,
+  ShieldAlert,
+  Square,
+} from "lucide-react"
+import type { NestedNode } from "@/dto/firestore/FirestoreSchema"
 import {
   useFirestoreDatabasesQuery,
   useFirestoreInitMutation,
@@ -22,7 +37,7 @@ import {
   useFirestoreTransferDeepCopyMutation,
 } from "@/services/api/firestore-query"
 import { firestoreService } from "@/services/api/firestore-service"
-import type { NestedNode } from "@/dto/firestore/FirestoreSchema"
+import { useGcpStore, type ProjectTab } from "@/store/gcp-store"
 
 interface FirestoreToFirestoreImportDialogProps {
   context: ProjectTab & { activePath: string }
@@ -41,6 +56,16 @@ interface TreeNode {
   children?: TreeNode[]
   isLoaded: boolean
   isLoading: boolean
+}
+
+const STEP_SEQUENCE: Step[] = ["AUTH", "SELECT", "SUMMARY", "CONFLICT", "EXECUTE"]
+
+const STEP_LABELS: Record<Step, string> = {
+  AUTH: "Source",
+  SELECT: "Select",
+  SUMMARY: "Summary",
+  CONFLICT: "Conflict",
+  EXECUTE: "Import",
 }
 
 function mapNestedNodesToTree(nodes: NestedNode[] | undefined, type: "collection" | "document"): TreeNode[] {
@@ -75,6 +100,7 @@ export function FirestoreToFirestoreImportDialog({
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
   const [firebasePathInput, setFirebasePathInput] = useState("")
   const [conflictResolution, setConflictResolution] = useState<ConflictResolution>("MERGE")
+  const [authAttempted, setAuthAttempted] = useState(false)
 
   const activeCredentialsFile = useCustomCredentials ? customCredentialsFile : globalCredentialsFile
   const sourceCredentialsReady = Boolean(activeCredentialsFile)
@@ -101,6 +127,10 @@ export function FirestoreToFirestoreImportDialog({
   const projects = projectsQuery.data ?? []
   const databases = databasesQuery.data ?? []
 
+  const stepIndex = Math.max(STEP_SEQUENCE.indexOf(step), 0)
+  const sourceProjectMissing = authAttempted && !sourceProjectId.trim()
+  const sourceCredentialsMissing = authAttempted && !activeCredentialsFile
+
   function resetState() {
     setStep("AUTH")
     setUseCustomCredentials(false)
@@ -112,6 +142,7 @@ export function FirestoreToFirestoreImportDialog({
     setSelectedPaths(new Set())
     setFirebasePathInput("")
     setConflictResolution("MERGE")
+    setAuthAttempted(false)
   }
 
   function handleOpenChange(nextOpen: boolean) {
@@ -126,6 +157,7 @@ export function FirestoreToFirestoreImportDialog({
     setUseCustomCredentials(customMode)
     setSourceProjectId("")
     setSourceDatabaseId("")
+    setAuthAttempted(false)
   }
 
   function handleCustomFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -133,6 +165,7 @@ export function FirestoreToFirestoreImportDialog({
     setCustomCredentialsFile(file)
     setSourceProjectId("")
     setSourceDatabaseId("")
+    setAuthAttempted(false)
   }
 
   function handleProjectChange(nextProjectId: string) {
@@ -145,6 +178,8 @@ export function FirestoreToFirestoreImportDialog({
   }
 
   async function proceedToSelect() {
+    setAuthAttempted(true)
+
     if (!sourceProjectId.trim()) {
       toast.error("Please select a source project ID.")
       return
@@ -368,13 +403,14 @@ export function FirestoreToFirestoreImportDialog({
         return (
           <div key={node.path} className="flex flex-col">
             <div
-              className="flex items-center rounded py-1 hover:bg-muted/50"
+              className="flex items-center rounded-md py-1 hover:bg-muted/50"
               style={{ paddingLeft: `${depth * 1.25}rem` }}
             >
               <button
                 type="button"
-                className="mr-1 flex h-6 w-6 items-center justify-center"
+                className="mr-1 flex h-6 w-6 items-center justify-center rounded-sm hover:bg-muted"
                 onClick={() => toggleExpand(node.path, node.isLoaded)}
+                aria-label={`Toggle ${node.name}`}
               >
                 {node.isLoading ? (
                   <Spinner className="h-4 w-4" />
@@ -387,16 +423,17 @@ export function FirestoreToFirestoreImportDialog({
 
               <button
                 type="button"
-                className="mr-2"
+                className="mr-2 rounded-sm p-0.5 hover:bg-muted"
                 onClick={() => toggleSelect(node.path)}
                 title={isSelected ? "Unselect" : "Select"}
+                aria-label={isSelected ? `Unselect ${node.name}` : `Select ${node.name}`}
               >
                 {isSelected ? <CheckSquare className="h-4 w-4 text-primary" /> : <Square className="h-4 w-4" />}
               </button>
 
               <button
                 type="button"
-                className="flex flex-1 items-center gap-2 text-left"
+                className="flex flex-1 items-center gap-2 rounded-sm px-1 py-0.5 text-left hover:bg-muted"
                 onClick={() => toggleExpand(node.path, node.isLoaded)}
               >
                 {node.type === "collection" ? (
@@ -404,7 +441,7 @@ export function FirestoreToFirestoreImportDialog({
                 ) : (
                   <FileText className="h-4 w-4 text-orange-500" />
                 )}
-                <span className="font-mono text-sm">{node.name}</span>
+                <span className="truncate font-mono text-sm">{node.name}</span>
               </button>
             </div>
 
@@ -448,244 +485,333 @@ export function FirestoreToFirestoreImportDialog({
     }
   }
 
+  function handleBack() {
+    if (step === "SELECT") {
+      setStep("AUTH")
+      return
+    }
+    if (step === "SUMMARY") {
+      setStep("SELECT")
+      return
+    }
+    if (step === "CONFLICT") {
+      setStep("SUMMARY")
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="w-[95vw] max-w-[95vw] min-h-[60vh] max-h-[90vh] overflow-y-auto flex flex-col sm:w-[80vw] sm:max-w-[80vw]">
-        <DialogHeader>
-          <DialogTitle>Import from Firestore</DialogTitle>
-          <DialogDescription>
-            Deep copy nested collections and documents from an external Firestore database.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex flex-1 flex-col overflow-hidden py-4">
-          {step === "AUTH" && (
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <Label>Source Credentials</Label>
-                <Select value={useCustomCredentials ? "custom" : "global"} onValueChange={handleCredentialsMode}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="global">Use global credentials</SelectItem>
-                    <SelectItem value="custom">Upload source credentials</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                {useCustomCredentials ? (
-                  <div className="rounded-md border border-dashed p-3">
-                    <Label htmlFor="source-credentials-file" className="mb-2 flex items-center gap-2">
-                      <FileUp className="h-4 w-4" />
-                      Upload JSON Credentials
-                    </Label>
-                    <Input
-                      id="source-credentials-file"
-                      type="file"
-                      accept=".json,application/json"
-                      onChange={handleCustomFileChange}
-                    />
-                    {customCredentialsFile ? (
-                      <p className="mt-2 text-xs text-muted-foreground">Selected: {customCredentialsFile.name}</p>
-                    ) : null}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    {globalCredentialsFile
-                      ? `Using global credentials: ${globalCredentialsFile.name}`
-                      : "No global credentials uploaded yet."}
-                  </p>
-                )}
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <Label className="flex items-center gap-1.5">
-                    Source Project ID
-                    {projectsQuery.isFetching ? <Spinner className="ml-1 inline-block h-3 w-3" /> : null}
-                  </Label>
-                  <Select
-                    value={sourceProjectId || undefined}
-                    onValueChange={handleProjectChange}
-                    disabled={!sourceCredentialsReady || projectsQuery.isFetching || projects.length === 0}
-                  >
-                    <SelectTrigger className="mt-1">
-                      <SelectValue placeholder={sourceCredentialsReady ? "Load projects" : "Upload credentials"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {projects.map((project) => (
-                        <SelectItem key={project} value={project}>
-                          {project}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label className="flex items-center gap-1.5">
-                    Source Database
-                    {databasesQuery.isFetching ? <Spinner className="ml-1 inline-block h-3 w-3" /> : null}
-                  </Label>
-                  <Select
-                    value={sourceDatabaseId || "__default__"}
-                    onValueChange={handleDatabaseChange}
-                    disabled={!sourceProjectId || databasesQuery.isFetching}
-                  >
-                    <SelectTrigger className="mt-1">
-                      <SelectValue placeholder={normalizedDatabaseLabel} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__default__">(default)</SelectItem>
-                      {databases.map((database) => (
-                        <SelectItem key={database} value={database}>
-                          {database}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
+      <DialogContent className="max-h-[92vh] w-[96vw] max-w-5xl gap-0 overflow-hidden p-0 sm:w-[90vw] md:w-[84vw]">
+        <DialogHeader className="border-b px-4 py-4 sm:px-5">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <DialogTitle className="inline-flex items-center gap-2">
+                <CloudDownload className="text-primary" />
+                Import from Firestore
+              </DialogTitle>
+              <DialogDescription className="mt-1">
+                Deep copy nested collections/documents into <strong>{context.projectId}</strong>
+                {" / "}
+                <strong>{context.databaseId || "(default)"}</strong>.
+              </DialogDescription>
             </div>
-          )}
-
-          {step === "SELECT" && (
-            <div className="flex flex-1 flex-col min-h-0 space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <Label>Select Paths to Import</Label>
-                <div className="flex w-full max-w-md items-center gap-2">
-                  <Input
-                    placeholder="Firebase path (e.g. channels/UC-...)"
-                    className="h-8"
-                    value={firebasePathInput}
-                    onChange={(event) => setFirebasePathInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault()
-                        void handleLoadFirebasePath()
-                      }
-                    }}
-                  />
-                  <Button type="button" size="sm" variant="outline" onClick={() => void handleLoadFirebasePath()}>
-                    Load
-                  </Button>
-                </div>
-              </div>
-              <div className="flex-1 overflow-auto rounded-md border bg-background p-2">
-                {renderTree(tree)}
-              </div>
-              <div className="text-sm text-muted-foreground">Selected: {selectedPaths.size} items</div>
-            </div>
-          )}
-
-          {step === "SUMMARY" && (
-            <div className="flex flex-1 flex-col min-h-0 space-y-4">
-              <Label>Import Summary</Label>
-              <div className="flex-1 overflow-auto rounded-md border">
-                <table className="w-full text-left text-sm">
-                  <thead className="sticky top-0 bg-muted text-xs uppercase">
-                    <tr>
-                      <th className="border-b border-r px-4 py-2">Source Path</th>
-                      <th className="border-b px-4 py-2">Destination Path</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {summaryItems.map((item, index) => (
-                      <tr key={`${item.source}-${index}`} className="border-b last:border-0 hover:bg-muted/50">
-                        <td className="border-r px-4 py-2 font-mono text-xs text-muted-foreground">{item.source}</td>
-                        <td className="px-4 py-2 font-mono text-xs text-primary">{item.target}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {step === "CONFLICT" && (
-            <div className="space-y-6">
-              <Label>Conflict Resolution</Label>
-              <RadioGroup
-                value={conflictResolution}
-                onValueChange={(value) => setConflictResolution(value as ConflictResolution)}
-                className="space-y-3"
-              >
-                <div className="flex items-center space-x-3 rounded-md border p-4">
-                  <RadioGroupItem value="MERGE" id="merge" />
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="merge">Merge Data</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Existing documents will be updated. New fields are added, existing fields are overwritten.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-3 rounded-md border p-4">
-                  <RadioGroupItem value="OVERWRITE" id="overwrite" />
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="overwrite">Overwrite (Replace)</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Existing documents will be completely replaced. Fields not present in the source will be deleted.
-                    </p>
-                  </div>
-                </div>
-              </RadioGroup>
-            </div>
-          )}
-
-          {step === "EXECUTE" && (
-            <div className="flex flex-1 flex-col items-center justify-center space-y-4">
-              <Spinner className="h-12 w-12 text-primary" />
-              <div className="text-center">
-                <h3 className="text-lg font-semibold">Copying Data...</h3>
-                <p className="text-sm text-muted-foreground">
-                  This may take a few moments depending on the size of the selection.
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="mt-4 flex justify-between">
-          <div>
-            {step !== "AUTH" && step !== "EXECUTE" ? (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  if (step === "SELECT") {
-                    setStep("AUTH")
-                  } else if (step === "SUMMARY") {
-                    setStep("SELECT")
-                  } else if (step === "CONFLICT") {
-                    setStep("SUMMARY")
-                  }
-                }}
-              >
-                Back
-              </Button>
-            ) : null}
+            <Badge variant="outline">Step {stepIndex + 1} of {STEP_SEQUENCE.length}</Badge>
           </div>
 
-          <div className="flex gap-2">
-            <Button variant="ghost" onClick={() => handleOpenChange(false)} disabled={step === "EXECUTE"}>
-              Cancel
-            </Button>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {STEP_SEQUENCE.map((value, index) => {
+              const reached = index <= stepIndex
+              const active = value === step
+              return (
+                <Badge key={value} variant={active ? "secondary" : reached ? "outline" : "ghost"}>
+                  {STEP_LABELS[value]}
+                </Badge>
+              )
+            })}
+          </div>
+        </DialogHeader>
 
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-5">
             {step === "AUTH" ? (
-              <Button onClick={() => void proceedToSelect()} disabled={!sourceProjectId || initFirestoreMutation.isPending}>
-                {initFirestoreMutation.isPending ? <Spinner className="mr-2 h-4 w-4" /> : null}
-                Next
-              </Button>
+              <div className="space-y-4">
+                <div className="rounded-lg border bg-card p-4">
+                  <Label className="text-sm font-medium">Source Credentials</Label>
+                  <div className="mt-2 grid gap-3">
+                    <Select value={useCustomCredentials ? "custom" : "global"} onValueChange={handleCredentialsMode}>
+                      <SelectTrigger className="h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="global">Use global credentials</SelectItem>
+                        <SelectItem value="custom">Upload source credentials</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {useCustomCredentials ? (
+                      <div className="rounded-md border border-dashed bg-muted/20 p-3">
+                        <Label htmlFor="source-credentials-file" className="mb-2 flex items-center gap-2">
+                          <FileUp className="h-4 w-4" />
+                          Upload JSON Credentials
+                        </Label>
+                        <Input
+                          id="source-credentials-file"
+                          type="file"
+                          accept=".json,application/json"
+                          onChange={handleCustomFileChange}
+                        />
+                        {customCredentialsFile ? (
+                          <p className="mt-2 text-xs text-muted-foreground">Selected: {customCredentialsFile.name}</p>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        {globalCredentialsFile
+                          ? `Using global credentials: ${globalCredentialsFile.name}`
+                          : "No global credentials uploaded yet."}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border bg-card p-4">
+                  <Label className="text-sm font-medium">Source Context</Label>
+                  <div className="mt-2 grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label className="flex items-center gap-1.5 text-sm">
+                        Source Project ID
+                        {projectsQuery.isFetching ? <Spinner className="inline-block h-3 w-3" /> : null}
+                      </Label>
+                      <Select
+                        value={sourceProjectId || undefined}
+                        onValueChange={handleProjectChange}
+                        disabled={!sourceCredentialsReady || projectsQuery.isFetching || projects.length === 0}
+                      >
+                        <SelectTrigger className="h-9">
+                          <SelectValue placeholder={sourceCredentialsReady ? "Load projects" : "Upload credentials"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {projects.map((project) => (
+                            <SelectItem key={project} value={project}>
+                              {project}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label className="flex items-center gap-1.5 text-sm">
+                        Source Database
+                        {databasesQuery.isFetching ? <Spinner className="inline-block h-3 w-3" /> : null}
+                      </Label>
+                      <Select
+                        value={sourceDatabaseId || "__default__"}
+                        onValueChange={handleDatabaseChange}
+                        disabled={!sourceProjectId || databasesQuery.isFetching}
+                      >
+                        <SelectTrigger className="h-9">
+                          <SelectValue placeholder={normalizedDatabaseLabel} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__default__">(default)</SelectItem>
+                          {databases.map((database) => (
+                            <SelectItem key={database} value={database}>
+                              {database}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+
+                {sourceCredentialsMissing || sourceProjectMissing ? (
+                  <Alert variant="destructive">
+                    <AlertCircle />
+                    <AlertTitle>Source setup required</AlertTitle>
+                    <AlertDescription>
+                      {sourceCredentialsMissing
+                        ? "Provide source credentials before continuing."
+                        : "Select a source project ID before continuing."}
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+              </div>
             ) : null}
 
             {step === "SELECT" ? (
-              <Button onClick={() => setStep("SUMMARY")} disabled={selectedPaths.size === 0}>
-                Next
-              </Button>
+              <div className="space-y-4">
+                <div className="rounded-lg border bg-card p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Label className="text-sm font-medium">Select Paths to Import</Label>
+                    <Badge variant="outline">Selected: {selectedPaths.size}</Badge>
+                  </div>
+
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <Input
+                      placeholder="Firebase path (e.g. channels/UC-...)"
+                      className="h-9"
+                      value={firebasePathInput}
+                      onChange={(event) => setFirebasePathInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault()
+                          void handleLoadFirebasePath()
+                        }
+                      }}
+                    />
+                    <Button type="button" size="sm" variant="outline" className="h-9 sm:w-auto" onClick={() => void handleLoadFirebasePath()}>
+                      Load
+                    </Button>
+                  </div>
+
+                  <div className="mt-3 max-h-[48vh] overflow-auto rounded-md border bg-background p-2">
+                    {tree.length > 0 ? renderTree(tree) : (
+                      <Empty className="border-none p-4">
+                        <EmptyHeader>
+                          <EmptyTitle>No paths loaded yet</EmptyTitle>
+                          <EmptyDescription>Load root collections or a Firebase path to start selecting.</EmptyDescription>
+                        </EmptyHeader>
+                      </Empty>
+                    )}
+                  </div>
+                </div>
+              </div>
             ) : null}
 
-            {step === "SUMMARY" ? <Button onClick={() => setStep("CONFLICT")}>Next</Button> : null}
+            {step === "SUMMARY" ? (
+              <div className="space-y-4">
+                <div className="rounded-lg border bg-card p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-sm font-medium">Import Summary</Label>
+                    <Badge variant="outline">{summaryItems.length} item(s)</Badge>
+                  </div>
 
-            {step === "CONFLICT" ? <Button onClick={() => void executeCopy()}>Confirm & Import</Button> : null}
+                  <div className="mt-3 max-h-[46vh] overflow-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="sticky top-0 bg-background/95">Source Path</TableHead>
+                          <TableHead className="sticky top-0 bg-background/95">Destination Path</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {summaryItems.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={2} className="py-6 text-center text-sm text-muted-foreground">
+                              No selected paths.
+                            </TableCell>
+                          </TableRow>
+                        ) : null}
+                        {summaryItems.map((item, index) => (
+                          <TableRow key={`${item.source}-${index}`}>
+                            <TableCell className="font-mono text-xs text-muted-foreground">{item.source}</TableCell>
+                            <TableCell className="font-mono text-xs text-primary">{item.target}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {step === "CONFLICT" ? (
+              <div className="space-y-4">
+                <div className="rounded-lg border bg-card p-4">
+                  <Label className="text-sm font-medium">Conflict Resolution</Label>
+                  <RadioGroup
+                    value={conflictResolution}
+                    onValueChange={(value) => setConflictResolution(value as ConflictResolution)}
+                    className="mt-3 space-y-3"
+                  >
+                    <div className="flex items-start space-x-3 rounded-md border p-4">
+                      <RadioGroupItem value="MERGE" id="merge" />
+                      <div className="grid gap-1.5">
+                        <Label htmlFor="merge">Merge Data</Label>
+                        <p className="text-sm text-muted-foreground">
+                          Existing documents will be updated. New fields are added, existing fields are overwritten.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-start space-x-3 rounded-md border p-4">
+                      <RadioGroupItem value="OVERWRITE" id="overwrite" />
+                      <div className="grid gap-1.5">
+                        <Label htmlFor="overwrite">Overwrite (Replace)</Label>
+                        <p className="text-sm text-muted-foreground">
+                          Existing documents will be completely replaced. Fields not present in the source will be deleted.
+                        </p>
+                      </div>
+                    </div>
+                  </RadioGroup>
+                </div>
+
+                {conflictResolution === "OVERWRITE" ? (
+                  <Alert variant="destructive">
+                    <ShieldAlert />
+                    <AlertTitle>Destructive overwrite selected</AlertTitle>
+                    <AlertDescription>
+                      Existing destination documents can be fully replaced. Verify the summary before confirming import.
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+              </div>
+            ) : null}
+
+            {step === "EXECUTE" ? (
+              <div className="flex min-h-[320px] flex-col items-center justify-center space-y-4 rounded-lg border bg-card p-6 text-center">
+                <Spinner className="h-12 w-12 text-primary" />
+                <div>
+                  <h3 className="text-lg font-semibold">Copying Data...</h3>
+                  <p className="text-sm text-muted-foreground">
+                    This may take a few moments depending on the size of the selection.
+                  </p>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="border-t bg-background px-4 py-3 sm:px-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                {step !== "AUTH" && step !== "EXECUTE" ? (
+                  <Button variant="outline" onClick={handleBack}>
+                    Back
+                  </Button>
+                ) : null}
+              </div>
+
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+                <Button variant="ghost" onClick={() => handleOpenChange(false)} disabled={step === "EXECUTE"}>
+                  Cancel
+                </Button>
+
+                {step === "AUTH" ? (
+                  <Button onClick={() => void proceedToSelect()} disabled={!sourceProjectId || initFirestoreMutation.isPending}>
+                    {initFirestoreMutation.isPending ? <Spinner data-icon="inline-start" /> : null}
+                    Continue
+                  </Button>
+                ) : null}
+
+                {step === "SELECT" ? (
+                  <Button onClick={() => setStep("SUMMARY")} disabled={selectedPaths.size === 0}>
+                    Review Selection
+                  </Button>
+                ) : null}
+
+                {step === "SUMMARY" ? <Button onClick={() => setStep("CONFLICT")}>Set Conflict Policy</Button> : null}
+
+                {step === "CONFLICT" ? (
+                  <Button
+                    variant={conflictResolution === "OVERWRITE" ? "destructive" : "default"}
+                    onClick={() => void executeCopy()}
+                  >
+                    Confirm & Import
+                  </Button>
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
       </DialogContent>

@@ -5,7 +5,9 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { createRouter, RouterProvider } from '@tanstack/react-router'
 import { routeTree } from './routeTree.gen'
 import { GcpStoreProvider } from "@/store/gcp-store"
+import { ThemeProvider } from "@/shadcn/components/theme-provider"
 import './style.css'
+import { TooltipProvider } from './shadcn/components/ui/tooltip'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -32,11 +34,20 @@ declare module '@tanstack/react-router' {
 }
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <GcpStoreProvider>
-        <RouterProvider router={router} />
-        <ReactQueryDevtools initialIsOpen={false} />
-      </GcpStoreProvider>
-    </QueryClientProvider>
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="light"
+      enableSystem
+      disableTransitionOnChange
+    >
+      <QueryClientProvider client={queryClient}>
+        <GcpStoreProvider>
+          <TooltipProvider>
+            <RouterProvider router={router} />
+          </TooltipProvider>
+          {import.meta.env.DEV ? <ReactQueryDevtools initialIsOpen={false} /> : null}
+        </GcpStoreProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   </StrictMode>,
 )

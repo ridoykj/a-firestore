@@ -181,9 +181,9 @@ export function FirestoreDocumentPreviewPanel({
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
           side="right"
-          className="h-dvh max-h-dvh gap-0 rounded-none border-l p-0 data-[side=right]:w-screen data-[side=right]:max-w-none data-[side=right]:sm:w-[80vw] data-[side=right]:sm:max-w-none"
+          className="h-dvh max-h-dvh gap-0 rounded-none border-l p-0 data-[side=right]:w-screen data-[side=right]:max-w-none data-[side=right]:sm:w-[85vw] data-[side=right]:sm:max-w-none"
         >
-          <SheetHeader className="border-b px-4 py-3">
+          <SheetHeader className="border-b px-4 py-4">
             <SheetTitle className="flex flex-wrap items-center justify-between gap-2">
               <span className="inline-flex items-center gap-2">
                 <CheckCircle2 data-icon="inline-start" />
@@ -277,7 +277,7 @@ export function FirestoreDocumentPreviewPanel({
                 </div>
               </div>
             </SheetTitle>
-            <SheetDescription className="font-mono text-xs">
+            <SheetDescription className="font-mono text-sm">
               {documentId} {documentPath ? `- ${documentPath}` : ""}
             </SheetDescription>
           </SheetHeader>
@@ -289,7 +289,7 @@ export function FirestoreDocumentPreviewPanel({
                 onValueChange={(value) => onActiveTabChange(value as PreviewTab)}
                 className="min-h-0 flex-1 gap-3"
               >
-                <TabsList variant="line">
+                <TabsList variant="line" className="h-9">
                   <TabsTrigger value="tree">
                     <FolderTree data-icon="inline-start" />
                     Tree

@@ -3,9 +3,17 @@ import { Button } from "@/shadcn/components/ui/button"
 import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/alert"
 import { Input } from "@/shadcn/components/ui/input"
 import { Spinner } from "@/shadcn/components/ui/spinner"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/shadcn/components/ui/sheet"
 import { AlertCircle, ChevronLeft, Eye, FileText, Folder, RefreshCw } from "lucide-react"
 import { type NestedResponse } from "@/dto/firestore/FirestoreSchema"
 import { pathIsCollection } from "@/view/pages/firestore/lib/firestore-utils"
+import { cn } from "@/shadcn/lib/utils"
 
 interface FirestoreNestedTraverseProps {
   nestedLoading: boolean
@@ -20,6 +28,9 @@ interface FirestoreNestedTraverseProps {
   hasNextPage: boolean
   isFetchingNextPage: boolean
   fetchNextPage: () => void
+  drawerMode?: boolean
+  drawerOpen?: boolean
+  onDrawerOpenChange?: (open: boolean) => void
 }
 
 export function FirestoreNestedTraverse({
@@ -35,6 +46,9 @@ export function FirestoreNestedTraverse({
   hasNextPage,
   isFetchingNextPage,
   fetchNextPage,
+  drawerMode = false,
+  drawerOpen = false,
+  onDrawerOpenChange,
 }: FirestoreNestedTraverseProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
@@ -67,25 +81,23 @@ export function FirestoreNestedTraverse({
     return () => observer.disconnect()
   }, [fetchNextPage, hasNextPage, isFetchingNextPage, nestedIdFilter, nestedResponse?.currentPath])
 
-  return (
-    <aside className="w-72 shrink-0 border-r bg-card">
-      <div className="px-3 py-1 flex flex-col gap-2  border-b">
-        <div className="flex h-10 items-center border-b text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Nested Traverse
-        </div>
-        <div className="flex flex-col bg-card gap-2">
+  const content = (
+    <>
+      <div className="border-b px-3 py-3">
+        <div className="mb-2 text-sm font-semibold text-foreground/75">Nested Traverse</div>
+        <div className="flex flex-col gap-2">
           <Input
             value={nestedIdFilter}
             onChange={(event) => setNestedIdFilter(event.target.value)}
-            placeholder="Filter document/collection ID"
-            className="font-mono text-xs"
+            placeholder="Filter document or collection id"
+            className="h-9 font-mono text-sm"
           />
           <div className="flex flex-wrap gap-2">
             {nestedResponse?.parentPath ? (
               <Button
                 type="button"
                 variant="outline"
-                size="xs"
+                size="sm"
                 onClick={() => {
                   const parent = nestedResponse.parentPath
                   setQueryPath(`/${parent}`)
@@ -94,22 +106,31 @@ export function FirestoreNestedTraverse({
                   } else {
                     void refreshNested(parent)
                   }
+                  onDrawerOpenChange?.(false)
                 }}
               >
                 <ChevronLeft data-icon="inline-start" />
                 Up
               </Button>
             ) : null}
-            <Button type="button" variant="outline" size="xs" onClick={() => void refreshNested(queryPath)}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void refreshNested(queryPath)}
+              aria-label="Refresh nested traversal"
+              title="Refresh nested traversal"
+            >
               <RefreshCw data-icon="inline-start" />
               Refresh
             </Button>
           </div>
         </div>
       </div>
-      <div ref={scrollContainerRef} className="h-[calc(100%-2.5rem)] overflow-auto p-3">
+
+      <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-auto p-3">
         {nestedLoading ? (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Spinner />
             Loading...
           </div>
@@ -123,67 +144,69 @@ export function FirestoreNestedTraverse({
         ) : null}
 
         {!nestedLoading && !nestedResponse?.nestedError ? (
-
           <div className="grid gap-2">
-
             {nestedResponse?.nodeType === "collection"
               ? nestedResponse.documentNodes.map((node) => (
-                <div key={node.path} className="flex items-start gap-1">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-auto min-h-7 flex-1 justify-start rounded-md px-2 py-1.5 text-left text-xs"
-                    onClick={() => void refreshNested(node.path)}
-                  >
-                    <FileText data-icon="inline-start" aria-hidden="true" />
-                    <div className="grid min-w-0 gap-0.5">
-                      <span className="truncate font-medium">{node.id}</span>
-                      <span className="truncate text-muted-foreground">{node.path}</span>
-                    </div>
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant="outline"
-                    className="mt-1 shrink-0"
-                    aria-label={`Open Data Preview for ${node.id}`}
-                    title={`Open Data Preview for ${node.id}`}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      onOpenDocumentPreview(node.path, node.id)
-                    }}
-                  >
-                    <Eye aria-hidden="true" />
-                  </Button>
-                </div>
-              ))
+                  <div key={node.path} className="flex items-start gap-1.5">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-auto min-h-8 flex-1 justify-start rounded-md px-2.5 py-2 text-left text-sm"
+                      onClick={() => {
+                        void refreshNested(node.path)
+                        onDrawerOpenChange?.(false)
+                      }}
+                    >
+                      <FileText data-icon="inline-start" aria-hidden="true" />
+                      <div className="grid min-w-0 gap-0.5">
+                        <span className="truncate font-medium">{node.id}</span>
+                      </div>
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="outline"
+                      className="mt-1 shrink-0"
+                      aria-label={`Open Data Preview for ${node.id}`}
+                      title={`Open Data Preview for ${node.id}`}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onOpenDocumentPreview(node.path, node.id)
+                        onDrawerOpenChange?.(false)
+                      }}
+                    >
+                      <Eye aria-hidden="true" />
+                    </Button>
+                  </div>
+                ))
               : null}
 
             {nestedResponse?.nodeType === "document"
               ? nestedResponse.childCollectionNodes.map((node) => (
-                <Button
-                  key={node.path}
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-auto w-full justify-start rounded-md px-2 py-1.5 text-left text-xs"
-                  onClick={() => {
-                    setQueryPath(`/${node.path}`)
-                    void runQuery(0, node.path)
-                  }}
-                >
-                  <Folder data-icon="inline-start" aria-hidden="true" />
-                  <div className="grid min-w-0 gap-0.5">
-                    <span className="font-medium">{node.id}</span>
-                    <span className="truncate text-muted-foreground">{node.path}</span>
-                  </div>
-                </Button>
-              ))
+                  <Button
+                    key={node.path}
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-auto w-full justify-start rounded-md px-2.5 py-2 text-left text-sm"
+                    onClick={() => {
+                      setQueryPath(`/${node.path}`)
+                      void runQuery(0, node.path)
+                      onDrawerOpenChange?.(false)
+                    }}
+                  >
+                    <Folder data-icon="inline-start" aria-hidden="true" />
+                    <div className="grid min-w-0 gap-0.5">
+                      <span className="font-medium">{node.id}</span>
+                      {/* <span className="truncate text-muted-foreground">{node.path}</span> */}
+                    </div>
+                  </Button>
+                ))
               : null}
 
             {hasNextPage ? (
-              <div ref={sentinelRef} className="flex h-8 items-center justify-center text-xs text-muted-foreground">
+              <div ref={sentinelRef} className="flex h-8 items-center justify-center text-sm text-muted-foreground">
                 {isFetchingNextPage ? (
                   <>
                     <Spinner />
@@ -196,11 +219,31 @@ export function FirestoreNestedTraverse({
             ) : null}
 
             {nestedResponse?.nestedHint ? (
-              <p className="text-xs text-muted-foreground">{nestedResponse.nestedHint}</p>
+              <p className="text-sm text-muted-foreground">{nestedResponse.nestedHint}</p>
             ) : null}
           </div>
         ) : null}
       </div>
+    </>
+  )
+
+  if (drawerMode) {
+    return (
+      <Sheet open={drawerOpen} onOpenChange={onDrawerOpenChange}>
+        <SheetContent side="left" className="w-[90vw] max-w-md p-0">
+          <SheetHeader className="border-b px-4 py-3 text-left">
+            <SheetTitle>Nested Traverse</SheetTitle>
+            <SheetDescription>Navigate nested documents and collections.</SheetDescription>
+          </SheetHeader>
+          <div className="flex min-h-0 flex-1 flex-col">{content}</div>
+        </SheetContent>
+      </Sheet>
+    )
+  }
+
+  return (
+    <aside className="hidden w-72 shrink-0 border-r bg-card md:flex md:flex-col">
+      <div className={cn("flex min-h-0 flex-1 flex-col")}>{content}</div>
     </aside>
   )
 }

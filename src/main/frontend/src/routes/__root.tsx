@@ -42,7 +42,7 @@ export const Route = createRootRoute({
             <Suspense fallback={<AppErrorComponent />}>
                 <Outlet />
                 <Toaster richColors />
-                <TanStackRouterDevtools />
+                {import.meta.env.DEV ? <TanStackRouterDevtools /> : null}
             </Suspense>
             <Scripts />
         </>

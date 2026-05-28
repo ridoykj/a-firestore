@@ -1,12 +1,44 @@
+import { useMemo, useState } from "react"
 import type { QueryResponse } from "@/dto/firestore/FirestoreSchema"
 import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/alert"
 import { Badge } from "@/shadcn/components/ui/badge"
 import { Button } from "@/shadcn/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/shadcn/components/ui/dropdown-menu"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/shadcn/components/ui/empty"
+import { Input } from "@/shadcn/components/ui/input"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/shadcn/components/ui/pagination"
 import { Skeleton } from "@/shadcn/components/ui/skeleton"
 import { Spinner } from "@/shadcn/components/ui/spinner"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shadcn/components/ui/table"
-import { AlertCircle, ChevronLeft, ChevronRight } from "lucide-react"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/shadcn/components/ui/table"
+import {
+  AlertCircle,
+  CheckCircle2,
+  Eye,
+  Filter,
+  MoreHorizontal,
+  Search,
+  XCircle,
+} from "lucide-react"
 import { getPayloadOnly, normalizePath, safePreviewValue } from "@/view/pages/firestore/lib/firestore-utils"
 import { useIsMobile } from "@/shadcn/hooks/use-mobile"
 import { cn } from "@/shadcn/lib/utils"
@@ -27,6 +59,26 @@ type FirestoreQueryResultsProps = {
   queryStats: string
 }
 
+type StatusFilter = "all" | "previewable" | "selected"
+
+type RowModel = {
+  key: string
+  doc: Record<string, unknown>
+  documentPath: string
+  normalizedDocumentPath: string
+  documentId: string
+  payloadObject: Record<string, unknown>
+  rowPreviewDisabled: boolean
+  rowIsSelected: boolean
+  searchText: string
+}
+
+const STATUS_FILTER_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
+  { value: "all", label: "All rows" },
+  { value: "previewable", label: "Previewable only" },
+  { value: "selected", label: "Selected row only" },
+]
+
 export function FirestoreQueryResults({
   queryLoading,
   queryError,
@@ -39,21 +91,152 @@ export function FirestoreQueryResults({
   queryStats,
 }: FirestoreQueryResultsProps) {
   const isMobile = useIsMobile()
+  const [quickFilter, setQuickFilter] = useState("")
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
+
   const dataColumns = (queryResponse?.columns ?? []).filter((column) => column.name !== "id")
-  const emptyStateColumnSpan = dataColumns.length + 1
+  const emptyStateColumnSpan = dataColumns.length + 2
+  const queryDocuments = useMemo(() => queryResponse?.documents ?? [], [queryResponse?.documents])
+  const normalizedQuickFilter = quickFilter.trim().toLowerCase()
+
+  const rows = useMemo<RowModel[]>(() => {
+    return queryDocuments.map((rawDoc, index) => {
+      const doc = rawDoc as Record<string, unknown>
+      const documentPath = typeof doc._path === "string" ? doc._path : ""
+      const normalizedDocumentPath = normalizePath(documentPath)
+      const documentId = typeof doc.id === "string" ? doc.id : "(no-id)"
+      const payloadObject = getPayloadOnly(doc)
+      const rowPreviewDisabled = !documentPath
+      const rowIsSelected =
+        !!selectedPreviewPath && normalizePath(selectedPreviewPath) === normalizedDocumentPath
+      const valueSearch = dataColumns
+        .map((column) => safePreviewValue(doc[column.name]))
+        .join(" ")
+        .toLowerCase()
+
+      return {
+        key: `${documentPath || documentId}-${index}`,
+        doc,
+        documentPath,
+        normalizedDocumentPath,
+        documentId,
+        payloadObject,
+        rowPreviewDisabled,
+        rowIsSelected,
+        searchText: `${documentId} ${documentPath} ${valueSearch}`.toLowerCase(),
+      }
+    })
+  }, [dataColumns, queryDocuments, selectedPreviewPath])
+
+  const filteredRows = useMemo(() => {
+    return rows.filter((row) => {
+      if (statusFilter === "previewable" && row.rowPreviewDisabled) {
+        return false
+      }
+      if (statusFilter === "selected" && !row.rowIsSelected) {
+        return false
+      }
+      if (normalizedQuickFilter && !row.searchText.includes(normalizedQuickFilter)) {
+        return false
+      }
+      return true
+    })
+  }, [normalizedQuickFilter, rows, statusFilter])
+
+  const hasActiveClientFilter = normalizedQuickFilter.length > 0 || statusFilter !== "all"
+  const statusFilterLabel =
+    STATUS_FILTER_OPTIONS.find((option) => option.value === statusFilter)?.label ?? "All rows"
+  const canPrev = Boolean(queryResponse?.hasPreviousPage) && !queryLoading
+  const canNext = Boolean(queryResponse?.hasNextPage) && !queryLoading
+  const statusBadgeVariant = queryError
+    ? "destructive"
+    : queryLoading
+      ? "outline"
+      : "secondary"
+
+  const openRowPreview = (row: RowModel) => {
+    if (row.rowPreviewDisabled) {
+      return
+    }
+    onRequestPreviewFromRow(row.documentPath, row.documentId, row.payloadObject)
+  }
 
   return (
     <>
-      <div className="min-h-0 flex flex-1 flex-col bg-background p-3">
+      <div className="min-h-0 flex flex-1 flex-col bg-background p-3 sm:p-4">
+        <div className="mb-3 rounded-lg border bg-card p-3">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <div className="relative w-full max-w-xl">
+                <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={quickFilter}
+                  onChange={(event) => setQuickFilter(event.target.value)}
+                  placeholder="Quick filter by ID, path, or visible values..."
+                  className="h-9 w-full pl-8"
+                  disabled={queryLoading || !!queryError}
+                  aria-label="Quick filter rows"
+                />
+              </div>
+              {hasActiveClientFilter ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 shrink-0"
+                  onClick={() => {
+                    setQuickFilter("")
+                    setStatusFilter("all")
+                  }}
+                  disabled={queryLoading}
+                >
+                  Clear
+                </Button>
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="outline" size="sm" className="h-9">
+                    <Filter data-icon="inline-start" />
+                    {statusFilterLabel}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel>Row Filter</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {STATUS_FILTER_OPTIONS.map((option) => (
+                    <DropdownMenuItem
+                      key={option.value}
+                      onClick={() => setStatusFilter(option.value)}
+                    >
+                      <span className="inline-flex min-w-4">
+                        {statusFilter === option.value ? (
+                          <CheckCircle2 className="h-4 w-4 text-primary" />
+                        ) : null}
+                      </span>
+                      {option.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Badge variant="outline">Rows: {rows.length}</Badge>
+              <Badge variant="outline">Visible: {filteredRows.length}</Badge>
+            </div>
+          </div>
+        </div>
+
         {queryLoading ? (
           <div className="grid gap-3">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
               <Spinner />
               Running query...
             </div>
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-32 w-full" />
-            <Skeleton className="h-32 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-16 w-full" />
           </div>
         ) : null}
 
@@ -66,104 +249,224 @@ export function FirestoreQueryResults({
         ) : null}
 
         {!queryLoading && !queryError ? (
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col rounded-md border bg-card/20">
-            <div className="min-h-0 flex-1 overflow-auto [&_[data-slot=table-container]]:overflow-visible">
-              <Table className="w-max min-w-full text-left text-xs">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="sticky top-0 z-20 min-w-44 bg-muted py-2 font-semibold">
-                      <div className="grid gap-0.5">
-                        <span>ID</span>
-                        <span className="text-[10px] font-normal text-muted-foreground">string</span>
-                      </div>
-                    </TableHead>
-                    {dataColumns.map((column) => (
-                      <TableHead
-                        key={column.name}
-                        className="sticky top-0 z-20 min-w-44 bg-muted py-2 font-semibold"
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col rounded-lg border bg-card/30 shadow-sm">
+            {isMobile ? (
+              <div className="min-h-0 flex-1 overflow-auto p-3">
+                {filteredRows.length === 0 ? (
+                  <Empty className="border-none">
+                    <EmptyHeader>
+                      <EmptyTitle>
+                        {queryDocuments.length === 0
+                          ? "No documents found"
+                          : "No matching rows"}
+                      </EmptyTitle>
+                      <EmptyDescription>
+                        {queryDocuments.length === 0
+                          ? "Try changing the path, filters, or pagination settings."
+                          : "Try adjusting the quick filter or row filter to see results."}
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                ) : (
+                  <div className="grid gap-2.5">
+                    {filteredRows.map((row) => (
+                      <div
+                        key={row.key}
+                        className={cn(
+                          "rounded-lg border bg-card p-3 shadow-xs",
+                          row.rowIsSelected && "border-primary/50 bg-primary/5",
+                        )}
                       >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold">{row.documentId}</p>
+                            <p className="truncate font-mono text-xs text-muted-foreground">
+                              {row.documentPath || "(no-path)"}
+                            </p>
+                          </div>
+                          {row.rowPreviewDisabled ? (
+                            <Badge variant="destructive">Unavailable</Badge>
+                          ) : row.rowIsSelected ? (
+                            <Badge variant="secondary">Selected</Badge>
+                          ) : (
+                            <Badge variant="outline">Ready</Badge>
+                          )}
+                        </div>
+
+                        <div className="mt-3 grid gap-2">
+                          {dataColumns.slice(0, 4).map((column) => (
+                            <div key={`${row.key}-${column.name}`} className="grid gap-0.5">
+                              <span className="text-xs font-medium text-muted-foreground">
+                                {column.name}
+                              </span>
+                              <span className="line-clamp-2 text-sm">
+                                {safePreviewValue(row.doc[column.name])}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="mt-3">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="w-full"
+                            onClick={() => openRowPreview(row)}
+                            disabled={row.rowPreviewDisabled}
+                          >
+                            <Eye data-icon="inline-start" />
+                            Open Preview
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="hidden min-h-0 flex-1 overflow-y-auto md:block">
+                <Table className="min-w-full text-left text-sm">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="sticky top-0 z-20 w-56 min-w-56 bg-background/95 py-3 font-semibold shadow-[inset_0_-1px_0_hsl(var(--border))] backdrop-blur">
                         <div className="grid gap-0.5">
-                          <span>{column.name}</span>
-                          <span className="text-[10px] font-normal text-muted-foreground">{column.type}</span>
+                          <span>Document</span>
+                          <span className="text-xs font-normal text-foreground/65">
+                            ID and path
+                          </span>
                         </div>
                       </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(queryResponse?.documents ?? []).length === 0 ? (
-                    <TableRow>
-                      <TableCell className="py-6 text-center text-sm text-muted-foreground" colSpan={emptyStateColumnSpan}>
-                        <Empty className="border-none">
-                          <EmptyHeader>
-                            <EmptyTitle>No documents found</EmptyTitle>
-                            <EmptyDescription>Try changing the path, filters, or pagination settings.</EmptyDescription>
-                          </EmptyHeader>
-                        </Empty>
-                      </TableCell>
+                      {dataColumns.map((column) => (
+                        <TableHead
+                          key={column.name}
+                          className="sticky top-0 z-20 w-48 min-w-40 bg-background/95 py-3 font-semibold shadow-[inset_0_-1px_0_hsl(var(--border))] backdrop-blur"
+                        >
+                          <div className="grid gap-0.5">
+                            <span>{column.name}</span>
+                            <span className="text-xs font-normal text-foreground/65">
+                              {column.type}
+                            </span>
+                          </div>
+                        </TableHead>
+                      ))}
+                      <TableHead className="sticky top-0 z-20 w-16 bg-background/95 py-3 text-right font-semibold shadow-[inset_0_-1px_0_hsl(var(--border))] backdrop-blur">
+                        Actions
+                      </TableHead>
                     </TableRow>
-                  ) : null}
+                  </TableHeader>
+                  <TableBody>
+                    {filteredRows.length === 0 ? (
+                      <TableRow>
+                        <TableCell className="py-10 text-center text-sm text-muted-foreground" colSpan={emptyStateColumnSpan}>
+                          <Empty className="border-none">
+                            <EmptyHeader>
+                              <EmptyTitle>
+                                {queryDocuments.length === 0
+                                  ? "No documents found"
+                                  : "No matching rows"}
+                              </EmptyTitle>
+                              <EmptyDescription>
+                                {queryDocuments.length === 0
+                                  ? "Try changing the path, filters, or pagination settings."
+                                  : "Try adjusting the quick filter or row filter to see results."}
+                              </EmptyDescription>
+                            </EmptyHeader>
+                          </Empty>
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
 
-                  {(queryResponse?.documents ?? []).map((doc, index) => {
-                    const documentPath = typeof doc._path === "string" ? doc._path : ""
-                    const normalizedDocumentPath = normalizePath(documentPath)
-                    const documentId = typeof doc.id === "string" ? doc.id : "(no-id)"
-                    const payloadObject = getPayloadOnly(doc)
-                    const rowPreviewDisabled = !documentPath
-                    const rowIsSelected =
-                      !!selectedPreviewPath &&
-                      normalizePath(selectedPreviewPath) === normalizedDocumentPath
-                    const openRowPreview = () => {
-                      if (rowPreviewDisabled) {
-                        return
-                      }
-                      onRequestPreviewFromRow(documentPath, documentId, payloadObject)
-                    }
-
-                    return (
+                    {filteredRows.map((row) => (
                       <TableRow
-                        key={`${documentPath || documentId}-${index}`}
+                        key={row.key}
                         className={cn(
-                          "odd:bg-background even:bg-muted/20",
-                          rowIsSelected && "odd:bg-accent/60 even:bg-accent/60 hover:bg-accent/60",
+                          "odd:bg-background even:bg-muted/10 hover:bg-accent/35",
+                          row.rowIsSelected && "odd:bg-primary/10 even:bg-primary/10 hover:bg-primary/15",
                         )}
-                        aria-selected={rowIsSelected}
-                        tabIndex={rowPreviewDisabled ? -1 : 0}
-                        onDoubleClick={() => {
-                          if (!isMobile) {
-                            openRowPreview()
-                          }
-                        }}
-                        onClick={() => {
-                          if (isMobile) {
-                            openRowPreview()
-                          }
-                        }}
+                        aria-selected={row.rowIsSelected}
+                        tabIndex={row.rowPreviewDisabled ? -1 : 0}
+                        onDoubleClick={() => openRowPreview(row)}
                         onKeyDown={(event) => {
-                          if (!rowPreviewDisabled && (event.key === "Enter" || event.key === " ")) {
+                          if (!row.rowPreviewDisabled && (event.key === "Enter" || event.key === " ")) {
                             event.preventDefault()
-                            openRowPreview()
+                            openRowPreview(row)
                           }
                         }}
                       >
-                        <TableCell className="align-top font-medium">{documentId}</TableCell>
+                        <TableCell className="max-w-sm py-3 align-top">
+                          <div className="grid gap-1">
+                            <div className="flex items-center gap-2">
+                              <span className="truncate font-medium">{row.documentId}</span>
+                              {row.rowPreviewDisabled ? (
+                                <Badge variant="destructive">Unavailable</Badge>
+                              ) : row.rowIsSelected ? (
+                                <Badge variant="secondary">Selected</Badge>
+                              ) : (
+                                <Badge variant="outline">Ready</Badge>
+                              )}
+                            </div>
+                          </div>
+                        </TableCell>
                         {dataColumns.map((column) => (
-                          <TableCell key={`${documentPath}-${column.name}`} className="max-w-xs">
-                            <span className="line-clamp-2 text-muted-foreground">{safePreviewValue(doc[column.name])}</span>
+                          <TableCell
+                            key={`${row.normalizedDocumentPath}-${column.name}`}
+                            className="max-w-xs whitespace-normal break-all py-3 align-top"
+                          >
+                            <span
+                              className="line-clamp-2 text-foreground/85"
+                              title={safePreviewValue(row.doc[column.name])}
+                            >
+                              {safePreviewValue(row.doc[column.name])}
+                            </span>
                           </TableCell>
                         ))}
+                        <TableCell className="w-16 py-3 text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={`Actions for ${row.documentId}`}
+                                title={`Actions for ${row.documentId}`}
+                              >
+                                <MoreHorizontal />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={() => openRowPreview(row)}
+                                disabled={row.rowPreviewDisabled}
+                              >
+                                <Eye className="mr-2 h-4 w-4" />
+                                Open Preview
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem disabled>
+                                {row.documentPath || "Path unavailable"}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
                       </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+
+            {hasActiveClientFilter && filteredRows.length > 0 ? (
+              <div className="border-t bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                Client filter is applied to current page rows only.
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>
 
-      <div className="flex items-center justify-between border-t bg-card px-3 py-2 text-xs text-muted-foreground">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-2 border-t bg-card px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <span>
             {queryResponse
               ? `Page ${queryResponse.pageIndex + 1} - ${queryResponse.pageSize} per page`
@@ -176,34 +479,63 @@ export function FirestoreQueryResults({
                 : "No rows on this page"
               : "No rows on this page"}
           </span>
+          {hasActiveClientFilter ? (
+            <Badge variant="outline">Filtered view</Badge>
+          ) : null}
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
-            disabled={!queryResponse?.hasPreviousPage || queryLoading}
-            onClick={onRunPrevPage}
-          >
-            <ChevronLeft data-icon="inline-start" />
-            Prev
-          </Button>
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
-            disabled={!queryResponse?.hasNextPage || queryLoading}
-            onClick={onRunNextPage}
-          >
-            Next
-            <ChevronRight data-icon="inline-end" />
-          </Button>
-        </div>
+
+        <Pagination className="mx-0 w-auto justify-start sm:justify-end">
+          <PaginationContent>
+            <PaginationItem>
+              <PaginationPrevious
+                href="#"
+                aria-disabled={!canPrev}
+                className={cn(!canPrev && "pointer-events-none opacity-50")}
+                onClick={(event) => {
+                  event.preventDefault()
+                  if (canPrev) {
+                    onRunPrevPage()
+                  }
+                }}
+              />
+            </PaginationItem>
+            <PaginationItem>
+              <PaginationNext
+                href="#"
+                aria-disabled={!canNext}
+                className={cn(!canNext && "pointer-events-none opacity-50")}
+                onClick={(event) => {
+                  event.preventDefault()
+                  if (canNext) {
+                    onRunNextPage()
+                  }
+                }}
+              />
+            </PaginationItem>
+          </PaginationContent>
+        </Pagination>
       </div>
 
-      <footer className="flex h-8 items-center justify-between border-t bg-card px-3 text-xs text-muted-foreground">
-        <Badge variant="secondary">Ready</Badge>
-        <span>{queryStats}</span>
+      <footer className="flex min-h-10 flex-wrap items-center justify-between gap-2 border-t bg-card px-3 py-2 text-sm text-muted-foreground">
+        <Badge variant={statusBadgeVariant}>
+          {queryError ? (
+            <>
+              <XCircle data-icon="inline-start" />
+              Error
+            </>
+          ) : queryLoading ? (
+            <>
+              <Spinner data-icon="inline-start" />
+              Loading
+            </>
+          ) : (
+            <>
+              <CheckCircle2 data-icon="inline-start" />
+              Ready
+            </>
+          )}
+        </Badge>
+        <span className="truncate">{queryStats}</span>
       </footer>
     </>
   )

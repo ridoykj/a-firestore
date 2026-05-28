@@ -1,16 +1,36 @@
-import { useMemo, useRef, useState } from "react"
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Download,
   FilePlus2,
+  ListTree,
+  PanelLeft,
   PanelRightClose,
   PanelRightOpen,
   Play,
+  SlidersHorizontal,
   Table2,
   Upload,
 } from "lucide-react"
+import { useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
 
+import {
+  DEFAULT_WHERE_ROW,
+  EMPTY_JSON_TEMPLATE,
+  EMPTY_NESTED_RESPONSE,
+  type CrudBusy,
+  type FirestoreDocument,
+  type FirestoreQueryRequest,
+  type NestedResponse,
+  type OrderDirection,
+  type PreviewCloseIntent,
+  type PreviewEditorTheme,
+  type PreviewValidationSummary,
+  type QueryResponse,
+  type TransferFormat,
+  type WhereRow,
+} from "@/dto/firestore/FirestoreSchema"
+import { firestoreService } from "@/services/api/firestore-service"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,30 +51,21 @@ import {
 } from "@/shadcn/components/ui/dropdown-menu"
 import { Field, FieldLabel } from "@/shadcn/components/ui/field"
 import { Input } from "@/shadcn/components/ui/input"
+import { useMediaQuery } from "@/shadcn/hooks/use-media-query"
+import { useIsMobile } from "@/shadcn/hooks/use-mobile"
+import type { ProjectTab } from "@/store/gcp-store"
+import { FirestoreCreateDrawer } from "@/view/pages/firestore/components/FirestoreCreateDrawer"
 import {
-  DEFAULT_WHERE_ROW,
-  EMPTY_JSON_TEMPLATE,
-  EMPTY_NESTED_RESPONSE,
-  type CrudBusy,
-  type FirestoreDocument,
-  type FirestoreQueryRequest,
-  type NestedResponse,
-  type OrderDirection,
-  type PreviewCloseIntent,
-  type PreviewEditorTheme,
-  type PreviewValidationSummary,
-  type QueryResponse,
-  type TransferFormat,
-  type WhereRow,
-} from "@/dto/firestore/FirestoreSchema"
-import {
-  documentIdIsValid,
-  generateFirestoreDocumentId,
-  getPayloadOnly,
-  normalizePath,
-  parseJsonPayload,
-  pathIsCollection,
-} from "@/view/pages/firestore/lib/firestore-utils"
+  FirestoreDocumentPreviewPanel,
+  type PreviewBusy,
+  type PreviewTab,
+} from "@/view/pages/firestore/components/FirestoreDocumentPreviewPanel"
+import { FirestoreFilterPanel } from "@/view/pages/firestore/components/FirestoreFilterPanel"
+import { FirestoreHeader } from "@/view/pages/firestore/components/FirestoreHeader"
+import { FirestoreNestedTraverse } from "@/view/pages/firestore/components/FirestoreNestedTraverse"
+import { FirestoreQueryResults } from "@/view/pages/firestore/components/FirestoreQueryResults"
+import { FirestoreSidebar } from "@/view/pages/firestore/components/FirestoreSidebar"
+import { FirestoreToFirestoreImportDialog } from "@/view/pages/firestore/components/FirestoreToFirestoreImportDialog"
 import {
   buildCollectionTransferJson,
   buildDocumentTransferJson,
@@ -67,20 +78,14 @@ import {
   toTransferRecord,
   triggerTextDownload,
 } from "@/view/pages/firestore/lib/firestore-transfer-utils"
-import { firestoreService } from "@/services/api/firestore-service"
-import { FirestoreCreateDrawer } from "@/view/pages/firestore/components/FirestoreCreateDrawer"
 import {
-  FirestoreDocumentPreviewPanel,
-  type PreviewBusy,
-  type PreviewTab,
-} from "@/view/pages/firestore/components/FirestoreDocumentPreviewPanel"
-import { FirestoreFilterPanel } from "@/view/pages/firestore/components/FirestoreFilterPanel"
-import { FirestoreQueryResults } from "@/view/pages/firestore/components/FirestoreQueryResults"
-import { FirestoreSidebar } from "@/view/pages/firestore/components/FirestoreSidebar"
-import { FirestoreHeader } from "@/view/pages/firestore/components/FirestoreHeader"
-import { FirestoreNestedTraverse } from "@/view/pages/firestore/components/FirestoreNestedTraverse"
-import { FirestoreToFirestoreImportDialog } from "@/view/pages/firestore/components/FirestoreToFirestoreImportDialog"
-import type { ProjectTab } from "@/store/gcp-store"
+  documentIdIsValid,
+  generateFirestoreDocumentId,
+  getPayloadOnly,
+  normalizePath,
+  parseJsonPayload,
+  pathIsCollection,
+} from "@/view/pages/firestore/lib/firestore-utils"
 
 type PreviewDocumentSelection = {
   documentPath: string
@@ -94,7 +99,6 @@ type PendingPreviewIntent =
 
 type FirestorePageProps = {
   tab: ProjectTab
-  onOpenAddTab: () => void
 }
 
 const PREVIEW_THEME_STORAGE_KEY = "firestore-preview-editor-theme"
@@ -118,8 +122,11 @@ function loadInitialPreviewTheme(): PreviewEditorTheme {
   return "dark"
 }
 
-export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps) {
+export default function FirestorePage({ tab }: FirestorePageProps) {
   const queryClient = useQueryClient()
+  const isMobile = useIsMobile()
+  const isNarrowDesktop = useMediaQuery("(max-width: 1280px)")
+  const drawerMode = isMobile || isNarrowDesktop
   const context = useMemo(
     () => ({
       projectId: tab.projectId,
@@ -130,6 +137,9 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
 
   const [leftSidebarExpanded, setLeftSidebarExpanded] = useState(true)
   const [rightSidebarExpanded, setRightSidebarExpanded] = useState(true)
+  const [drawerCollectionsOpen, setDrawerCollectionsOpen] = useState(false)
+  const [drawerNestedOpen, setDrawerNestedOpen] = useState(false)
+  const [drawerFiltersOpen, setDrawerFiltersOpen] = useState(false)
 
   const [activeCollection, setActiveCollection] = useState("")
   const [queryPath, setQueryPath] = useState("")
@@ -1081,8 +1091,8 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
   }
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-muted/40">
-      <div className="flex h-full w-full">
+    <div className="relative flex min-h-0 h-full w-full flex-1 overflow-hidden bg-muted/40">
+      <div className="flex min-h-0 h-full w-full">
         <FirestoreSidebar
           leftSidebarExpanded={leftSidebarExpanded}
           setLeftSidebarExpanded={setLeftSidebarExpanded}
@@ -1091,12 +1101,15 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
           activeCollection={activeCollection}
           refreshCollections={refreshCollections}
           runCollectionQuery={runCollectionQuery}
+          drawerMode={drawerMode}
+          drawerOpen={drawerCollectionsOpen}
+          onDrawerOpenChange={setDrawerCollectionsOpen}
         />
 
-        <main className="flex min-w-0 flex-1 flex-col relative">
-          <FirestoreHeader tab={tab} onOpenAddTab={onOpenAddTab} />
+        <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          <FirestoreHeader tab={tab} />
 
-          <div className="flex min-h-0 flex-1 relative">
+          <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
             <FirestoreNestedTraverse
               nestedLoading={nestedLoading}
               nestedResponse={nestedResponse}
@@ -1112,13 +1125,19 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
               hasNextPage={Boolean(nestedQuery.hasNextPage)}
               isFetchingNextPage={nestedQuery.isFetchingNextPage}
               fetchNextPage={() => void nestedQuery.fetchNextPage({ cancelRefetch: false })}
+              drawerMode={drawerMode}
+              drawerOpen={drawerNestedOpen}
+              onDrawerOpenChange={setDrawerNestedOpen}
             />
 
             <section className="flex min-w-0 flex-1 flex-col">
               <div className="border-b bg-card px-4 py-3">
                 <div className="grid gap-3">
                   <Field orientation="horizontal" className="flex flex-wrap items-center gap-2">
-                    <FieldLabel htmlFor="query-path" className="text-xs uppercase tracking-wide text-muted-foreground">
+                    <FieldLabel
+                      htmlFor="query-path"
+                      className="text-sm font-medium text-foreground/70"
+                    >
                       Path
                     </FieldLabel>
                     <Input
@@ -1126,23 +1145,23 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
                       value={queryPath}
                       onChange={(event) => setQueryPath(event.target.value)}
                       placeholder="/users"
-                      className="max-w-xl font-mono text-xs"
+                      className="h-9 max-w-xl font-mono text-sm"
                     />
                     <Button type="button" size="sm" onClick={() => void runQuery(0)}>
                       <Play data-icon="inline-start" />
-                      Run
+                      Run Query
                     </Button>
                   </Field>
 
-                  <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2.5">
                     <div className="flex items-center gap-1 rounded-md border bg-background p-1">
-                      <Button type="button" size="xs" variant="secondary">
+                      <Button type="button" size="sm" variant="secondary">
                         <Table2 data-icon="inline-start" />
                         Table
                       </Button>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -1226,25 +1245,58 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
                         <FilePlus2 data-icon="inline-start" />
                         Create
                       </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setRightSidebarExpanded((value) => !value)}
-                      >
-                        {rightSidebarExpanded ? (
-                          <PanelRightClose data-icon="inline-start" />
-                        ) : (
-                          <PanelRightOpen data-icon="inline-start" />
-                        )}
-                        Filters
-                      </Button>
+
+                      {drawerMode ? (
+                        <>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setDrawerCollectionsOpen(true)}
+                          >
+                            <PanelLeft data-icon="inline-start" />
+                            Collections
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setDrawerNestedOpen(true)}
+                          >
+                            <ListTree data-icon="inline-start" />
+                            Nested
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setDrawerFiltersOpen(true)}
+                          >
+                            <SlidersHorizontal data-icon="inline-start" />
+                            Filters
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setRightSidebarExpanded((value) => !value)}
+                        >
+                          {rightSidebarExpanded ? (
+                            <PanelRightClose data-icon="inline-start" />
+                          ) : (
+                            <PanelRightOpen data-icon="inline-start" />
+                          )}
+                          Filters
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="flex min-h-0 flex-1">
+              <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
                 <div className="flex min-w-0 flex-1 flex-col">
                   <FirestoreQueryResults
                     queryLoading={queryLoading}
@@ -1367,6 +1419,9 @@ export default function FirestorePage({ tab, onOpenAddTab }: FirestorePageProps)
                   limit={limit}
                   setLimit={setLimit}
                   onRun={() => void runQuery(0)}
+                  drawerMode={drawerMode}
+                  drawerOpen={drawerFiltersOpen}
+                  onDrawerOpenChange={setDrawerFiltersOpen}
                 />
               </div>
             </section>

@@ -55,8 +55,8 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
   })
   const initFirestoreMutation = useFirestoreInitMutation()
 
-  const projects = projectsQuery.data ?? []
-  const databases = databasesQuery.data ?? []
+  const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data])
+  const databases = useMemo(() => databasesQuery.data ?? [], [databasesQuery.data])
   const loadingProjects = projectsQuery.isFetching
   const loadingDatabases = databasesQuery.isFetching
   const initializing = initFirestoreMutation.isPending
@@ -138,7 +138,7 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Add Firestore Tab</DialogTitle>
           <DialogDescription>
@@ -146,9 +146,9 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-3">
-          <div className="grid gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Credentials JSON</label>
+        <div className="grid gap-4">
+          <div className="grid gap-2">
+            <label className="text-sm font-medium text-muted-foreground">Credentials JSON</label>
             <Input
               type="file"
               accept=".json,application/json"
@@ -158,6 +158,7 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
                 setSelectedProject("")
                 setSelectedDatabase("")
               }}
+              className="h-10 text-sm"
             />
             <Button
               type="button"
@@ -165,14 +166,15 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
               size="sm"
               onClick={() => void handleLoadProjects()}
               disabled={!credentialsFile || loadingProjects}
+              className="h-9"
             >
               {loadingProjects ? <Spinner className="w-3 h-3 mr-1" /> : null}
               Load Projects
             </Button>
           </div>
 
-          <div className="grid gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
+          <div className="grid gap-2">
+            <label className="text-sm font-medium text-muted-foreground">
               Project ID
               {loadingDatabases ? <Spinner className="w-3 h-3 inline-block ml-1" /> : null}
             </label>
@@ -184,12 +186,12 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
               }}
               disabled={loadingProjects || projects.length === 0}
             >
-              <SelectTrigger>
+              <SelectTrigger className="h-10 text-sm">
                 <SelectValue placeholder="Select a project" />
               </SelectTrigger>
               <SelectContent>
                 {projects.map((project) => (
-                  <SelectItem key={project} value={project}>
+                  <SelectItem key={project} value={project} className="text-sm">
                     {project}
                   </SelectItem>
                 ))}
@@ -197,8 +199,8 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
             </Select>
           </div>
 
-          <div className="grid gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
+          <div className="grid gap-2">
+            <label className="text-sm font-medium text-muted-foreground">
               Database ID
               {initializing ? <Spinner className="w-3 h-3 inline-block ml-1" /> : null}
             </label>
@@ -207,13 +209,15 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
               onValueChange={(value) => setSelectedDatabase(value === "__default__" ? "" : value)}
               disabled={!selectedProject || loadingDatabases || initializing}
             >
-              <SelectTrigger>
+              <SelectTrigger className="h-10 text-sm">
                 <SelectValue placeholder={loadingDatabases ? "Loading..." : "(default)"} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__default__">(default)</SelectItem>
+                <SelectItem value="__default__" className="text-sm">
+                  (default)
+                </SelectItem>
                 {databases.map((database) => (
-                  <SelectItem key={database} value={database}>
+                  <SelectItem key={database} value={database} className="text-sm">
                     {database}
                   </SelectItem>
                 ))}
