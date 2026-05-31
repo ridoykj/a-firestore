@@ -12,17 +12,10 @@ import {
   FieldSet,
 } from "@/shadcn/components/ui/field"
 import { Input } from "@/shadcn/components/ui/input"
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/shadcn/components/ui/sheet"
 import { Skeleton } from "@/shadcn/components/ui/skeleton"
 import { Spinner } from "@/shadcn/components/ui/spinner"
 import { parseJsonPayload, pathIsCollection, normalizePath } from "@/view/pages/firestore/lib/firestore-utils"
-import { FilePlus2, RefreshCcw, WandSparkles } from "lucide-react"
+import { FilePlus2, RefreshCcw, WandSparkles, X } from "lucide-react"
 
 const FirestoreJsonCodeEditor = lazy(async () => {
   const module = await import("@/view/pages/firestore/components/FirestoreJsonCodeEditor")
@@ -99,37 +92,30 @@ export function FirestoreCreateDrawer({
     !jsonHasSyntaxErrors &&
     !semanticJsonErrorMessage
 
+  if (!open) return null
+
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        className="h-dvh max-h-dvh gap-0 rounded-none border-l p-0 data-[side=right]:w-screen data-[side=right]:max-w-none data-[side=right]:sm:w-[85vw] data-[side=right]:sm:max-w-none"
-        showCloseButton={!isSubmitting}
-        onEscapeKeyDown={(event) => {
-          if (isSubmitting) {
-            event.preventDefault()
-          }
-        }}
-        onInteractOutside={(event) => {
-          if (isSubmitting) {
-            event.preventDefault()
-          }
-        }}
-      >
-        <SheetHeader className="border-b px-4 py-4">
-          <SheetTitle className="inline-flex items-center gap-2">
-            <FilePlus2 data-icon="inline-start" />
-            Create Document
-          </SheetTitle>
-          <SheetDescription>
-            Create a document in any collection path. If the collection does not exist, Firestore
-            creates it on first write.
-          </SheetDescription>
-        </SheetHeader>
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-4xl bg-card rounded-3xl shadow-2xl p-6 border border-border flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between pb-4 border-b border-border shrink-0">
+          <div className="flex items-center gap-2">
+            <FilePlus2 className="w-5 h-5 text-primary" />
+            <h3 className="text-sm font-bold text-foreground">
+              Create Document
+            </h3>
+          </div>
+          <button
+            onClick={() => onOpenChange(false)}
+            disabled={isSubmitting}
+            className="p-1 rounded-lg hover:bg-muted text-muted-foreground transition-colors disabled:opacity-50"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
 
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 overflow-auto px-4 py-4">
-            <div className="mx-auto flex w-full max-w-5xl min-h-0 flex-col gap-4">
+          <div className="min-h-0 flex-1 overflow-y-auto py-4">
+            <div className="flex w-full min-h-0 flex-col gap-4">
               <div className="rounded-lg border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
                 <span className="font-medium text-destructive">*</span> Required fields
               </div>
@@ -269,29 +255,26 @@ export function FirestoreCreateDrawer({
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 border-t bg-background px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-                disabled={isSubmitting}
-              >
-                Cancel
-              </Button>
-              <Button type="button" variant="ghost" onClick={onDiscardDraft} disabled={isSubmitting}>
-                <RefreshCcw data-icon="inline-start" />
-                Discard Draft
-              </Button>
-            </div>
-
-            <Button type="button" onClick={onSubmit} disabled={!canSubmit} className="w-full sm:w-auto">
-              {isSubmitting ? <Spinner data-icon="inline-start" /> : null}
+          <div className="flex items-center justify-end gap-2 pt-4 border-t border-border shrink-0">
+            <Button type="button" variant="ghost" onClick={onDiscardDraft} disabled={isSubmitting}>
+              <RefreshCcw className="w-4 h-4 mr-1.5" />
+              Discard Draft
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button type="button" onClick={onSubmit} disabled={!canSubmit} className="shadow-sm">
+              {isSubmitting ? <Spinner className="mr-1.5" /> : null}
               {isSubmitting ? "Creating..." : "Create Document"}
             </Button>
           </div>
         </div>
-      </SheetContent>
-    </Sheet>
+      </div>
+    </div>
   )
 }

@@ -1,16 +1,5 @@
 import type { OrderDirection, WhereRow, WhereType } from "@/dto/firestore/FirestoreSchema"
-import { AlertCircle, PanelRightClose, PanelRightOpen, Plus, Trash2 } from "lucide-react"
-import { Button } from "@/shadcn/components/ui/button"
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/shadcn/components/ui/field"
-import { Input } from "@/shadcn/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/shadcn/components/ui/select"
-import { Separator } from "@/shadcn/components/ui/separator"
+import { ChevronRight, Play, Plus, SlidersHorizontal, X } from "lucide-react"
 import {
   Sheet,
   SheetContent,
@@ -58,152 +47,153 @@ export function FirestoreFilterPanel({
   onDrawerOpenChange,
 }: FirestoreFilterPanelProps) {
   const panelBody = (
-    <div className="min-h-0 flex-1 overflow-auto p-3">
-      <FieldGroup>
-        <Field>
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex-1 overflow-auto px-5 pb-5 pt-0">
+        <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-foreground/75">Where Filters</p>
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="outline"
-              onClick={addWhereFilterRow}
-              aria-label="Add where filter row"
-              title="Add where filter row"
-            >
-              <Plus data-icon="inline-start" />
-            </Button>
+            <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Where Filters</span>
+            <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded">AND Logic</span>
           </div>
 
-          {whereRows.map((row) => (
-            <Field key={row.id} className="rounded-md border bg-muted/10 p-2">
-              <FieldLabel htmlFor={`where-field-${row.id}`} className="sr-only">
-                Where Field
-              </FieldLabel>
-              <Input
-                id={`where-field-${row.id}`}
-                value={row.field}
-                onChange={(event) => setWhereRowValue(row.id, "field", event.target.value)}
-                placeholder="field"
-                className="h-9 font-mono text-sm"
+          {whereRows.length === 0 ? (
+            <div className="p-4 border border-dashed border-border rounded-xl text-center text-muted-foreground text-xs">
+              No active query filter rules applied.
+            </div>
+          ) : (
+            <div className="space-y-3.5 max-h-[300px] overflow-y-auto pr-1">
+              {whereRows.map((row) => (
+                <div key={row.id} className="p-3 bg-muted/30 rounded-xl border border-border relative space-y-2">
+                  <button
+                    onClick={() => removeWhereFilterRow(row.id)}
+                    className="absolute top-2 right-2 text-muted-foreground hover:text-rose-500 transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+
+                  <div>
+                    <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider block mb-1">Field</span>
+                    <input
+                      type="text"
+                      value={row.field}
+                      onChange={(e) => setWhereRowValue(row.id, "field", e.target.value)}
+                      placeholder="e.g. status"
+                      className="w-full bg-card text-xs px-2.5 py-1 rounded-lg border border-border focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider block mb-1">Operator</span>
+                      <select
+                        value={row.operator}
+                        onChange={(e) => setWhereRowValue(row.id, "operator", e.target.value)}
+                        className="w-full bg-card text-xs px-2 py-1.5 rounded-lg border border-border focus:outline-none"
+                      >
+                        <option value="==">==</option>
+                        <option value="!=">!=</option>
+                        <option value=">">&gt;</option>
+                        <option value=">=">&gt;=</option>
+                        <option value="<">&lt;</option>
+                        <option value="<=">&lt;=</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider block mb-1">Type</span>
+                      <select
+                        value={row.type}
+                        onChange={(e) => setWhereRowValue(row.id, "type", e.target.value as WhereType)}
+                        className="w-full bg-card text-xs px-2 py-1.5 rounded-lg border border-border focus:outline-none"
+                      >
+                        <option value="string">string</option>
+                        <option value="number">number</option>
+                        <option value="boolean">boolean</option>
+                        <option value="null">null</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider block mb-1">Value</span>
+                    <input
+                      type="text"
+                      value={row.value}
+                      onChange={(e) => setWhereRowValue(row.id, "value", e.target.value)}
+                      placeholder="Match value..."
+                      className="w-full bg-card text-xs px-2.5 py-1.5 rounded-lg border border-border focus:outline-none"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-6 pt-5 border-t border-border space-y-4">
+          <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground block">Order</span>
+          <div className="space-y-2">
+            <div>
+              <span className="text-[9px] text-primary font-bold uppercase tracking-wider block mb-1">Field Key</span>
+              <input
+                type="text"
+                value={orderField}
+                onChange={(e) => setOrderField(e.target.value)}
+                placeholder="id"
+                className="w-full bg-muted/50 text-xs px-3 py-2 rounded-lg border border-border focus:outline-none"
               />
-              <div className="grid grid-cols-[1fr_1fr_auto] gap-1">
-                <Select
-                  value={row.operator}
-                  onValueChange={(value) => setWhereRowValue(row.id, "operator", value)}
-                >
-                  <SelectTrigger className="h-9 w-full text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="==">==</SelectItem>
-                    <SelectItem value="!=">!=</SelectItem>
-                    <SelectItem value=">">&gt;</SelectItem>
-                    <SelectItem value=">=">&gt;=</SelectItem>
-                    <SelectItem value="<">&lt;</SelectItem>
-                    <SelectItem value="<=">&lt;=</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select
-                  value={row.type}
-                  onValueChange={(value) => setWhereRowValue(row.id, "type", value as WhereType)}
-                >
-                  <SelectTrigger className="h-9 w-full text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="string">string</SelectItem>
-                    <SelectItem value="number">number</SelectItem>
-                    <SelectItem value="boolean">boolean</SelectItem>
-                    <SelectItem value="null">null</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-sm"
-                  onClick={() => removeWhereFilterRow(row.id)}
-                  aria-label="Remove where filter row"
-                  title="Remove where filter row"
-                >
-                  <Trash2 data-icon="inline-start" />
-                </Button>
-              </div>
-              <Input
-                value={row.value}
-                onChange={(event) => setWhereRowValue(row.id, "value", event.target.value)}
-                placeholder="value"
-                className="h-9 font-mono text-sm"
-              />
-            </Field>
-          ))}
-        </Field>
+            </div>
+            <div>
+              <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider block mb-1">Sort Direction</span>
+              <select
+                value={orderDirection}
+                onChange={(e) => setOrderDirection(e.target.value as OrderDirection)}
+                className="w-full bg-muted/50 text-xs px-3 py-2 rounded-lg border border-border focus:outline-none font-semibold"
+              >
+                <option value="desc">Descending</option>
+                <option value="asc">Ascending</option>
+              </select>
+            </div>
+          </div>
+        </div>
 
-        <Separator />
+        <div className="mt-6 pt-5 border-t border-border space-y-3">
+          <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground block">Pagination Limit</span>
+          <div>
+            <input
+              type="number"
+              value={limit}
+              onChange={(e) => setLimit(Number(e.target.value))}
+              placeholder="e.g. 50"
+              className="w-full bg-muted/50 text-xs px-3 py-2 rounded-lg border border-border focus:outline-none font-bold"
+            />
+          </div>
+        </div>
+      </div>
 
-        <Field>
-          <FieldLabel htmlFor="order-field">Order</FieldLabel>
-          <Input
-            id="order-field"
-            value={orderField}
-            onChange={(event) => setOrderField(event.target.value)}
-            placeholder="field"
-            className="h-9 font-mono text-sm"
-          />
-          <Select
-            value={orderDirection}
-            onValueChange={(value) => setOrderDirection(value === "asc" ? "asc" : "desc")}
-          >
-            <SelectTrigger className="h-9 w-full text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="desc">Descending</SelectItem>
-              <SelectItem value="asc">Ascending</SelectItem>
-            </SelectContent>
-          </Select>
-          <FieldDescription>Sort direction applies to the selected field.</FieldDescription>
-        </Field>
-
-        <Separator />
-
-        <Field>
-          <FieldLabel>Pagination</FieldLabel>
-          <Select value={String(limit)} onValueChange={(value) => setLimit(Number(value))}>
-            <SelectTrigger className="h-9 w-full text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="25">25</SelectItem>
-              <SelectItem value="50">50</SelectItem>
-              <SelectItem value="100">100</SelectItem>
-              <SelectItem value="200">200</SelectItem>
-              <SelectItem value="500">500</SelectItem>
-            </SelectContent>
-          </Select>
-          <FieldDescription>Controls the maximum rows per query page.</FieldDescription>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              onRun()
-              onDrawerOpenChange?.(false)
-            }}
-          >
-            Run Query
-          </Button>
-        </Field>
-      </FieldGroup>
+      <div className="px-5 pb-5 mt-auto border-t border-border pt-5 shrink-0">
+        <button
+          onClick={() => {
+            onRun()
+            onDrawerOpenChange?.(false)
+          }}
+          className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs py-3 rounded-xl flex items-center justify-center gap-2 shadow-sm hover:shadow-md transition-all active:scale-95"
+        >
+          <Play className="w-4 h-4 fill-current text-primary-foreground" />
+          <span>Run Query</span>
+        </button>
+      </div>
     </div>
   )
 
   if (drawerMode) {
     return (
       <Sheet open={drawerOpen} onOpenChange={onDrawerOpenChange}>
-        <SheetContent side="right" className="w-[90vw] max-w-md p-0">
+        <SheetContent side="right" className="w-[90vw] max-w-md p-0 flex flex-col">
           <SheetHeader className="border-b px-4 py-3 text-left">
-            <SheetTitle>Filter and Order</SheetTitle>
+            <SheetTitle className="inline-flex items-center gap-2 text-base">
+              <SlidersHorizontal className="text-primary w-5 h-5" />
+              Filter and Order
+            </SheetTitle>
             <SheetDescription>Refine query results by filters, order, and page size.</SheetDescription>
           </SheetHeader>
           <div className="flex min-h-0 flex-1 flex-col">{panelBody}</div>
@@ -215,35 +205,42 @@ export function FirestoreFilterPanel({
   return (
     <aside
       className={cn(
-        "hidden border-l bg-card transition-all md:flex md:flex-col",
-        rightSidebarExpanded ? "md:w-[20rem]" : "md:w-12",
+        "hidden border-l border-border bg-card text-foreground transition-all duration-300 md:flex md:flex-col",
+        rightSidebarExpanded ? "md:w-80" : "md:w-12",
       )}
     >
-      <div className="flex h-12 items-center justify-between border-b px-2">
-        {rightSidebarExpanded ? (
-          <span className="text-sm font-semibold text-foreground/75">Filter and Order</span>
-        ) : null}
-        <Button
-          type="button"
-          size="icon-sm"
-          variant="ghost"
-          onClick={onToggle}
-          aria-label={rightSidebarExpanded ? "Collapse filter panel" : "Expand filter panel"}
-          title={rightSidebarExpanded ? "Collapse filter panel" : "Expand filter panel"}
-        >
-          {rightSidebarExpanded ? (
-            <PanelRightClose data-icon="inline-start" />
-          ) : (
-            <PanelRightOpen data-icon="inline-start" />
-          )}
-        </Button>
-      </div>
-
       {rightSidebarExpanded ? (
-        panelBody
+        <>
+          <div className="flex items-center justify-between p-5 pb-4 mb-4 border-b border-border">
+            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Filter and Order</span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={addWhereFilterRow}
+                className="p-1.5 rounded-full hover:bg-muted text-primary transition-colors"
+                title="Add new filter clause"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+              <button
+                onClick={onToggle}
+                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors"
+                title="Hide Panel"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col">{panelBody}</div>
+        </>
       ) : (
-        <div className="flex min-h-0 flex-1 items-center justify-center">
-          <AlertCircle className="text-muted-foreground" />
+        <div className="w-12 flex flex-col items-center py-5">
+          <button
+            onClick={onToggle}
+            className="p-2.5 rounded-xl bg-secondary text-primary hover:bg-secondary/80 transition-all shadow-sm"
+            title="View Filter and Order panel"
+          >
+            <SlidersHorizontal className="w-5 h-5 animate-pulse" />
+          </button>
         </div>
       )}
     </aside>

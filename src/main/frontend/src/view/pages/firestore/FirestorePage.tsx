@@ -1,16 +1,4 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
-import {
-  Download,
-  FilePlus2,
-  ListTree,
-  PanelLeft,
-  PanelRightClose,
-  PanelRightOpen,
-  Play,
-  SlidersHorizontal,
-  Table2,
-  Upload,
-} from "lucide-react"
 import { useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
@@ -41,27 +29,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/shadcn/components/ui/alert-dialog"
-import { Button } from "@/shadcn/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/shadcn/components/ui/dropdown-menu"
-import { Field, FieldLabel } from "@/shadcn/components/ui/field"
-import { Input } from "@/shadcn/components/ui/input"
 import { useMediaQuery } from "@/shadcn/hooks/use-media-query"
 import { useIsMobile } from "@/shadcn/hooks/use-mobile"
 import type { ProjectTab } from "@/store/gcp-store"
 import { FirestoreCreateDrawer } from "@/view/pages/firestore/components/FirestoreCreateDrawer"
-import {
-  FirestoreDocumentPreviewPanel,
-  type PreviewBusy,
-  type PreviewTab,
-} from "@/view/pages/firestore/components/FirestoreDocumentPreviewPanel"
+import { FirestoreDocumentPreviewPanel, type PreviewBusy, type PreviewTab } from "@/view/pages/firestore/components/FirestoreDocumentPreviewPanel"
 import { FirestoreFilterPanel } from "@/view/pages/firestore/components/FirestoreFilterPanel"
-import { FirestoreHeader } from "@/view/pages/firestore/components/FirestoreHeader"
+import { WorkspaceControllerDeck } from "@/view/pages/firestore/components/WorkspaceControllerDeck"
 import { FirestoreNestedTraverse } from "@/view/pages/firestore/components/FirestoreNestedTraverse"
 import { FirestoreQueryResults } from "@/view/pages/firestore/components/FirestoreQueryResults"
 import { FirestoreSidebar } from "@/view/pages/firestore/components/FirestoreSidebar"
@@ -149,6 +123,7 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
   const [limit, setLimit] = useState(50)
   const [page, setPage] = useState(0)
   const [whereRows, setWhereRows] = useState<WhereRow[]>([{ ...DEFAULT_WHERE_ROW }])
+  const [searchQuery, setSearchQuery] = useState('')
 
   const [queryResponse, setQueryResponse] = useState<QueryResponse | null>(null)
   const [queryLoading, setQueryLoading] = useState(false)
@@ -491,14 +466,14 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
       const importedRecords =
         format === "json"
           ? (() => {
-              const parsed = parseCollectionTransferJson(content)
-              if (normalizePath(parsed.path) !== normalizePath(targetCollectionPath)) {
-                throw new Error(
-                  `Import file path '${parsed.path}' does not match target collection '${targetCollectionPath}'.`,
-                )
-              }
-              return parsed.records
-            })()
+            const parsed = parseCollectionTransferJson(content)
+            if (normalizePath(parsed.path) !== normalizePath(targetCollectionPath)) {
+              throw new Error(
+                `Import file path '${parsed.path}' does not match target collection '${targetCollectionPath}'.`,
+              )
+            }
+            return parsed.records
+          })()
           : parseTransferCsv(content)
 
       const upsertRecords = importedRecords.map((record, index) =>
@@ -623,12 +598,12 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
         format === "json"
           ? parseDocumentTransferJson(content)
           : (() => {
-              const rows = parseTransferCsv(content)
-              if (rows.length !== 1) {
-                throw new Error("Document CSV import must contain exactly one data row.")
-              }
-              return rows[0]
-            })()
+            const rows = parseTransferCsv(content)
+            if (rows.length !== 1) {
+              throw new Error("Document CSV import must contain exactly one data row.")
+            }
+            return rows[0]
+          })()
 
       const importedPath = normalizePath(importedRecord.path ?? "")
       const importedId = importedRecord.id.trim()
@@ -1107,7 +1082,28 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
         />
 
         <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-          <FirestoreHeader tab={tab} />
+          <WorkspaceControllerDeck
+            tab={tab}
+            queryPath={queryPath}
+            setQueryPath={setQueryPath}
+            runQuery={(pageVal) => void runQuery(pageVal ?? 0)}
+            isQuerying={queryLoading}
+            exportCollectionCurrentPage={(format) => void exportCollectionCurrentPage(format)}
+            exportCollectionFull={(format) => void exportCollectionFull(format)}
+            requestCollectionImport={requestCollectionImport}
+            setFirestoreImportDialogOpen={setFirestoreImportDialogOpen}
+            openCreateFromHeader={openCreateFromHeader}
+            transferControlsDisabled={transferControlsDisabled}
+            crudBusy={crudBusy}
+            previewBusy={previewBusy}
+            transferBusy={transferBusy}
+            filterPanelOpen={rightSidebarExpanded}
+            setFilterPanelOpen={setRightSidebarExpanded}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+          // totalRows={queryResponse?.resultCount || 0}
+          // filteredRows={filteredRowsCount} // You can compute filteredRows based on searchQuery later
+          />
 
           <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
             <FirestoreNestedTraverse
@@ -1131,171 +1127,6 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
             />
 
             <section className="flex min-w-0 flex-1 flex-col">
-              <div className="border-b bg-card px-4 py-3">
-                <div className="grid gap-3">
-                  <Field orientation="horizontal" className="flex flex-wrap items-center gap-2">
-                    <FieldLabel
-                      htmlFor="query-path"
-                      className="text-sm font-medium text-foreground/70"
-                    >
-                      Path
-                    </FieldLabel>
-                    <Input
-                      id="query-path"
-                      value={queryPath}
-                      onChange={(event) => setQueryPath(event.target.value)}
-                      placeholder="/users"
-                      className="h-9 max-w-xl font-mono text-sm"
-                    />
-                    <Button type="button" size="sm" onClick={() => void runQuery(0)}>
-                      <Play data-icon="inline-start" />
-                      Run Query
-                    </Button>
-                  </Field>
-
-                  <div className="flex flex-wrap items-center justify-between gap-2.5">
-                    <div className="flex items-center gap-1 rounded-md border bg-background p-1">
-                      <Button type="button" size="sm" variant="secondary">
-                        <Table2 data-icon="inline-start" />
-                        Table
-                      </Button>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={transferControlsDisabled()}
-                          >
-                            <Download data-icon="inline-start" />
-                            Export
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={() => void exportCollectionCurrentPage("json")}
-                            disabled={transferControlsDisabled()}
-                          >
-                            JSON (current page)
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => void exportCollectionCurrentPage("csv")}
-                            disabled={transferControlsDisabled()}
-                          >
-                            CSV (current page)
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onClick={() => void exportCollectionFull("json")}
-                            disabled={transferControlsDisabled()}
-                          >
-                            JSON (full collection)
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => void exportCollectionFull("csv")}
-                            disabled={transferControlsDisabled()}
-                          >
-                            CSV (full collection)
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={transferControlsDisabled()}
-                          >
-                            <Upload data-icon="inline-start" />
-                            Import
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={() => requestCollectionImport("json")}
-                            disabled={transferControlsDisabled()}
-                          >
-                            Import JSON
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => requestCollectionImport("csv")}
-                            disabled={transferControlsDisabled()}
-                          >
-                            Import CSV
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={() => setFirestoreImportDialogOpen(true)}>
-                            Import Firestore
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={openCreateFromHeader}
-                        disabled={crudBusy !== null || previewBusy !== null || transferBusy}
-                      >
-                        <FilePlus2 data-icon="inline-start" />
-                        Create
-                      </Button>
-
-                      {drawerMode ? (
-                        <>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setDrawerCollectionsOpen(true)}
-                          >
-                            <PanelLeft data-icon="inline-start" />
-                            Collections
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setDrawerNestedOpen(true)}
-                          >
-                            <ListTree data-icon="inline-start" />
-                            Nested
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setDrawerFiltersOpen(true)}
-                          >
-                            <SlidersHorizontal data-icon="inline-start" />
-                            Filters
-                          </Button>
-                        </>
-                      ) : (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setRightSidebarExpanded((value) => !value)}
-                        >
-                          {rightSidebarExpanded ? (
-                            <PanelRightClose data-icon="inline-start" />
-                          ) : (
-                            <PanelRightOpen data-icon="inline-start" />
-                          )}
-                          Filters
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
               <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
                 <div className="flex min-w-0 flex-1 flex-col">
                   <FirestoreQueryResults
@@ -1308,6 +1139,8 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
                     onRunPrevPage={() => void runQuery(Math.max(0, page - 1))}
                     onRunNextPage={() => void runQuery(page + 1)}
                     queryStats={queryStats}
+                    quickSearchText={searchQuery}
+                    onFilterMatchCountChange={() => { }}
                   />
 
                   <input
@@ -1454,7 +1287,7 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-        
+
         <FirestoreToFirestoreImportDialog
           context={{ ...tab, activePath: queryPath }}
           open={firestoreImportDialogOpen}

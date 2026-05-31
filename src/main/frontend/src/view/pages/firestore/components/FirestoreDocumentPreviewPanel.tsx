@@ -18,7 +18,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/shadcn/components/ui/alert-dialog"
-import { Badge } from "@/shadcn/components/ui/badge"
 import { Button } from "@/shadcn/components/ui/button"
 import {
   DropdownMenu,
@@ -33,18 +32,10 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/shadcn/components/ui/field"
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/shadcn/components/ui/sheet"
 import { Skeleton } from "@/shadcn/components/ui/skeleton"
 import { Spinner } from "@/shadcn/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shadcn/components/ui/tabs"
 import {
-  CheckCircle2,
   Download,
   FileJson,
   FolderTree,
@@ -53,6 +44,7 @@ import {
   Sun,
   Upload,
   WandSparkles,
+  X
 } from "lucide-react"
 
 const FirestoreJsonCodeEditor = lazy(async () => {
@@ -176,74 +168,74 @@ export function FirestoreDocumentPreviewPanel({
       </Alert>
     ) : null
 
+  if (!open) return null
+
   return (
     <>
-      <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent
-          side="right"
-          className="h-dvh max-h-dvh gap-0 rounded-none border-l p-0 data-[side=right]:w-screen data-[side=right]:max-w-none data-[side=right]:sm:w-[85vw] data-[side=right]:sm:max-w-none"
-        >
-          <SheetHeader className="border-b px-4 py-4">
-            <SheetTitle className="flex flex-wrap items-center justify-between gap-2">
-              <span className="inline-flex items-center gap-2">
-                <CheckCircle2 data-icon="inline-start" />
-                Document Preview
-              </span>
-              <Badge variant="outline">
-                {activeTab === "json" ? "JSON Editor" : "Tree Preview"}
-              </Badge>
-              <div className="flex flex-wrap items-center gap-2">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="outline"
-                      disabled={isPending || transferBusy || pathIsInvalid}
-                    >
-                      <Download data-icon="inline-start" />
-                      Export
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      onClick={() => onExportDocument("json")}
-                      disabled={pathIsInvalid || isPending || transferBusy}
-                    >
-                      Export JSON
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => onExportDocument("csv")}
-                      disabled={pathIsInvalid || isPending || transferBusy}
-                    >
-                      Export CSV
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex justify-end transition-all">
+        <div className="w-full max-w-2xl bg-card h-full flex flex-col overflow-y-auto shadow-2xl border-l border-border animate-in slide-in-from-right-8 duration-300">
+          <div className="border-b border-border px-6 py-5 shrink-0">
+            <div className="flex items-center justify-between pb-4">
+              <div>
+                <span className="text-[10px] font-bold text-primary uppercase tracking-wider block">Document Properties</span>
+                <h3 className="text-sm font-bold font-mono text-primary truncate mt-1">
+                  {documentId || "(no-id)"}
+                </h3>
+              </div>
+            <div className="flex items-center gap-3">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="bg-card"
+                    disabled={isPending || transferBusy || pathIsInvalid}
+                  >
+                    <Download className="mr-1.5 h-4 w-4 text-emerald-500" />
+                    Export
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={() => onExportDocument("json")}
+                    disabled={pathIsInvalid || isPending || transferBusy}
+                  >
+                    Export JSON
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => onExportDocument("csv")}
+                    disabled={pathIsInvalid || isPending || transferBusy}
+                  >
+                    Export CSV
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
 
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="outline"
-                      disabled={isPending || transferBusy || pathIsInvalid}
-                    >
-                      <Upload data-icon="inline-start" />
-                      Import
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      onClick={() => onImportDocument("json")}
-                      disabled={pathIsInvalid || isPending || transferBusy}
-                    >
-                      Import JSON
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => onImportDocument("csv")}
-                      disabled={pathIsInvalid || isPending || transferBusy}
-                    >
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="bg-card"
+                    disabled={isPending || transferBusy || pathIsInvalid}
+                  >
+                    <Upload className="mr-1.5 h-4 w-4 text-blue-500" />
+                    Import
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={() => onImportDocument("json")}
+                    disabled={pathIsInvalid || isPending || transferBusy}
+                  >
+                    Import JSON
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => onImportDocument("csv")}
+                    disabled={pathIsInvalid || isPending || transferBusy}
+                  >
                       Import CSV
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
@@ -253,36 +245,43 @@ export function FirestoreDocumentPreviewPanel({
                   </DropdownMenuContent>
                 </DropdownMenu>
 
-                <div className="flex items-center gap-1 rounded-md border bg-background p-1">
-                  <Button
+                <div className="flex items-center gap-1 rounded-md border bg-muted/50 p-1 ml-2">
+                  <button
                     type="button"
-                    size="xs"
-                    variant={editorTheme === "light" ? "secondary" : "ghost"}
                     onClick={() => onEditorThemeChange("light")}
                     disabled={isPending}
+                    className={`p-1.5 rounded-md ${editorTheme === "light" ? "bg-background shadow-sm" : "hover:bg-muted text-muted-foreground"}`}
+                    title="Light Theme"
                   >
-                    <Sun data-icon="inline-start" />
-                    Light
-                  </Button>
-                  <Button
+                    <Sun className="w-3.5 h-3.5" />
+                  </button>
+                  <button
                     type="button"
-                    size="xs"
-                    variant={editorTheme === "dark" ? "secondary" : "ghost"}
                     onClick={() => onEditorThemeChange("dark")}
                     disabled={isPending}
+                    className={`p-1.5 rounded-md ${editorTheme === "dark" ? "bg-background shadow-sm" : "hover:bg-muted text-muted-foreground"}`}
+                    title="Dark Theme"
                   >
-                    <Moon data-icon="inline-start" />
-                    Dark
-                  </Button>
+                    <Moon className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-              </div>
-            </SheetTitle>
-            <SheetDescription className="font-mono text-sm">
-              {documentId} {documentPath ? `- ${documentPath}` : ""}
-            </SheetDescription>
-          </SheetHeader>
 
-          <div className="min-h-0 flex flex-1 flex-col px-4 py-3">
+                <button
+                  onClick={() => onOpenChange(false)}
+                  className="p-1 rounded-full hover:bg-muted text-muted-foreground transition-colors ml-2"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            
+            <div className="mt-4 flex flex-wrap gap-2 text-xs font-mono text-muted-foreground break-all">
+              <span className="font-bold">Path:</span>
+              <span className="text-foreground">{documentPath || "(not set)"}</span>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex flex-1 flex-col px-6 py-4">
             <FieldGroup className="min-h-0 flex-1">
               <Tabs
                 value={activeTab}
@@ -357,32 +356,33 @@ export function FirestoreDocumentPreviewPanel({
             </FieldGroup>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3">
-            <Button type="button" variant="outline" onClick={closePanel} disabled={isPending}>
-              Close
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-6 py-4 shrink-0 bg-background">
+            <Button
+              type="button"
+              variant="ghost"
+              className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+              onClick={openDeleteConfirm}
+              disabled={isPending || pathIsInvalid}
+            >
+              {busyAction === "delete" ? <Spinner className="mr-1.5" /> : null}
+              {busyAction === "delete" ? "Deleting..." : "Delete Doc"}
             </Button>
             <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" onClick={closePanel} disabled={isPending}>
+                Cancel
+              </Button>
               <Button
                 type="button"
                 onClick={handleSave}
                 disabled={isPending || jsonHasValidationErrors}
               >
-                {busyAction === "update" ? <Spinner data-icon="inline-start" /> : null}
-                {busyAction === "update" ? "Saving..." : "Save"}
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={openDeleteConfirm}
-                disabled={isPending || pathIsInvalid}
-              >
-                {busyAction === "delete" ? <Spinner data-icon="inline-start" /> : null}
-                {busyAction === "delete" ? "Deleting..." : "Delete"}
+                {busyAction === "update" ? <Spinner className="mr-1.5" /> : null}
+                {busyAction === "update" ? "Saving..." : "Save Changes"}
               </Button>
             </div>
           </div>
-        </SheetContent>
-      </Sheet>
+        </div>
+      </div>
 
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent size="sm">
