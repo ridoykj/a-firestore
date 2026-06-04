@@ -2,7 +2,7 @@ import { useMemo, useState } from "react"
 import JsonView from "@microlink/react-json-view"
 import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/alert"
 import { Badge } from "@/shadcn/components/ui/badge"
-import { Button } from "@/shadcn/components/ui/button"
+import { ToggleGroup, ToggleGroupItem } from "@/shadcn/components/ui/toggle-group"
 import { useIsMobile } from "@/shadcn/hooks/use-mobile"
 import { useTheme } from "next-themes"
 
@@ -61,45 +61,28 @@ export function FirestoreJsonTreeViewer({ draft, onDraftChange }: FirestoreJsonT
       <div className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3 className="text-base font-semibold">Tree View</h3>
-          <p className="text-sm text-muted-foreground">
-            Browse and edit JSON structure with nested expansion controls.
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={onDraftChange ? "secondary" : "outline"}>
             {onDraftChange ? "Editable" : "Read only"}
           </Badge>
-          <Button
-            type="button"
-            variant={collapseMode === "auto" ? "secondary" : "outline"}
+          <ToggleGroup
+            type="single"
+            value={collapseMode}
+            spacing={0}
+            onValueChange={(value) => {
+              if (value) {
+                setCollapseMode(value as CollapseMode)
+              }
+            }}
+            className="rounded-full overflow-hidden border"
             size="sm"
-            className="h-10"
-            aria-pressed={collapseMode === "auto"}
-            onClick={() => setCollapseMode("auto")}
           >
-            Auto
-          </Button>
-          <Button
-            type="button"
-            variant={collapseMode === "compact" ? "secondary" : "outline"}
-            size="sm"
-            className="h-10"
-            aria-pressed={collapseMode === "compact"}
-            onClick={() => setCollapseMode("compact")}
-          >
-            Compact
-          </Button>
-          <Button
-            type="button"
-            variant={collapseMode === "expand" ? "secondary" : "outline"}
-            size="sm"
-            className="h-10"
-            aria-pressed={collapseMode === "expand"}
-            onClick={() => setCollapseMode("expand")}
-          >
-            Expand All
-          </Button>
+            <ToggleGroupItem value="auto" >Auto</ToggleGroupItem>
+            <ToggleGroupItem value="compact" >Compact</ToggleGroupItem>
+            <ToggleGroupItem value="expand" >Expand All</ToggleGroupItem>
+          </ToggleGroup>
         </div>
       </div>
 

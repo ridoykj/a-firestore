@@ -1,11 +1,8 @@
-import { useEffect, useMemo, useState } from "react"
-import { toast } from "sonner"
 import {
   useFirestoreDatabasesQuery,
   useFirestoreInitMutation,
   useFirestoreProjectsQuery,
 } from "@/services/api/firestore-query"
-import { useGcpStore, type ProjectTab } from "@/store/gcp-store"
 import { Button } from "@/shadcn/components/ui/button"
 import {
   Dialog,
@@ -17,7 +14,9 @@ import {
 } from "@/shadcn/components/ui/dialog"
 import { Input } from "@/shadcn/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shadcn/components/ui/select"
-import { Spinner } from "@/shadcn/components/ui/spinner"
+import { useGcpStore, type ProjectTab } from "@/store/gcp-store"
+import { useEffect, useMemo, useState } from "react"
+import { toast } from "sonner"
 
 interface AddTabDialogProps {
   open: boolean
@@ -85,30 +84,33 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
     )
   }, [databases, databasesQuery.dataUpdatedAt])
 
-  async function handleLoadProjects() {
-    if (!credentialsFile) {
-      toast.warning("Choose a credentials JSON file first.")
+  useEffect(() => {
+    if (!credentialsFile || projectsQuery.isFetching) {
       return
     }
 
-    setSelectedProject("")
-    setSelectedDatabase("")
-    const result = await projectsQuery.refetch()
-    if (result.error) {
-      const message = result.error.message || "Failed to load project IDs."
-      toast.error(message)
-      return
+    const loadProjects = async () => {
+      setSelectedProject("")
+      setSelectedDatabase("")
+      const result = await projectsQuery.refetch()
+      if (result.error) {
+        const message = result.error.message || "Failed to load project IDs."
+        toast.error(message)
+        return
+      }
+
+      const loadedProjects = result.data ?? []
+      const initialProject = loadedProjects[0] ?? ""
+      setSelectedProject(initialProject)
+      if (initialProject) {
+        toast.success(`Loaded ${loadedProjects.length} project ID(s).`)
+      } else {
+        toast.warning("No accessible project IDs found with the uploaded credentials.")
+      }
     }
 
-    const loadedProjects = result.data ?? []
-    const initialProject = loadedProjects[0] ?? ""
-    setSelectedProject(initialProject)
-    if (initialProject) {
-      toast.success(`Loaded ${loadedProjects.length} project ID(s).`)
-    } else {
-      toast.warning("No accessible project IDs found with the uploaded credentials.")
-    }
-  }
+    void loadProjects()
+  }, [credentialsFile])
 
   async function handleCreateTab() {
     if (!credentialsFile) {
@@ -147,82 +149,86 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
         </DialogHeader>
 
         <div className="grid gap-4">
-          <div className="grid gap-2">
-            <label className="text-sm font-medium text-muted-foreground">Credentials JSON</label>
-            <Input
-              type="file"
-              accept=".json,application/json"
-              onChange={(event) => {
-                const nextFile = event.target.files?.[0] ?? null
-                setCredentialsFile(nextFile)
-                setSelectedProject("")
-                setSelectedDatabase("")
-              }}
-              className="h-10 text-sm"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void handleLoadProjects()}
-              disabled={!credentialsFile || loadingProjects}
-              className="h-9"
-            >
-              {loadingProjects ? <Spinner className="w-3 h-3 mr-1" /> : null}
-              Load Projects
-            </Button>
+          <div className="rounded-3xl border border-border/70 bg-muted/80 p-4">
+            <div className="space-y-3">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Credentials JSON</p>
+                <p className="text-xs text-muted-foreground">
+                  Upload a service account key to automatically load available Firestore projects.
+                </p>
+              </div>
+              <Input
+                type="file"
+                accept=".json,application/json"
+                onChange={(event) => {
+                  const nextFile = event.target.files?.[0] ?? null
+                  setCredentialsFile(nextFile)
+                  setSelectedProject("")
+                  setSelectedDatabase("")
+                }}
+                className="h-12 rounded-2xl border-dashed border-border/70 bg-background text-sm"
+              />
+            </div>
           </div>
 
-          <div className="grid gap-2">
-            <label className="text-sm font-medium text-muted-foreground">
-              Project ID
-              {loadingDatabases ? <Spinner className="w-3 h-3 inline-block ml-1" /> : null}
-            </label>
-            <Select
-              value={selectedProject || undefined}
-              onValueChange={(value) => {
-                setSelectedProject(value)
-                setSelectedDatabase("")
-              }}
-              disabled={loadingProjects || projects.length === 0}
-            >
-              <SelectTrigger className="h-10 text-sm">
-                <SelectValue placeholder="Select a project" />
-              </SelectTrigger>
-              <SelectContent>
-                {projects.map((project) => (
-                  <SelectItem key={project} value={project} className="text-sm">
-                    {project}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <div className="grid gap-4 rounded-3xl border border-border/70 bg-background p-4 shadow-sm min-w-0">
+            <div className="grid gap-4 sm:grid-cols-2 min-w-0">
+              <div className="grid gap-2 min-w-0">
+                <div className="flex items-center justify-between gap-3 min-w-0">
+                  <label className="text-sm font-medium text-muted-foreground">Project ID</label>
+                  <span className="text-xs text-muted-foreground truncate">
+                    {loadingProjects ? "Loading projects..." : projects.length > 0 ? `${projects.length} found` : "No projects loaded yet"}
+                  </span>
+                </div>
+                <Select
+                  value={selectedProject || undefined}
+                  onValueChange={(value) => {
+                    setSelectedProject(value)
+                    setSelectedDatabase("")
+                  }}
+                  disabled={!credentialsFile || loadingProjects || projects.length === 0}
+                >
+                  <SelectTrigger className="h-12 text-sm w-full min-w-0">
+                    <SelectValue placeholder="Select a project" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {projects.map((project) => (
+                      <SelectItem key={project} value={project} className="text-sm pr-8">
+                        {project}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-          <div className="grid gap-2">
-            <label className="text-sm font-medium text-muted-foreground">
-              Database ID
-              {initializing ? <Spinner className="w-3 h-3 inline-block ml-1" /> : null}
-            </label>
-            <Select
-              value={selectedDatabase || "__default__"}
-              onValueChange={(value) => setSelectedDatabase(value === "__default__" ? "" : value)}
-              disabled={!selectedProject || loadingDatabases || initializing}
-            >
-              <SelectTrigger className="h-10 text-sm">
-                <SelectValue placeholder={loadingDatabases ? "Loading..." : "(default)"} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__default__" className="text-sm">
-                  (default)
-                </SelectItem>
-                {databases.map((database) => (
-                  <SelectItem key={database} value={database} className="text-sm">
-                    {database}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              <div className="grid gap-2 min-w-0">
+                <div className="flex items-center justify-between gap-3 min-w-0">
+                  <label className="text-sm font-medium text-muted-foreground">Database ID</label>
+                  {initializing ? (
+                    <span className="text-xs text-muted-foreground truncate">Initializing...</span>
+                  ) : null}
+                </div>
+                <Select
+                  value={selectedDatabase || "__default__"}
+                  onValueChange={(value) => setSelectedDatabase(value === "__default__" ? "" : value)}
+                  disabled={!selectedProject || loadingDatabases || initializing}
+                >
+                  <SelectTrigger className="h-12 text-sm w-full min-w-0">
+                    <SelectValue placeholder={loadingDatabases ? "Loading..." : "(default)"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__default__" className="text-sm pr-8">
+                      (default)
+                    </SelectItem>
+                    {databases.map((database) => (
+                      <SelectItem key={database} value={database} className="text-sm pr-8">
+                        {database}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>            
           </div>
         </div>
 

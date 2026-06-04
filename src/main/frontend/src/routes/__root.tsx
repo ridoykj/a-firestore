@@ -15,7 +15,7 @@ export const Route = createRootRoute({
                 content: 'My App is a web application',
             },
             {
-                title: 'NPS',
+                title: 'GManager',
             },
         ],
         links: [

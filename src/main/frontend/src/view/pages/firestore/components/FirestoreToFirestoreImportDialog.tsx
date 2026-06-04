@@ -1,22 +1,24 @@
-import { useMemo, useState, type ChangeEvent, type ReactNode } from "react"
-import { toast } from "sonner"
+import type { NestedNode } from "@/dto/firestore/FirestoreSchema"
+import {
+  useFirestoreDatabasesQuery,
+  useFirestoreInitMutation,
+  useFirestoreProjectsQuery,
+  useFirestoreTransferDeepCopyMutation,
+} from "@/services/api/firestore-query"
+import { firestoreService } from "@/services/api/firestore-service"
 import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/alert"
 import { Badge } from "@/shadcn/components/ui/badge"
 import { Button } from "@/shadcn/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/shadcn/components/ui/dialog"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/shadcn/components/ui/empty"
+import { Field, FieldContent, FieldDescription, FieldLabel, FieldTitle } from "@/shadcn/components/ui/field"
 import { Input } from "@/shadcn/components/ui/input"
 import { Label } from "@/shadcn/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/shadcn/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shadcn/components/ui/select"
+import { Sheet, SheetContent, SheetHeader } from "@/shadcn/components/ui/sheet"
 import { Spinner } from "@/shadcn/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shadcn/components/ui/table"
+import { useGcpStore, type ProjectTab } from "@/store/gcp-store"
 import {
   AlertCircle,
   CheckSquare,
@@ -28,16 +30,10 @@ import {
   Folder,
   ShieldAlert,
   Square,
+  X,
 } from "lucide-react"
-import type { NestedNode } from "@/dto/firestore/FirestoreSchema"
-import {
-  useFirestoreDatabasesQuery,
-  useFirestoreInitMutation,
-  useFirestoreProjectsQuery,
-  useFirestoreTransferDeepCopyMutation,
-} from "@/services/api/firestore-query"
-import { firestoreService } from "@/services/api/firestore-service"
-import { useGcpStore, type ProjectTab } from "@/store/gcp-store"
+import { useMemo, useState, type ChangeEvent, type ReactNode } from "react"
+import { toast } from "sonner"
 
 interface FirestoreToFirestoreImportDialogProps {
   context: ProjectTab & { activePath: string }
@@ -500,39 +496,65 @@ export function FirestoreToFirestoreImportDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-h-[92vh] w-[96vw] max-w-5xl gap-0 overflow-hidden p-0 sm:w-[90vw] md:w-[84vw]">
-        <DialogHeader className="border-b px-4 py-4 sm:px-5">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div>
-              <DialogTitle className="inline-flex items-center gap-2">
-                <CloudDownload className="text-primary" />
-                Import from Firestore
-              </DialogTitle>
-              <DialogDescription className="mt-1">
-                Deep copy nested collections/documents into <strong>{context.projectId}</strong>
-                {" / "}
-                <strong>{context.databaseId || "(default)"}</strong>.
-              </DialogDescription>
+    <Sheet open={open} onOpenChange={handleOpenChange}>
+      <SheetContent
+        side="right"
+        showCloseButton={false}
+        className="w-[90%]! sm:w-[85%]! sm:max-w-[85%]! p-0 gap-0 flex flex-col overflow-y-auto shadow-2xl"
+      >
+        <SheetHeader className="p-3 border-b border-border">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
+            <div className="flex items-start justify-between w-full sm:w-auto">
+              <div className="flex items-center gap-2">
+                <CloudDownload className="w-5 h-5 text-primary" />
+                <h3 className="text-sm font-bold text-foreground">
+                  Import from Firestore
+                </h3>
+              </div>
+              <button
+                onClick={() => handleOpenChange(false)}
+                className="sm:hidden p-1.5 -mr-1.5 rounded-full hover:bg-muted text-muted-foreground transition-colors shrink-0"
+                disabled={step === "EXECUTE"}
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
-            <Badge variant="outline">Step {stepIndex + 1} of {STEP_SEQUENCE.length}</Badge>
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <Badge variant="outline">Step {stepIndex + 1} of {STEP_SEQUENCE.length}</Badge>
+              <Button
+                variant="outline"
+                size="icon-lg"
+                onClick={() => handleOpenChange(false)}
+                className="rounded-full hover:bg-muted text-muted-foreground transition-colors ml-2 hidden sm:inline-flex"
+                disabled={step === "EXECUTE"}
+              >
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
           </div>
 
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {STEP_SEQUENCE.map((value, index) => {
-              const reached = index <= stepIndex
-              const active = value === step
-              return (
-                <Badge key={value} variant={active ? "secondary" : reached ? "outline" : "ghost"}>
-                  {STEP_LABELS[value]}
-                </Badge>
-              )
-            })}
+          <div className="mt-3 flex flex-col gap-3 px-1 pb-1 text-left">
+            <p className="text-sm text-muted-foreground">
+              Deep copy nested collections/documents into <strong>{context.projectId}</strong>
+              {" / "}
+              <strong>{context.databaseId || "(default)"}</strong>.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {STEP_SEQUENCE.map((value, index) => {
+                const reached = index <= stepIndex
+                const active = value === step
+                return (
+                  <Badge key={value} variant={active ? "secondary" : reached ? "outline" : "ghost"}>
+                    {STEP_LABELS[value]}
+                  </Badge>
+                )
+              })}
+            </div>
           </div>
-        </DialogHeader>
+        </SheetHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-5">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col px-2 py-1 sm:px-4">
+          <div className="min-h-0 flex-1 overflow-auto py-3">
             {step === "AUTH" ? (
               <div className="space-y-4">
                 <div className="rounded-lg border bg-card p-4">
@@ -726,24 +748,63 @@ export function FirestoreToFirestoreImportDialog({
                     onValueChange={(value) => setConflictResolution(value as ConflictResolution)}
                     className="mt-3 space-y-3"
                   >
-                    <div className="flex items-start space-x-3 rounded-md border p-4">
-                      <RadioGroupItem value="MERGE" id="merge" />
+                    <div
+                      className={`flex cursor-pointer items-start space-x-3 rounded-md border p-4 transition-colors hover:bg-muted/50 ${conflictResolution === "MERGE" ? "border-primary bg-muted/20" : ""}`}
+                      onClick={() => setConflictResolution("MERGE")}
+                    >
+                      <RadioGroupItem value="MERGE" id="merge" className="mt-0.5" checked={conflictResolution === "MERGE"} />
                       <div className="grid gap-1.5">
-                        <Label htmlFor="merge">Merge Data</Label>
+                        <Label htmlFor="merge" className="cursor-pointer font-medium leading-none">Merge Data</Label>
                         <p className="text-sm text-muted-foreground">
                           Existing documents will be updated. New fields are added, existing fields are overwritten.
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-start space-x-3 rounded-md border p-4">
-                      <RadioGroupItem value="OVERWRITE" id="overwrite" />
+                    <div
+                      className={`flex cursor-pointer items-start space-x-3 rounded-md border p-4 transition-colors hover:bg-muted/50 ${conflictResolution === "OVERWRITE" ? "border-primary bg-muted/20" : ""}`}
+                      onClick={() => setConflictResolution("OVERWRITE")}
+                    >
+                      <RadioGroupItem value="OVERWRITE" id="overwrite" className="mt-0.5" checked={conflictResolution === "OVERWRITE"} />
                       <div className="grid gap-1.5">
-                        <Label htmlFor="overwrite">Overwrite (Replace)</Label>
+                        <Label htmlFor="overwrite" className="cursor-pointer font-medium leading-none">Overwrite (Replace)</Label>
                         <p className="text-sm text-muted-foreground">
                           Existing documents will be completely replaced. Fields not present in the source will be deleted.
                         </p>
                       </div>
                     </div>
+                  </RadioGroup>
+                  <RadioGroup defaultValue="plus" className="max-w-sm">
+                    <FieldLabel htmlFor="plus-plan">
+                      <Field orientation="horizontal">
+                        <FieldContent>
+                          <FieldTitle>Plus</FieldTitle>
+                          <FieldDescription>
+                            For individuals and small teams.
+                          </FieldDescription>
+                        </FieldContent>
+                        <RadioGroupItem value="plus" id="plus-plan" />
+                      </Field>
+                    </FieldLabel>
+                    <FieldLabel htmlFor="pro-plan">
+                      <Field orientation="horizontal">
+                        <FieldContent>
+                          <FieldTitle>Pro</FieldTitle>
+                          <FieldDescription>For growing businesses.</FieldDescription>
+                        </FieldContent>
+                        <RadioGroupItem value="pro" id="pro-plan" />
+                      </Field>
+                    </FieldLabel>
+                    <FieldLabel htmlFor="enterprise-plan">
+                      <Field orientation="horizontal">
+                        <FieldContent>
+                          <FieldTitle>Enterprise</FieldTitle>
+                          <FieldDescription>
+                            For large teams and enterprises.
+                          </FieldDescription>
+                        </FieldContent>
+                        <RadioGroupItem value="enterprise" id="enterprise-plan" />
+                      </Field>
+                    </FieldLabel>
                   </RadioGroup>
                 </div>
 
@@ -760,7 +821,7 @@ export function FirestoreToFirestoreImportDialog({
             ) : null}
 
             {step === "EXECUTE" ? (
-              <div className="flex min-h-[320px] flex-col items-center justify-center space-y-4 rounded-lg border bg-card p-6 text-center">
+              <div className="flex min-h-80 flex-col items-center justify-center space-y-4 rounded-lg border bg-card p-6 text-center">
                 <Spinner className="h-12 w-12 text-primary" />
                 <div>
                   <h3 className="text-lg font-semibold">Copying Data...</h3>
@@ -771,50 +832,49 @@ export function FirestoreToFirestoreImportDialog({
               </div>
             ) : null}
           </div>
+        </div>
 
-          <div className="border-t bg-background px-4 py-3 sm:px-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                {step !== "AUTH" && step !== "EXECUTE" ? (
-                  <Button variant="outline" onClick={handleBack}>
-                    Back
-                  </Button>
-                ) : null}
-              </div>
+        <div className="flex flex-col-reverse sm:flex-row sm:flex-wrap items-center sm:justify-between gap-3 border-t border-border px-4 py-4 sm:px-6 shrink-0 bg-background">
+          <div className="w-full sm:w-auto">
+            {step !== "AUTH" && step !== "EXECUTE" ? (
+              <Button variant="outline" onClick={handleBack} className="w-full sm:w-auto">
+                Back
+              </Button>
+            ) : null}
+          </div>
 
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
-                <Button variant="ghost" onClick={() => handleOpenChange(false)} disabled={step === "EXECUTE"}>
-                  Cancel
-                </Button>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center w-full sm:w-auto">
+            <Button variant="ghost" onClick={() => handleOpenChange(false)} disabled={step === "EXECUTE"} className="w-full sm:w-auto">
+              Cancel
+            </Button>
 
-                {step === "AUTH" ? (
-                  <Button onClick={() => void proceedToSelect()} disabled={!sourceProjectId || initFirestoreMutation.isPending}>
-                    {initFirestoreMutation.isPending ? <Spinner data-icon="inline-start" /> : null}
-                    Continue
-                  </Button>
-                ) : null}
+            {step === "AUTH" ? (
+              <Button onClick={() => void proceedToSelect()} disabled={!sourceProjectId || initFirestoreMutation.isPending} className="w-full sm:w-auto shadow-sm">
+                {initFirestoreMutation.isPending ? <Spinner data-icon="inline-start" /> : null}
+                Continue
+              </Button>
+            ) : null}
 
-                {step === "SELECT" ? (
-                  <Button onClick={() => setStep("SUMMARY")} disabled={selectedPaths.size === 0}>
-                    Review Selection
-                  </Button>
-                ) : null}
+            {step === "SELECT" ? (
+              <Button onClick={() => setStep("SUMMARY")} disabled={selectedPaths.size === 0} className="w-full sm:w-auto shadow-sm">
+                Review Selection
+              </Button>
+            ) : null}
 
-                {step === "SUMMARY" ? <Button onClick={() => setStep("CONFLICT")}>Set Conflict Policy</Button> : null}
+            {step === "SUMMARY" ? <Button onClick={() => setStep("CONFLICT")} className="w-full sm:w-auto shadow-sm">Set Conflict Policy</Button> : null}
 
-                {step === "CONFLICT" ? (
-                  <Button
-                    variant={conflictResolution === "OVERWRITE" ? "destructive" : "default"}
-                    onClick={() => void executeCopy()}
-                  >
-                    Confirm & Import
-                  </Button>
-                ) : null}
-              </div>
-            </div>
+            {step === "CONFLICT" ? (
+              <Button
+                variant={conflictResolution === "OVERWRITE" ? "destructive" : "default"}
+                onClick={() => void executeCopy()}
+                className="w-full sm:w-auto shadow-sm"
+              >
+                Confirm & Import
+              </Button>
+            ) : null}
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   )
 }

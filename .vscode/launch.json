@@ -5,18 +5,18 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Launch Integrated Browser",
+            "name": "Launch Chrome",
             "request": "launch",
-            "type": "editor-browser",
-            "url": "http://localhost:5173",
-            "webRoot": "${workspaceFolder}"
+            "type": "chrome",
+            "url":  "http://localhost:5173",
+            "webRoot": "${workspaceFolder}/src/main/frontend"
         },
         {
-            "type": "chrome",
+            "type": "editor-browser",
             "request": "launch",
-            "name": "Launch Chrome against localhost",
+            "name": "Launch Integrated Browser against localhost",
             "url": "http://localhost:5173",
-            "webRoot": "${workspaceFolder}"
+            "webRoot": "${workspaceFolder}/src/main/frontend"
         }
     ]
 }

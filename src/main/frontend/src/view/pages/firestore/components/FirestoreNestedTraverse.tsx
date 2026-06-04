@@ -236,8 +236,8 @@ export function FirestoreNestedTraverse({
   }
 
   return (
-    <aside className="hidden w-64 shrink-0 border-r border-border bg-card md:flex md:flex-col">
-      <div className={cn("flex min-h-0 flex-1 flex-col")}>{content}</div>
+    <aside className="hidden w-64 shrink-0 border-r border-border bg-card md:flex md:flex-col h-full">
+      <div className={cn("flex min-h-0 h-full flex-1 flex-col")}>{content}</div>
     </aside>
   )
 }

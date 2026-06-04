@@ -1,6 +1,12 @@
 import { useMemo, useState } from "react"
 import { Plus, X, Database, Sun, Moon, Folder } from "lucide-react"
 import { Button } from "@/shadcn/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/shadcn/components/ui/dropdown-menu"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shadcn/components/ui/tabs"
 import { cn } from "@/shadcn/lib/utils"
 import { AddTabDialog } from "@/view/pages/firestore/components/AddTabDialog"
@@ -52,16 +58,22 @@ export function FirestoreTabsLayout() {
             <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
             <span className="sr-only">Toggle theme</span>
           </Button>
-          <div
-            onClick={() => {
-              // Simulating the prompt requirement to show profile info
-              alert("Dashboard Profile Info:\nUser: tanstack.router@gmail.com\nRole: admin\nWorkspace rules applied.");
-            }}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-700 text-sm font-medium text-white cursor-pointer hover:ring-2 ring-white transition-all active:scale-95"
-            title="Account Profile: tanstack.router@gmail.com"
-          >
-            TR
-          </div>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-700 text-sm font-medium text-white hover:ring-2 ring-white transition-all active:scale-95"
+                title="Account Profile: tanstack.router@gmail.com"
+              >
+                TR
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => (window.location.href = "/")}>Dashboard</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => (window.location.href = "/logout")}>Logout</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 

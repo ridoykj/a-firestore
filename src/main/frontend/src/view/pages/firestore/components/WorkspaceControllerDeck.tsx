@@ -26,6 +26,7 @@ import {
   Play,
   Plus,
   Search,
+  Trash,
   Upload
 } from "lucide-react"
 import { useEffect, useMemo } from "react"
@@ -40,6 +41,8 @@ interface WorkspaceControllerDeckProps {
 
   exportCollectionCurrentPage: (format: TransferFormat) => void
   exportCollectionFull: (format: TransferFormat) => void
+  exportSelectedJSON: () => void
+  exportSelectedCSV: () => void
   requestCollectionImport: (format: TransferFormat) => void
   setFirestoreImportDialogOpen: (open: boolean) => void
   openCreateFromHeader: () => void
@@ -47,6 +50,9 @@ interface WorkspaceControllerDeckProps {
   crudBusy: unknown | null
   previewBusy: unknown | null
   transferBusy: boolean
+
+  selectedRowCount: number
+  onRequestDeleteSelected: (documentPaths: string[]) => Promise<void>
 
   filterPanelOpen: boolean
   setFilterPanelOpen: (open: boolean) => void
@@ -63,6 +69,8 @@ export function WorkspaceControllerDeck({
   isQuerying,
   exportCollectionCurrentPage,
   exportCollectionFull,
+  exportSelectedJSON,
+  exportSelectedCSV,
   requestCollectionImport,
   setFirestoreImportDialogOpen,
   openCreateFromHeader,
@@ -70,6 +78,8 @@ export function WorkspaceControllerDeck({
   crudBusy,
   previewBusy,
   transferBusy,
+  selectedRowCount,
+  onRequestDeleteSelected,
   filterPanelOpen,
   setFilterPanelOpen,
   searchQuery,
@@ -280,6 +290,13 @@ export function WorkspaceControllerDeck({
               <DropdownMenuItem onClick={() => exportCollectionFull("csv")}>
                 CSV (full collection)
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={exportSelectedJSON}>
+                JSON (selected rows)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={exportSelectedCSV}>
+                CSV (selected rows)
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -314,6 +331,16 @@ export function WorkspaceControllerDeck({
           >
             <Plus className="w-3.5 h-3.5 text-blue-600" />
             <span>Create</span>
+          </button>
+
+          <button
+            onClick={() => onRequestDeleteSelected([])}
+            disabled={selectedRowCount === 0}
+            className="px-3.5 py-1.5 bg-card hover:bg-accent text-foreground text-xs font-semibold rounded-xl border border-border flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
+            title={selectedRowCount === 0 ? "Select rows to delete" : `Delete ${selectedRowCount} selected row(s)`}
+          >
+            <Trash className="w-3.5 h-3.5 text-red-500" />
+            <span>Delete selected</span>
           </button>
 
           <div className="h-5 w-px bg-border mx-1"></div>

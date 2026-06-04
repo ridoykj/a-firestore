@@ -128,6 +128,19 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
   const [queryResponse, setQueryResponse] = useState<QueryResponse | null>(null)
   const [queryLoading, setQueryLoading] = useState(false)
   const [queryError, setQueryError] = useState("")
+  const [querySelectedRows, setQuerySelectedRows] = useState<
+    Array<{
+      key: string
+      doc: Record<string, unknown>
+      documentPath: string
+      normalizedDocumentPath: string
+      documentId: string
+      payloadObject: Record<string, unknown>
+      rowPreviewDisabled: boolean
+      rowIsSelected: boolean
+      searchText: string
+    }>
+  >([])
 
   const [createCollectionPath, setCreateCollectionPath] = useState("")
   const [createDocumentId, setCreateDocumentId] = useState("")
@@ -274,6 +287,11 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     }
     return `${queryResponse.resultCount} documents found in ${queryResponse.elapsedMs}ms`
   }, [queryResponse])
+
+  const selectedRowPaths = useMemo(
+    () => querySelectedRows.map((row) => row.normalizedDocumentPath).filter(Boolean),
+    [querySelectedRows],
+  )
 
   function resolveCollectionTransferPath(): string {
     const normalizedQueryPath = normalizePath(queryPath)
@@ -1065,6 +1083,102 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     }
   }
 
+  async function handleDeleteSelectedRows(documentPaths: string[]) {
+    const normalizedPaths = documentPaths.map(normalizePath).filter(Boolean)
+    if (normalizedPaths.length === 0) {
+      toast.warning("No valid document paths were selected for deletion.")
+      return
+    }
+
+    const validPaths = normalizedPaths.filter((path) => !pathIsCollection(path))
+    if (validPaths.length === 0) {
+      toast.warning("Selected rows include only collection paths and cannot be deleted.")
+      return
+    }
+
+    try {
+      for (const documentPath of validPaths) {
+        await firestoreService.deleteDocument(context, documentPath)
+      }
+
+      toast.success(`Deleted ${validPaths.length} selected document(s).`)
+      await runQuery(page)
+      await refreshNested(queryPath)
+
+      if (
+        previewSelection &&
+        validPaths.includes(normalizePath(previewSelection.documentPath))
+      ) {
+        clearPreviewSelection()
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to delete selected documents."
+      toast.error(message)
+    }
+  }
+
+  function exportSelectedJSON() {
+    if (!queryResponse || querySelectedRows.length === 0) {
+      toast.warning("Select rows to export.")
+      return
+    }
+
+    const collectionPath = normalizePath(queryResponse.path)
+    if (!collectionPath || !pathIsCollection(collectionPath)) {
+      toast.error("Current query path is not a collection and cannot be exported.")
+      return
+    }
+
+    try {
+      const records = querySelectedRows.map((row) => toTransferRecord(row.doc, collectionPath))
+      const jsonPayload = buildCollectionTransferJson(collectionPath, records)
+      const fileName = `${sanitizeFileNamePart(collectionPath)}-selected.json`
+      triggerTextDownload(
+        fileName,
+        jsonPayload,
+        "application/json;charset=utf-8",
+      )
+      toast.success(`Exported ${records.length} selected document(s).`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Export failed."
+      toast.error(message)
+    }
+  }
+
+  function exportSelectedCSV() {
+    if (!queryResponse || querySelectedRows.length === 0) {
+      toast.warning("Select rows to export.")
+      return
+    }
+
+    const collectionPath = normalizePath(queryResponse.path)
+    if (!collectionPath || !pathIsCollection(collectionPath)) {
+      toast.error("Current query path is not a collection and cannot be exported.")
+      return
+    }
+
+    try {
+      const records = querySelectedRows.map((row) => toTransferRecord(row.doc, collectionPath))
+      const csvPayload = serializeTransferRecordsToCsv(records)
+      const fileName = `${sanitizeFileNamePart(collectionPath)}-selected.csv`
+      triggerTextDownload(
+        fileName,
+        csvPayload,
+        "text/csv;charset=utf-8",
+      )
+      toast.success(`Exported ${records.length} selected document(s).`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Export failed."
+      toast.error(message)
+    }
+  }
+  
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async function handleDeleteSelectedRowsFromHeader(_documentPaths?: string[]) {
+    
+    await handleDeleteSelectedRows(selectedRowPaths)
+  }
+
   return (
     <div className="relative flex min-h-0 h-full w-full flex-1 overflow-hidden bg-muted/40">
       <div className="flex min-h-0 h-full w-full">
@@ -1090,6 +1204,8 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
             isQuerying={queryLoading}
             exportCollectionCurrentPage={(format) => void exportCollectionCurrentPage(format)}
             exportCollectionFull={(format) => void exportCollectionFull(format)}
+            exportSelectedJSON={exportSelectedJSON}
+            exportSelectedCSV={exportSelectedCSV}
             requestCollectionImport={requestCollectionImport}
             setFirestoreImportDialogOpen={setFirestoreImportDialogOpen}
             openCreateFromHeader={openCreateFromHeader}
@@ -1097,6 +1213,8 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
             crudBusy={crudBusy}
             previewBusy={previewBusy}
             transferBusy={transferBusy}
+            selectedRowCount={querySelectedRows.length}
+            onRequestDeleteSelected={handleDeleteSelectedRowsFromHeader}
             filterPanelOpen={rightSidebarExpanded}
             setFilterPanelOpen={setRightSidebarExpanded}
             searchQuery={searchQuery}
@@ -1105,7 +1223,7 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
           // filteredRows={filteredRowsCount} // You can compute filteredRows based on searchQuery later
           />
 
-          <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+          <div className="relative flex min-h-0 h-full min-w-0 flex-1 overflow-hidden">
             <FirestoreNestedTraverse
               nestedLoading={nestedLoading}
               nestedResponse={nestedResponse}
@@ -1135,6 +1253,7 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
                     queryResponse={queryResponse}
                     selectedPreviewPath={previewOpen ? previewSelection?.documentPath ?? "" : ""}
                     onRequestPreviewFromRow={openPreviewFromRow}
+                    onSelectionChange={setQuerySelectedRows}
                     page={page}
                     onRunPrevPage={() => void runQuery(Math.max(0, page - 1))}
                     onRunNextPage={() => void runQuery(page + 1)}

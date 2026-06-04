@@ -2,6 +2,7 @@ import type { QueryResponse } from "@/dto/firestore/FirestoreSchema"
 import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/alert"
 import { Badge } from "@/shadcn/components/ui/badge"
 import { Button } from "@/shadcn/components/ui/button"
+import { Checkbox } from "@/shadcn/components/ui/checkbox"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/shadcn/components/ui/empty"
 import {
   Pagination,
@@ -26,9 +27,9 @@ import {
   AlertCircle,
   CheckCircle2,
   Eye,
-  XCircle
+  XCircle,
 } from "lucide-react"
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 type FirestoreQueryResultsProps = {
   queryLoading: boolean
@@ -40,6 +41,7 @@ type FirestoreQueryResultsProps = {
     documentId: string,
     payload: Record<string, unknown>,
   ) => void
+  onSelectionChange: (rows: RowModel[]) => void
   page: number
   onRunPrevPage: () => void
   onRunNextPage: () => void
@@ -68,6 +70,7 @@ export function FirestoreQueryResults({
   queryResponse,
   selectedPreviewPath,
   onRequestPreviewFromRow,
+  onSelectionChange,
   page,
   onRunPrevPage,
   onRunNextPage,
@@ -116,6 +119,12 @@ export function FirestoreQueryResults({
     })
   }, [dataColumns, queryDocuments, selectedPreviewPath])
 
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set())
+  const selectedRows = useMemo(
+    () => rows.filter((row) => selectedRowKeys.has(row.key)),
+    [rows, selectedRowKeys],
+  )
+
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
       if (statusFilter === "previewable" && row.rowPreviewDisabled) {
@@ -131,6 +140,40 @@ export function FirestoreQueryResults({
     })
   }, [normalizedQuickFilter, rows, statusFilter])
 
+  const visibleRowKeys = useMemo(
+    () => filteredRows.map((row) => row.key),
+    [filteredRows],
+  )
+  const anyVisibleSelected = visibleRowKeys.some((key) => selectedRowKeys.has(key))
+  const allVisibleSelected =
+    visibleRowKeys.length > 0 && visibleRowKeys.every((key) => selectedRowKeys.has(key))
+  const headerCheckboxState: boolean | "indeterminate" =
+    allVisibleSelected ? true : anyVisibleSelected ? "indeterminate" : false
+
+  const toggleRowSelection = (rowKey: string, shouldSelect: boolean) => {
+    setSelectedRowKeys((prev) => {
+      const next = new Set(prev)
+      if (shouldSelect) {
+        next.add(rowKey)
+      } else {
+        next.delete(rowKey)
+      }
+      return next
+    })
+  }
+
+  const toggleAllVisibleRows = () => {
+    setSelectedRowKeys((prev) => {
+      const next = new Set(prev)
+      if (allVisibleSelected) {
+        visibleRowKeys.forEach((key) => next.delete(key))
+      } else {
+        visibleRowKeys.forEach((key) => next.add(key))
+      }
+      return next
+    })
+  }
+
   const canPrev = Boolean(queryResponse?.hasPreviousPage) && !queryLoading
   const canNext = Boolean(queryResponse?.hasNextPage) && !queryLoading
   const statusBadgeVariant = queryError
@@ -144,6 +187,10 @@ export function FirestoreQueryResults({
       onFilterMatchCountChange(filteredRows.length)
     }
   }, [filteredRows.length, onFilterMatchCountChange])
+
+  useEffect(() => {
+    onSelectionChange(selectedRows)
+  }, [selectedRows, onSelectionChange])
 
   const openRowPreview = (row: RowModel) => {
     if (row.rowPreviewDisabled) {
@@ -206,10 +253,21 @@ export function FirestoreQueryResults({
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold">{row.documentId}</p>
-                          <p className="truncate font-mono text-xs text-muted-foreground">
-                            {row.documentPath || "(no-path)"}
-                          </p>
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              checked={selectedRowKeys.has(row.key)}
+                              onCheckedChange={(checked) =>
+                                toggleRowSelection(row.key, checked === true)
+                              }
+                              className="h-5 w-5 shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold">{row.documentId}</p>
+                              <p className="truncate font-mono text-xs text-muted-foreground">
+                                {row.documentPath || "(no-path)"}
+                              </p>
+                            </div>
+                          </div>
                         </div>
                         {row.rowPreviewDisabled ? (
                           <Badge variant="destructive">Unavailable</Badge>
@@ -260,7 +318,14 @@ export function FirestoreQueryResults({
                       <TableRow className="sticky top-0 z-30 bg-background/95 shadow-[inset_0_-1px_0_hsl(var(--border)),inset_-1px_0_0_hsl(var(--border))] backdrop-blur">
                         <TableHead className="sticky top-0 left-0 z-30 w-56 min-w-56 border-r border-border/70 bg-background/95 py-3 font-semibold shadow-[inset_0_-1px_0_hsl(var(--border)),inset_-1px_0_0_hsl(var(--border))] backdrop-blur">
                           <div className="grid gap-0.5">
-                            <span>Document ID</span>
+                            <div className="flex items-center justify-between gap-2">
+                              <span>Document ID</span>
+                              <Checkbox
+                                checked={headerCheckboxState}
+                                onCheckedChange={toggleAllVisibleRows}
+                                className="h-5 w-5 shrink-0"
+                              />
+                            </div>
                             <span className="text-xs font-normal text-foreground/65">
                               key
                             </span>
@@ -326,17 +391,29 @@ export function FirestoreQueryResults({
                               row.rowIsSelected ? "bg-primary/10" : "bg-card/95",
                             )}
                           >
-                            <div className="grid gap-1">
-                              <div className="flex items-center gap-2">
-                                <span className="truncate font-medium">{row.documentId}</span>
-                                {row.rowPreviewDisabled ? (
-                                  <Badge variant="destructive">Unavailable</Badge>
-                                ) : row.rowIsSelected ? (
-                                  <Badge variant="secondary">Selected</Badge>
-                                ) : (
-                                  <Badge variant="outline">Ready</Badge>
-                                )}
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <Checkbox
+                                  checked={selectedRowKeys.has(row.key)}
+                                  onCheckedChange={(checked) =>
+                                    toggleRowSelection(row.key, checked === true)
+                                  }
+                                  className="h-5 w-5 shrink-0"
+                                />
+                                <div className="min-w-0">
+                                  <span className="truncate font-medium">{row.documentId}</span>
+                                  <p className="truncate font-mono text-xs text-muted-foreground">
+                                    {row.documentPath || "(no-path)"}
+                                  </p>
+                                </div>
                               </div>
+                              {row.rowPreviewDisabled ? (
+                                <Badge variant="destructive">Unavailable</Badge>
+                              ) : row.rowIsSelected ? (
+                                <Badge variant="secondary">Selected</Badge>
+                              ) : (
+                                <Badge variant="outline">Ready</Badge>
+                              )}
                             </div>
                           </TableCell>
                           {dataColumns.map((column) => (
