@@ -1,0 +1,76 @@
+// Template only. Replace placeholders after inspecting the active project.
+// Suggested feature files:
+// - src/main/frontend/src/dto/{{feature-folder}}/{{FeatureName}}Schema.ts
+// - src/main/frontend/src/services/api/{{feature-name}}-service.ts
+// - src/main/frontend/src/view/pages/{{feature-folder}}/{{FeatureName}}Page.tsx
+// Preferred clean structure:
+// - src/features/{{feature-folder}}/api/{{featureName}}Api.ts
+// - src/features/{{feature-folder}}/hooks/use{{FeatureName}}Queries.ts
+// - src/features/{{feature-folder}}/schemas/{{FeatureName}}Schema.ts
+// - src/shared/api/axiosClient.ts
+
+import { axiosClient } from "@/shared/api/axiosClient"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { AxiosError } from "axios"
+
+export type {{FeatureName}}CreateRequest = {
+  name: string
+}
+
+export type {{FeatureName}}Response = {
+  id: string
+  name: string
+}
+
+const {{featureName}}QueryKeys = {
+  root: ["{{featureName}}"] as const,
+  list: () => [...{{featureName}}QueryKeys.root, "list"] as const,
+} as const
+
+function toRequestError(error: unknown): Error {
+  if (error instanceof AxiosError) {
+    const data = error.response?.data
+    if (typeof data === "string" && data.trim()) {
+      return new Error(data)
+    }
+    if (data && typeof data === "object") {
+      const message = (data as Record<string, unknown>).message
+      if (typeof message === "string" && message.trim()) {
+        return new Error(message)
+      }
+    }
+  }
+  return error instanceof Error ? error : new Error("Request failed.")
+}
+
+async function request<T>(call: () => Promise<{ data: T }>): Promise<T> {
+  try {
+    const { data } = await call()
+    return data
+  } catch (error) {
+    throw toRequestError(error)
+  }
+}
+
+export const {{featureName}}Api = {
+  list: () => request<{{FeatureName}}Response[]>(() => axiosClient.get("/api/{{resource-path}}")),
+  create: (payload: {{FeatureName}}CreateRequest) =>
+    request<{{FeatureName}}Response>(() => axiosClient.post("/api/{{resource-path}}", payload)),
+}
+
+export function use{{FeatureName}}ListQuery() {
+  return useQuery({
+    queryKey: {{featureName}}QueryKeys.list(),
+    queryFn: {{featureName}}Api.list,
+  })
+}
+
+export function use{{FeatureName}}CreateMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: {{featureName}}Api.create,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: {{featureName}}QueryKeys.root })
+    },
+  })
+}
