@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "shadcn/tailwind.css";
 @import "@fontsource-variable/inter";
 
 @custom-variant dark (&:is(.dark *));
@@ -125,6 +126,9 @@
     }
   body {
     @apply min-h-dvh bg-background text-foreground antialiased;
+    }
+  button:not(:disabled), [role="button"]:not(:disabled) {
+    cursor: pointer;
     }
   html {
     @apply font-sans text-[15px];

@@ -1,4 +1,3 @@
-import type { NestedNode } from "@/features/firestore/schemas/FirestoreSchema"
 import {
   useFirestoreDatabasesQuery,
   useFirestoreInitMutation,
@@ -6,11 +5,12 @@ import {
   useFirestoreTransferDeepCopyMutation,
 } from "@/features/firestore/api/firestore-query"
 import { firestoreService } from "@/features/firestore/api/firestore-service"
+import type { NestedNode } from "@/features/firestore/schemas/FirestoreSchema"
+import { useGcpStore, type ProjectTab } from "@/features/gcp/store/gcp-store"
 import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/alert"
 import { Badge } from "@/shadcn/components/ui/badge"
 import { Button } from "@/shadcn/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/shadcn/components/ui/empty"
-import { Field, FieldContent, FieldDescription, FieldLabel, FieldTitle } from "@/shadcn/components/ui/field"
 import { Input } from "@/shadcn/components/ui/input"
 import { Label } from "@/shadcn/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/shadcn/components/ui/radio-group"
@@ -18,7 +18,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader } from "@/shadcn/components/ui/sheet"
 import { Spinner } from "@/shadcn/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shadcn/components/ui/table"
-import { useGcpStore, type ProjectTab } from "@/features/gcp/store/gcp-store"
 import {
   AlertCircle,
   CheckSquare,
@@ -772,39 +771,6 @@ export function FirestoreToFirestoreImportDialog({
                         </p>
                       </div>
                     </div>
-                  </RadioGroup>
-                  <RadioGroup defaultValue="plus" className="max-w-sm">
-                    <FieldLabel htmlFor="plus-plan">
-                      <Field orientation="horizontal">
-                        <FieldContent>
-                          <FieldTitle>Plus</FieldTitle>
-                          <FieldDescription>
-                            For individuals and small teams.
-                          </FieldDescription>
-                        </FieldContent>
-                        <RadioGroupItem value="plus" id="plus-plan" />
-                      </Field>
-                    </FieldLabel>
-                    <FieldLabel htmlFor="pro-plan">
-                      <Field orientation="horizontal">
-                        <FieldContent>
-                          <FieldTitle>Pro</FieldTitle>
-                          <FieldDescription>For growing businesses.</FieldDescription>
-                        </FieldContent>
-                        <RadioGroupItem value="pro" id="pro-plan" />
-                      </Field>
-                    </FieldLabel>
-                    <FieldLabel htmlFor="enterprise-plan">
-                      <Field orientation="horizontal">
-                        <FieldContent>
-                          <FieldTitle>Enterprise</FieldTitle>
-                          <FieldDescription>
-                            For large teams and enterprises.
-                          </FieldDescription>
-                        </FieldContent>
-                        <RadioGroupItem value="enterprise" id="enterprise-plan" />
-                      </Field>
-                    </FieldLabel>
                   </RadioGroup>
                 </div>
 
