@@ -26,8 +26,15 @@ export default defineConfig({
     emptyOutDir: true,
   },
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
+    alias: [
+      {
+        find: "@/shadcn",
+        replacement: path.resolve(__dirname, "./src/shared/components/ui/shadcn"),
+      },
+      {
+        find: "@",
+        replacement: path.resolve(__dirname, "./src"),
+      },
+    ],
   },
 })

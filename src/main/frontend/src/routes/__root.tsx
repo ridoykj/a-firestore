@@ -1,7 +1,7 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { Suspense } from "react";
-import { Toaster } from "../shadcn/components/ui/sonner";
+import { Toaster } from "@/shadcn/components/ui/sonner";
 import AppErrorComponent from "../view/pages/error/AppErrorComponent";
 import GlobalErrorComponent from "../view/pages/error/GlobalErrorComponent";
 import NotFoundPage from "../view/pages/error/NotFoundPage";

@@ -4,10 +4,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { createRouter, RouterProvider } from '@tanstack/react-router'
 import { routeTree } from './routeTree.gen'
-import { GcpStoreProvider } from "@/store/gcp-store"
+import { GcpStoreProvider } from "@/features/gcp/store/gcp-store"
 import { ThemeProvider } from "@/shadcn/components/theme-provider"
 import './style.css'
-import { TooltipProvider } from './shadcn/components/ui/tooltip'
+import { TooltipProvider } from "@/shadcn/components/ui/tooltip"
 
 const queryClient = new QueryClient({
   defaultOptions: {
