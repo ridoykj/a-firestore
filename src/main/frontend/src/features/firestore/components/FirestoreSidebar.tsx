@@ -224,7 +224,7 @@ export function FirestoreSidebar({
               }}
             >
               <div className="flex items-center gap-2 min-w-0">
-                <Folder className={cn("w-3.5 h-3.5 flex-shrink-0", isActive ? "text-primary" : "text-amber-500")} />
+                <Folder className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-primary" : "text-amber-500")} />
                 <span className="truncate">{collection}</span>
               </div>
             </button>
