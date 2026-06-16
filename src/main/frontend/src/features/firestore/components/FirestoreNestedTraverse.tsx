@@ -81,25 +81,7 @@ export function FirestoreNestedTraverse({
 
   const content = (
     <>
-      <div className="px-4 flex items-center justify-between mb-3 mt-5">
-        <div className="flex items-center gap-2">
-          <Database className="w-4 h-4 text-emerald-500" />
-          <span className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-wider">Nested Traverse</span>
-        </div>
-        
-        <button
-          onClick={() => {
-            setNestedIdFilter('')
-            void refreshNested(queryPath)
-          }}
-          className="p-1 rounded hover:bg-muted text-primary transition-colors"
-          title="Refresh nested browser list"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      <div className="px-3 mb-3">
+      <div className="px-3 py-3 mb-1 border-b">
         <div className="relative">
           <Search className="absolute left-2.5 top-2 w-3.5 h-3.5 text-muted-foreground" />
           <input
@@ -112,7 +94,7 @@ export function FirestoreNestedTraverse({
         </div>
       </div>
 
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-2 space-y-0.5">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-2 space-y-0.5 mt-2">
         {nestedLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground p-3">
             <Spinner />
@@ -237,6 +219,23 @@ export function FirestoreNestedTraverse({
 
   return (
     <aside className="hidden w-64 shrink-0 border-r border-border bg-card md:flex md:flex-col h-full">
+      <div className="flex shrink-0 items-center border-b border-border transition-all h-14 px-5 justify-between">
+        <div className="flex items-center gap-2">
+          <Database className="w-4 h-4 text-emerald-500" />
+          <span className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-wider">Nested Traverse</span>
+        </div>
+        
+        <button
+          onClick={() => {
+            setNestedIdFilter('')
+            void refreshNested(queryPath)
+          }}
+          className="p-1 rounded hover:bg-muted text-primary transition-colors"
+          title="Refresh nested browser list"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+        </button>
+      </div>
       <div className={cn("flex min-h-0 h-full flex-1 flex-col")}>{content}</div>
     </aside>
   )

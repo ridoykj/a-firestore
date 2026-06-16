@@ -446,77 +446,79 @@ export function FirestoreQueryResults({
         ) : null}
       </div>
 
-      <div className="flex flex-col gap-2 border-t bg-card px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <span>
-            {queryResponse
-              ? `Page ${queryResponse.pageIndex + 1} - ${queryResponse.pageSize} per page`
-              : `Page ${page + 1}`}
-          </span>
-          <span>
-            {queryResponse
-              ? queryResponse.resultCount > 0
-                ? `Showing ${queryResponse.pageStart}-${queryResponse.pageEnd}`
-                : "No rows on this page"
-              : "No rows on this page"}
-          </span>
-          {hasActiveClientFilter ? (
-            <Badge variant="outline">Filtered view</Badge>
-          ) : null}
+      <footer className="flex min-h-10 flex-wrap items-center justify-between gap-2 border-t bg-card px-3 py-2 text-sm text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-3">
+          <Badge variant={statusBadgeVariant}>
+            {queryError ? (
+              <>
+                <XCircle data-icon="inline-start" />
+                Error
+              </>
+            ) : queryLoading ? (
+              <>
+                <Spinner data-icon="inline-start" />
+                Loading
+              </>
+            ) : (
+              <>
+                <CheckCircle2 data-icon="inline-start" />
+                Ready
+              </>
+            )}
+          </Badge>
+
+          <div className="flex items-center gap-2">
+            <span>
+              {queryResponse
+                ? `Page ${queryResponse.pageIndex + 1} - ${queryResponse.pageSize} per page`
+                : `Page ${page + 1}`}
+            </span>
+            <span>
+              {queryResponse
+                ? queryResponse.resultCount > 0
+                  ? `Showing ${queryResponse.pageStart}-${queryResponse.pageEnd}`
+                  : "No rows on this page"
+                : "No rows on this page"}
+            </span>
+            {hasActiveClientFilter ? (
+              <Badge variant="outline">Filtered view</Badge>
+            ) : null}
+          </div>
         </div>
 
-        <Pagination className="mx-0 w-auto justify-start sm:justify-end">
-          <PaginationContent>
-            <PaginationItem>
-              <PaginationPrevious
-                href="#"
-                aria-disabled={!canPrev}
-                className={cn(!canPrev && "pointer-events-none opacity-50")}
-                onClick={(event) => {
-                  event.preventDefault()
-                  if (canPrev) {
-                    onRunPrevPage()
-                  }
-                }}
-              />
-            </PaginationItem>
-            <PaginationItem>
-              <PaginationNext
-                href="#"
-                aria-disabled={!canNext}
-                className={cn(!canNext && "pointer-events-none opacity-50")}
-                onClick={(event) => {
-                  event.preventDefault()
-                  if (canNext) {
-                    onRunNextPage()
-                  }
-                }}
-              />
-            </PaginationItem>
-          </PaginationContent>
-        </Pagination>
-      </div>
-
-      <footer className="flex min-h-10 flex-wrap items-center justify-between gap-2 border-t bg-card px-3 py-2 text-sm text-muted-foreground">
-        <Badge variant={statusBadgeVariant}>
-          {queryError ? (
-            <>
-              <XCircle data-icon="inline-start" />
-              Error
-            </>
-          ) : queryLoading ? (
-            <>
-              <Spinner data-icon="inline-start" />
-              Loading
-            </>
-          ) : (
-            <>
-              <CheckCircle2 data-icon="inline-start" />
-              Ready
-            </>
-          )}
-        </Badge>
-        <span className="truncate">{queryStats}</span>
+        <div className="flex flex-wrap items-center gap-4">
+          <span className="truncate">{queryStats}</span>
+          <Pagination className="mx-0 w-auto justify-end">
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  href="#"
+                  aria-disabled={!canPrev}
+                  className={cn(!canPrev && "pointer-events-none opacity-50")}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    if (canPrev) {
+                      onRunPrevPage()
+                    }
+                  }}
+                />
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationNext
+                  href="#"
+                  aria-disabled={!canNext}
+                  className={cn(!canNext && "pointer-events-none opacity-50")}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    if (canNext) {
+                      onRunNextPage()
+                    }
+                  }}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        </div>
       </footer>
     </>
   )

@@ -13,7 +13,6 @@ import type { Edge, Node } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { toPng } from "html-to-image"
 import { Download, Maximize, Search, ZoomIn, ZoomOut } from "lucide-react"
-import { useTheme } from "next-themes"
 
 import { jsonToGraph, type DataNodeData, type LogicalNodeData } from "./graph/jsonToGraph"
 import { getLayoutedElements } from "./graph/layout"
@@ -21,6 +20,7 @@ import { DataNode } from "./graph/DataNode"
 import { LogicalNode } from "./graph/LogicalNode"
 import { Input } from "@/shadcn/components/ui/input"
 import { Button } from "@/shadcn/components/ui/button"
+import { useTheme } from "@/shared/components/ui/shadcn/components/theme-provider"
 
 const nodeTypes = {
   dataNode: DataNode,
@@ -46,8 +46,8 @@ function FlowComponent({ draft }: { draft: string }) {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [searchTerm, setSearchTerm] = useState("")
   const { zoomIn, zoomOut, fitView } = useReactFlow()
-  const { resolvedTheme } = useTheme()
-  const isDark = resolvedTheme === "dark"
+  const { theme } = useTheme()
+  const isDark = theme === "dark"
 
   const edgeOptions = useMemo(
     () => ({

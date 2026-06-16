@@ -14,7 +14,7 @@
         {
             "type": "editor-browser",
             "request": "launch",
-            "name": "Launch Integrated Browser against localhost",
+            "name": "Launch Integrated Browser",
             "url": "http://localhost:5173",
             "webRoot": "${workspaceFolder}/src/main/frontend"
         }

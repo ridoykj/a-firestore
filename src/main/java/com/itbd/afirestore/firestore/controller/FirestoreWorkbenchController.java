@@ -2,6 +2,7 @@ package com.itbd.afirestore.firestore.controller;
 
 import com.itbd.afirestore.firestore.service.FirestoreManagerService;
 import com.itbd.afirestore.firestore.service.GenericFirestoreService;
+import com.google.cloud.Timestamp;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.buffer.DataBufferUtils;
@@ -26,6 +27,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.time.Instant;
 
 @RestController
 @RequestMapping("/api/workbench")
@@ -377,6 +379,17 @@ public class FirestoreWorkbenchController {
             case "number" -> parseNumber(raw);
             case "boolean" -> Boolean.parseBoolean(raw);
             case "null" -> null;
+            case "string-array" -> Arrays.stream(raw.split(","))
+                    .map(String::trim)
+                    .toList();
+            case "number-array" -> Arrays.stream(raw.split(","))
+                    .map(String::trim)
+                    .map(this::parseNumber)
+                    .toList();
+            case "timestamp" -> {
+                Instant instant = Instant.parse(raw);
+                yield Timestamp.ofTimeSecondsAndNanos(instant.getEpochSecond(), instant.getNano());
+            }
             default -> throw new IllegalArgumentException("Unsupported where type: " + type);
         };
     }

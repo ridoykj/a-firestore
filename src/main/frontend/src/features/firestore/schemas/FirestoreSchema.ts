@@ -2,7 +2,7 @@ export type ViewMode = "table" | "tree" | "json"
 
 export type OrderDirection = "asc" | "desc"
 
-export type WhereType = "string" | "number" | "boolean" | "null"
+export type WhereType = "string" | "number" | "boolean" | "null" | "string-array" | "number-array" | "timestamp"
 
 export type StatusTone = "success" | "warning" | "error"
 

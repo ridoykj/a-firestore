@@ -33,7 +33,7 @@ function routeMeta(pathname: string): {
   }
 }
 
-export function AppShell() {
+export function AppLayout() {
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   })

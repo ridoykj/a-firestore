@@ -4,8 +4,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/aler
 import { Badge } from "@/shadcn/components/ui/badge"
 import { ToggleGroup, ToggleGroupItem } from "@/shadcn/components/ui/toggle-group"
 import { useIsMobile } from "@/shadcn/hooks/use-mobile"
-import { useTheme } from "next-themes"
-
+import { useTheme } from "@/shared/components/ui/shadcn/components/theme-provider"
 type FirestoreJsonTreeViewerProps = {
   draft: string
   onDraftChange?: (newDraft: string) => void
@@ -14,7 +13,7 @@ type FirestoreJsonTreeViewerProps = {
 type CollapseMode = "auto" | "expand" | "compact"
 
 export function FirestoreJsonTreeViewer({ draft, onDraftChange }: FirestoreJsonTreeViewerProps) {
-  const { resolvedTheme } = useTheme()
+  const { theme } = useTheme()
   const isMobile = useIsMobile()
   const [collapseMode, setCollapseMode] = useState<CollapseMode>("auto")
 
@@ -90,7 +89,7 @@ export function FirestoreJsonTreeViewer({ draft, onDraftChange }: FirestoreJsonT
         <div className="min-w-max">
           <JsonView
             src={parsedJson.data as object}
-            theme={resolvedTheme === "dark" ? "ashes" : "rjv-default"}
+            theme={theme === "dark" ? "ashes" : "rjv-default"}
             displayDataTypes={false}
             displayObjectSize={true}
             enableClipboard={true}

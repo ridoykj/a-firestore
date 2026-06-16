@@ -632,7 +632,9 @@ public class GenericFirestoreService {
                 case ">=" -> query.whereGreaterThanOrEqualTo(FieldPath.documentId(), value);
                 case "<" -> query.whereLessThan(FieldPath.documentId(), value);
                 case "<=" -> query.whereLessThanOrEqualTo(FieldPath.documentId(), value);
-                default -> throw new IllegalArgumentException("Unsupported where operator: " + operator);
+                case "in" -> query.whereIn(FieldPath.documentId(), (List<?>) value);
+                case "not-in" -> query.whereNotIn(FieldPath.documentId(), (List<?>) value);
+                default -> throw new IllegalArgumentException("Unsupported where operator for documentId: " + operator);
             };
         }
 
@@ -643,6 +645,10 @@ public class GenericFirestoreService {
             case ">=" -> query.whereGreaterThanOrEqualTo(normalizedField, value);
             case "<" -> query.whereLessThan(normalizedField, value);
             case "<=" -> query.whereLessThanOrEqualTo(normalizedField, value);
+            case "array-contains" -> query.whereArrayContains(normalizedField, value);
+            case "array-contains-any" -> query.whereArrayContainsAny(normalizedField, (List<?>) value);
+            case "in" -> query.whereIn(normalizedField, (List<?>) value);
+            case "not-in" -> query.whereNotIn(normalizedField, (List<?>) value);
             default -> throw new IllegalArgumentException("Unsupported where operator: " + operator);
         };
     }

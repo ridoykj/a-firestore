@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react"
-import { Plus, X, Database, Sun, Moon, Folder } from "lucide-react"
+import { AddTabDialog } from "@/features/firestore/components/AddTabDialog"
+import FirestorePage from "@/features/firestore/pages/FirestorePage"
+import { useGcpStore, type ProjectTab } from "@/features/gcp/store/gcp-store"
 import { Button } from "@/shadcn/components/ui/button"
 import {
   DropdownMenu,
@@ -8,12 +9,11 @@ import {
   DropdownMenuTrigger,
 } from "@/shadcn/components/ui/dropdown-menu"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shadcn/components/ui/tabs"
-import { cn } from "@/shadcn/lib/utils"
-import { AddTabDialog } from "@/features/firestore/components/AddTabDialog"
-import FirestorePage from "@/features/firestore/pages/FirestorePage"
-import { useGcpStore, type ProjectTab } from "@/features/gcp/store/gcp-store"
 import { useIsMobile } from "@/shadcn/hooks/use-mobile"
-import { useTheme } from "next-themes"
+import { cn } from "@/shadcn/lib/utils"
+import { useTheme } from "@/shared/components/ui/shadcn/components/theme-provider"
+import { Database, Folder, Moon, Plus, Sun, X } from "lucide-react"
+import { useMemo, useState } from "react"
 
 export function FirestoreTabsLayout() {
   const { openTabs, activeTabId, addTab, removeTab, setActiveTabId } = useGcpStore()
@@ -106,15 +106,14 @@ export function FirestoreTabsLayout() {
           <div className="flex border-b bg-muted/30 px-3 py-2">
             <div className="flex min-w-0 flex-1 items-center gap-1 rounded-xl border border-border/60 bg-muted p-1">
               <TabsList
-                className="h-8 min-w-0 flex-1 justify-start gap-1 overflow-x-auto rounded-none bg-transparent p-0"
-                variant="line"
+                className="h-8 min-w-0 flex-1 justify-start gap-1 rounded-none bg-transparent p-0 overflow-x-auto overflow-y-hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
               >
                 {openTabs.map((tab) => {
                   const isActive = tab.id === activeValue
                   return (
                     <div key={tab.id} className="group relative shrink-0">
                       <TabsTrigger
-                        value={tab.id}                        
+                        value={tab.id}
                         className={cn(
                           "h-8 min-w-0 max-w-60 justify-start gap-2 rounded-lg text-xs font-medium border border-foreground-700 px-3 pr-8 transition-all",
                           "bg-transparent text-muted-foreground shadow-none",
@@ -125,7 +124,9 @@ export function FirestoreTabsLayout() {
                         )}
                       >
                         <Folder className={cn("h-3.5 w-3.5 shrink-0", isActive ? "text-white" : "text-slate-500")} />
-                        <span className="truncate">{isMobile ? tab.projectId : tab.label}</span>
+                        <span className="truncate" title={isMobile ? tab.projectId : tab.label}>
+                          {isMobile ? tab.projectId : tab.label}
+                        </span>
                       </TabsTrigger>
                       <Button
                         type="button"

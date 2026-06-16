@@ -95,6 +95,10 @@ export function FirestoreFilterPanel({
                         <option value=">=">&gt;=</option>
                         <option value="<">&lt;</option>
                         <option value="<=">&lt;=</option>
+                        <option value="array-contains">array-contains</option>
+                        <option value="array-contains-any">array-contains-any</option>
+                        <option value="in">in</option>
+                        <option value="not-in">not-in</option>
                       </select>
                     </div>
 
@@ -109,6 +113,9 @@ export function FirestoreFilterPanel({
                         <option value="number">number</option>
                         <option value="boolean">boolean</option>
                         <option value="null">null</option>
+                        <option value="string-array">string[]</option>
+                        <option value="number-array">number[]</option>
+                        <option value="timestamp">timestamp</option>
                       </select>
                     </div>
                   </div>
@@ -209,10 +216,13 @@ export function FirestoreFilterPanel({
         rightSidebarExpanded ? "md:w-80" : "md:w-12",
       )}
     >
-      {rightSidebarExpanded ? (
-        <>
-          <div className="flex items-center justify-between p-5 pb-4 mb-4 border-b border-border">
-            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Filter and Order</span>
+      <div className={cn("flex shrink-0 items-center border-b border-border transition-all h-14", rightSidebarExpanded ? "px-5 justify-between" : "px-0 justify-center")}>
+        {rightSidebarExpanded ? (
+          <>
+            <div className="flex items-center gap-2">
+              <SlidersHorizontal className="w-4 h-4 text-blue-500" />
+              <span className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-wider">Filter and Order</span>
+            </div>
             <div className="flex items-center gap-1">
               <button
                 onClick={addWhereFilterRow}
@@ -229,11 +239,8 @@ export function FirestoreFilterPanel({
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col">{panelBody}</div>
-        </>
-      ) : (
-        <div className="w-12 flex flex-col items-center py-5">
+          </>
+        ) : (
           <button
             onClick={onToggle}
             className="p-2.5 rounded-xl bg-secondary text-primary hover:bg-secondary/80 transition-all shadow-sm"
@@ -241,8 +248,12 @@ export function FirestoreFilterPanel({
           >
             <SlidersHorizontal className="w-5 h-5 animate-pulse" />
           </button>
-        </div>
-      )}
+        )}
+      </div>
+
+      {rightSidebarExpanded ? (
+        <div className="flex min-h-0 flex-1 flex-col">{panelBody}</div>
+      ) : null}
     </aside>
   )
 }

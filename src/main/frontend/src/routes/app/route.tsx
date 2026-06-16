@@ -1,10 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { AppShell } from "@/shared/components/layout/AppShell"
+import { AppLayout } from "@/shared/components/layout/AppLayout"
 
 export const Route = createFileRoute('/app')({
   component: RouteComponent,
 })
 
 function RouteComponent() {
-  return <AppShell />
+  return <AppLayout />
 }

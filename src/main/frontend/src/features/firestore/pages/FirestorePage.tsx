@@ -110,7 +110,7 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
   )
 
   const [leftSidebarExpanded, setLeftSidebarExpanded] = useState(true)
-  const [rightSidebarExpanded, setRightSidebarExpanded] = useState(true)
+  const [rightSidebarExpanded, setRightSidebarExpanded] = useState(false)
   const [drawerCollectionsOpen, setDrawerCollectionsOpen] = useState(false)
   const [drawerNestedOpen, setDrawerNestedOpen] = useState(false)
   const [drawerFiltersOpen, setDrawerFiltersOpen] = useState(false)
@@ -1183,6 +1183,7 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     <div className="relative flex min-h-0 h-full w-full flex-1 overflow-hidden bg-muted/40">
       <div className="flex min-h-0 h-full w-full">
         <FirestoreSidebar
+          tab={tab}
           leftSidebarExpanded={leftSidebarExpanded}
           setLeftSidebarExpanded={setLeftSidebarExpanded}
           collections={collections}
@@ -1193,6 +1194,26 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
           drawerMode={drawerMode}
           drawerOpen={drawerCollectionsOpen}
           onDrawerOpenChange={setDrawerCollectionsOpen}
+        />
+
+        <FirestoreNestedTraverse
+          nestedLoading={nestedLoading}
+          nestedResponse={nestedResponse}
+          queryPath={queryPath}
+          nestedIdFilter={nestedIdFilter}
+          setNestedIdFilter={setNestedIdFilter}
+          setQueryPath={setQueryPath}
+          runQuery={runQuery}
+          refreshNested={refreshNested}
+          onOpenDocumentPreview={(documentPath, documentId) =>
+            void openPreviewFromNestedDocument(documentPath, documentId)
+          }
+          hasNextPage={Boolean(nestedQuery.hasNextPage)}
+          isFetchingNextPage={nestedQuery.isFetchingNextPage}
+          fetchNextPage={() => void nestedQuery.fetchNextPage({ cancelRefetch: false })}
+          drawerMode={drawerMode}
+          drawerOpen={drawerNestedOpen}
+          onDrawerOpenChange={setDrawerNestedOpen}
         />
 
         <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -1224,26 +1245,6 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
           />
 
           <div className="relative flex min-h-0 h-full min-w-0 flex-1 overflow-hidden">
-            <FirestoreNestedTraverse
-              nestedLoading={nestedLoading}
-              nestedResponse={nestedResponse}
-              queryPath={queryPath}
-              nestedIdFilter={nestedIdFilter}
-              setNestedIdFilter={setNestedIdFilter}
-              setQueryPath={setQueryPath}
-              runQuery={runQuery}
-              refreshNested={refreshNested}
-              onOpenDocumentPreview={(documentPath, documentId) =>
-                void openPreviewFromNestedDocument(documentPath, documentId)
-              }
-              hasNextPage={Boolean(nestedQuery.hasNextPage)}
-              isFetchingNextPage={nestedQuery.isFetchingNextPage}
-              fetchNextPage={() => void nestedQuery.fetchNextPage({ cancelRefetch: false })}
-              drawerMode={drawerMode}
-              drawerOpen={drawerNestedOpen}
-              onDrawerOpenChange={setDrawerNestedOpen}
-            />
-
             <section className="flex min-w-0 flex-1 flex-col">
               <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
                 <div className="flex min-w-0 flex-1 flex-col">
@@ -1356,29 +1357,29 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
                     transferBusy={transferBusy}
                   />
                 </div>
-
-                <FirestoreFilterPanel
-                  rightSidebarExpanded={rightSidebarExpanded}
-                  onToggle={() => setRightSidebarExpanded((value) => !value)}
-                  whereRows={whereRows}
-                  addWhereFilterRow={addWhereFilterRow}
-                  removeWhereFilterRow={removeWhereFilterRow}
-                  setWhereRowValue={setWhereRowValue}
-                  orderField={orderField}
-                  setOrderField={setOrderField}
-                  orderDirection={orderDirection}
-                  setOrderDirection={setOrderDirection}
-                  limit={limit}
-                  setLimit={setLimit}
-                  onRun={() => void runQuery(0)}
-                  drawerMode={drawerMode}
-                  drawerOpen={drawerFiltersOpen}
-                  onDrawerOpenChange={setDrawerFiltersOpen}
-                />
               </div>
             </section>
           </div>
         </main>
+
+        <FirestoreFilterPanel
+          rightSidebarExpanded={rightSidebarExpanded}
+          onToggle={() => setRightSidebarExpanded((value) => !value)}
+          whereRows={whereRows}
+          addWhereFilterRow={addWhereFilterRow}
+          removeWhereFilterRow={removeWhereFilterRow}
+          setWhereRowValue={setWhereRowValue}
+          orderField={orderField}
+          setOrderField={setOrderField}
+          orderDirection={orderDirection}
+          setOrderDirection={setOrderDirection}
+          limit={limit}
+          setLimit={setLimit}
+          onRun={() => void runQuery(0)}
+          drawerMode={drawerMode}
+          drawerOpen={drawerFiltersOpen}
+          onDrawerOpenChange={setDrawerFiltersOpen}
+        />
 
         <AlertDialog
           open={previewDiscardOpen}
