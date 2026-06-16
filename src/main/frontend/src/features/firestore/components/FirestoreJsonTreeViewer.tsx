@@ -5,6 +5,7 @@ import { Badge } from "@/shadcn/components/ui/badge"
 import { ToggleGroup, ToggleGroupItem } from "@/shadcn/components/ui/toggle-group"
 import { useIsMobile } from "@/shadcn/hooks/use-mobile"
 import { useTheme } from "@/shared/components/ui/shadcn/components/theme-provider"
+import { ScrollArea, ScrollBar } from "@/shadcn/components/ui/scroll-area"
 type FirestoreJsonTreeViewerProps = {
   draft: string
   onDraftChange?: (newDraft: string) => void
@@ -49,7 +50,7 @@ export function FirestoreJsonTreeViewer({ draft, onDraftChange }: FirestoreJsonT
 
   const handleEdit = onDraftChange
     ? (interaction: { updated_src: unknown }) =>
-        onDraftChange(JSON.stringify(interaction.updated_src, null, 2))
+      onDraftChange(JSON.stringify(interaction.updated_src, null, 2))
     : undefined
 
   const collapsedDepth =
@@ -85,7 +86,7 @@ export function FirestoreJsonTreeViewer({ draft, onDraftChange }: FirestoreJsonT
         </div>
       </div>
 
-      <div className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain rounded-md border bg-muted/10 p-2 sm:p-3 md:p-4 touch-pan-x">
+      <ScrollArea className="min-h-0 min-w-0 flex-1 rounded-md border bg-muted/10 p-2 sm:p-3 md:p-4">
         <div className="min-w-max">
           <JsonView
             src={parsedJson.data as object}
@@ -108,7 +109,8 @@ export function FirestoreJsonTreeViewer({ draft, onDraftChange }: FirestoreJsonT
             }}
           />
         </div>
-      </div>
+        <ScrollBar orientation="horizontal" />
+      </ScrollArea>
     </div>
   )
 }
