@@ -30,6 +30,7 @@ import {
   XCircle,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
+import { ScrollArea, ScrollBar } from "@/shadcn/components/ui/scroll-area"
 
 type FirestoreQueryResultsProps = {
   queryLoading: boolean
@@ -311,7 +312,7 @@ export function FirestoreQueryResults({
             </div>
 
             <div className="hidden min-h-0 flex-1 md:block">
-              <div className="relative h-full overflow-auto">
+              <ScrollArea className="relative h-full w-full">
                 <div className="*:data-[slot=table-container]:overflow-visible">
                   <Table className="text-left text-sm" style={{ minWidth: tableMinWidth }}>
                     <TableHeader>
@@ -401,10 +402,7 @@ export function FirestoreQueryResults({
                                   className="h-5 w-5 shrink-0"
                                 />
                                 <div className="min-w-0">
-                                  <span className="truncate font-medium">{row.documentId}</span>
-                                  <p className="truncate font-mono text-xs text-muted-foreground">
-                                    {row.documentPath || "(no-path)"}
-                                  </p>
+                                  <span className="truncate font-medium">{row.documentId}</span>                                  
                                 </div>
                               </div>
                               {row.rowPreviewDisabled ? (
@@ -434,7 +432,8 @@ export function FirestoreQueryResults({
                     </TableBody>
                   </Table>
                 </div>
-              </div>
+                <ScrollBar orientation="horizontal" />
+              </ScrollArea>
             </div>
 
             {hasActiveClientFilter && filteredRows.length > 0 ? (
@@ -444,7 +443,7 @@ export function FirestoreQueryResults({
             ) : null}
           </div>
         ) : null}
-      </div>
+      </div >
 
       <footer className="flex min-h-10 flex-wrap items-center justify-between gap-2 border-t bg-card px-3 py-2 text-sm text-muted-foreground">
         <div className="flex flex-wrap items-center gap-3">
