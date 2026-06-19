@@ -19,6 +19,7 @@
     "@tanstack/react-query-devtools": "^5.100.6",
     "@tanstack/react-router": "^1.168.25",
     "@tanstack/react-router-devtools": "^1.166.13",
+    "@tanstack/react-virtual": "^3.14.3",
     "@xyflow/react": "^12.10.2",
     "axios": "^1.12.2",
     "class-variance-authority": "^0.7.1",
@@ -56,7 +57,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
-    "shadcn": "^4.7.0",
+    "shadcn": "^4.11.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
     "vite": "^8.0.10"
