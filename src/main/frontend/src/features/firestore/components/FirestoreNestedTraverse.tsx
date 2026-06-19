@@ -284,8 +284,9 @@ export function FirestoreNestedTraverse({
           }}
           className="p-1 rounded hover:bg-muted text-primary transition-colors"
           title="Refresh nested browser list"
+          disabled={nestedLoading}
         >
-          <RefreshCw className="size-3.5" />
+          <RefreshCw className={`size-3.5 ${nestedLoading ? 'animate-spin' : ''}`} />
         </button>
       </div>
       <div className="flex min-h-0 flex-1 flex-col">{content}</div>
