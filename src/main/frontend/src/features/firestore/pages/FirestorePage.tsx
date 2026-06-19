@@ -1006,6 +1006,33 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     }
   }
 
+  async function handlePreviewRefresh() {
+    const normalizedPath = normalizePath(previewSelection?.documentPath ?? "")
+    if (!normalizedPath) return
+
+    setPreviewBusy("refresh")
+    try {
+      const details = await firestoreService.getDocumentDetails(context, normalizedPath)
+      const previewPayload =
+        details.fields && typeof details.fields === "object" ? details.fields : {}
+      const nextDraft = JSON.stringify(previewPayload, null, 2)
+      setPreviewSelection({
+        documentPath: normalizedPath,
+        documentId: details.id.trim() || previewSelection?.documentId || "",
+        payload: previewPayload,
+      })
+      setPreviewDraft(nextDraft)
+      setPreviewSavedDraft(nextDraft)
+      setPreviewValidation(EMPTY_PREVIEW_VALIDATION)
+      toast.success("Document reloaded.")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to reload document."
+      toast.error(message)
+    } finally {
+      setPreviewBusy(null)
+    }
+  }
+
   async function handlePreviewUpdate(draftOverride?: string) {
     const normalizedPath = normalizePath(previewSelection?.documentPath ?? "")
     if (!normalizedPath) {
@@ -1336,7 +1363,6 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
                   />
 
                   <FirestoreDocumentPreviewPanel
-                    key={previewSelection?.documentPath ?? "preview-empty"}
                     open={previewOpen}
                     onOpenChange={updatePreviewOpen}
                     documentId={previewSelection?.documentId ?? "(no-id)"}
@@ -1352,6 +1378,7 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
                     onValidationChange={setPreviewValidation}
                     onUpdate={(formattedDraft) => void handlePreviewUpdate(formattedDraft)}
                     onDelete={() => void handlePreviewDelete()}
+                    onRefresh={() => void handlePreviewRefresh()}
                     onExportDocument={(format) => void exportDocument(format)}
                     onImportDocument={(format) => requestDocumentImport(format)}
                     transferBusy={transferBusy}
