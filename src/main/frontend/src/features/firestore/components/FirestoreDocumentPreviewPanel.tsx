@@ -40,8 +40,6 @@ import { Skeleton } from "@/shadcn/components/ui/skeleton"
 import { Spinner } from "@/shadcn/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shadcn/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/shadcn/components/ui/toggle-group"
-import { FirestoreJsonGraphViewer } from "@/features/firestore/components/FirestoreJsonGraphViewer"
-import { FirestoreJsonTreeViewer } from "@/features/firestore/components/FirestoreJsonTreeViewer"
 import { normalizePath, pathIsCollection } from "@/features/firestore/api/firestore-utils"
 import {
   Download,
@@ -49,20 +47,31 @@ import {
   FolderTree,
   Moon,
   Network,
+  RefreshCw,
   Sun,
   Upload,
   WandSparkles,
   X
 } from "lucide-react"
-import { lazy, Suspense, useState } from "react"
+import { lazy, Suspense, useEffect, useState } from "react"
 
 const FirestoreJsonCodeEditor = lazy(async () => {
   const module = await import("@/features/firestore/components/FirestoreJsonCodeEditor")
   return { default: module.FirestoreJsonCodeEditor }
 })
 
+const FirestoreJsonTreeViewer = lazy(async () => {
+  const module = await import("@/features/firestore/components/FirestoreJsonTreeViewer")
+  return { default: module.FirestoreJsonTreeViewer }
+})
+
+const FirestoreJsonGraphViewer = lazy(async () => {
+  const module = await import("@/features/firestore/components/FirestoreJsonGraphViewer")
+  return { default: module.FirestoreJsonGraphViewer }
+})
+
 export type PreviewTab = "tree" | "graph" | "json"
-export type PreviewBusy = "update" | "delete" | null
+export type PreviewBusy = "update" | "delete" | "refresh" | null
 
 type FirestoreDocumentPreviewPanelProps = {
   open: boolean
@@ -80,6 +89,7 @@ type FirestoreDocumentPreviewPanelProps = {
   onOpenChange: (open: boolean) => void
   onUpdate: (formattedDraft: string) => void
   onDelete: () => void
+  onRefresh: () => void
   onExportDocument: (format: TransferFormat) => void
   onImportDocument: (format: TransferFormat) => void
   transferBusy?: boolean
@@ -101,6 +111,7 @@ export function FirestoreDocumentPreviewPanel({
   onOpenChange,
   onUpdate,
   onDelete,
+  onRefresh,
   onExportDocument,
   onImportDocument,
   transferBusy = false,
@@ -108,6 +119,13 @@ export function FirestoreDocumentPreviewPanel({
   const [attemptedJsonSubmit, setAttemptedJsonSubmit] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [formatRequestVersion, setFormatRequestVersion] = useState(0)
+  const [renderHeavyContent, setRenderHeavyContent] = useState(false)
+
+  useEffect(() => {
+    const timer = setTimeout(() => setRenderHeavyContent(open), 300)
+    return () => clearTimeout(timer)
+  }, [open])
+
   const isPending = busyAction !== null
 
   const normalizedPath = normalizePath(documentPath)
@@ -217,6 +235,19 @@ export function FirestoreDocumentPreviewPanel({
                 </Button>
               </div>
               <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="bg-card"
+                  onClick={onRefresh}
+                  disabled={isPending || transferBusy || pathIsInvalid}
+                  title="Refresh Document"
+                >
+                  <RefreshCw className={`mr-1.5 h-4 w-4 text-muted-foreground ${busyAction === "refresh" ? "animate-spin" : ""}`} />
+                  Refresh
+                </Button>
+
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -316,6 +347,7 @@ export function FirestoreDocumentPreviewPanel({
           </SheetHeader>
 
           <div className="min-h-0 flex flex-1 flex-col px-4 py-1 sm:px-6">
+            {renderHeavyContent ? (
             <FieldGroup className="min-h-0 flex-1">
               <Tabs
                 defaultValue="tree"
@@ -340,16 +372,20 @@ export function FirestoreDocumentPreviewPanel({
 
                 <TabsContent
                   value="tree"
-                  className="flex min-h-0 flex-1"
+                  className="flex min-h-0 flex-1 flex-col"
                 >
-                  <FirestoreJsonTreeViewer draft={draft} onDraftChange={onDraftChange} />
+                  <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center"><Spinner className="w-8 h-8 text-muted-foreground/50" /></div>}>
+                    <FirestoreJsonTreeViewer draft={draft} onDraftChange={onDraftChange} />
+                  </Suspense>
                 </TabsContent>
 
                 <TabsContent
                   value="graph"
-                  className="min-h-0 flex-1"
+                  className="min-h-0 flex-1 flex-col"
                 >
-                  <FirestoreJsonGraphViewer draft={draft} />
+                  <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center"><Spinner className="w-8 h-8 text-muted-foreground/50" /></div>}>
+                    <FirestoreJsonGraphViewer draft={draft} />
+                  </Suspense>
                 </TabsContent>
 
                 <TabsContent value="json" className="flex min-h-0 flex-1 flex-col gap-3">
@@ -389,6 +425,11 @@ export function FirestoreDocumentPreviewPanel({
                 </TabsContent>
               </Tabs>
             </FieldGroup>
+            ) : (
+              <div className="flex min-h-0 flex-1 items-center justify-center">
+                <Spinner className="w-8 h-8 text-muted-foreground/50" />
+              </div>
+            )}
           </div>
 
           <SheetFooter className="border-t sm:flex-row sm:flex-wrap items-center sm:justify-between gap-3 px-4 py-2 sm:px-6 shrink-0 ">
