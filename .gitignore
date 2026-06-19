@@ -30,4 +30,4 @@ build/
 !**/src/test/**/build/
 
 ### VS Code ###
-/src/main/resources/static/assets/
+/src/main/resources/static/
