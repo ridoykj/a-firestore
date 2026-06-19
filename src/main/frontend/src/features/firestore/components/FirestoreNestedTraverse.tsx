@@ -8,6 +8,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/shadcn/components/ui/sheet"
+import { ScrollArea } from "@/shadcn/components/ui/scroll-area"
 import { AlertCircle, ChevronLeft, Database, Eye, Files, Folder, RefreshCw, Search } from "lucide-react"
 import { type NestedResponse } from "@/features/firestore/schemas/FirestoreSchema"
 import { pathIsCollection } from "@/features/firestore/api/firestore-utils"
@@ -48,16 +49,17 @@ export function FirestoreNestedTraverse({
   drawerOpen = false,
   onDrawerOpenChange,
 }: FirestoreNestedTraverseProps) {
-  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    if (!sentinelRef.current || !scrollContainerRef.current) {
+    if (!sentinelRef.current) {
       return
     }
     if (!hasNextPage) {
       return
     }
+
+    const scrollViewport = sentinelRef.current.closest('[data-slot="scroll-area-viewport"]')
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -70,7 +72,7 @@ export function FirestoreNestedTraverse({
         }
       },
       {
-        root: scrollContainerRef.current,
+        root: scrollViewport,
         rootMargin: "200px",
       },
     )
@@ -81,9 +83,9 @@ export function FirestoreNestedTraverse({
 
   const content = (
     <>
-      <div className="px-3 py-3 mb-1 border-b">
+      <div className="px-3 py-3 mb-1 border-b shrink-0">
         <div className="relative">
-          <Search className="absolute left-2.5 top-2 w-3.5 h-3.5 text-muted-foreground" />
+          <Search className="absolute left-2.5 top-2 size-3.5 text-muted-foreground" />
           <input
             type="text"
             value={nestedIdFilter}
@@ -94,23 +96,24 @@ export function FirestoreNestedTraverse({
         </div>
       </div>
 
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-2 space-y-0.5 mt-2">
-        {nestedLoading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground p-3">
+      <ScrollArea className="flex-1 min-h-0 px-2 mt-2">
+        <div className="flex flex-col gap-0.5">
+          {nestedLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground p-3">
             <Spinner />
             Loading...
           </div>
         ) : null}
         {nestedResponse?.nestedError ? (
           <Alert variant="destructive" className="mx-2 mb-2">
-            <AlertCircle className="h-4 w-4" />
+            <AlertCircle className="size-4" />
             <AlertTitle>Error</AlertTitle>
             <AlertDescription className="text-xs">{nestedResponse.nestedError}</AlertDescription>
           </Alert>
         ) : null}
 
         {!nestedLoading && !nestedResponse?.nestedError ? (
-          <div className="space-y-0.5 pb-4">
+          <div className="flex flex-col gap-0.5 pb-4">
             {nestedResponse?.parentPath ? (
               <button
                 type="button"
@@ -126,7 +129,7 @@ export function FirestoreNestedTraverse({
                   onDrawerOpenChange?.(false)
                 }}
               >
-                <ChevronLeft className="w-3.5 h-3.5" />
+                <ChevronLeft className="size-3.5" />
                 <span>Up</span>
               </button>
             ) : null}
@@ -141,11 +144,11 @@ export function FirestoreNestedTraverse({
                       onDrawerOpenChange?.(false)
                     }}
                   >
-                    <Files className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                    <Files className="size-3.5 text-muted-foreground shrink-0" />
                     <span className="truncate font-mono text-[11px]" title={node.id}>{node.id}</span>
                   </button>
 
-                  <div className="flex items-center gap-1.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex items-center gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                     <span className="text-[8px] bg-green-100/70 text-green-700 dark:bg-green-950/40 dark:text-green-300 px-1 py-0.5 rounded font-mono font-bold tracking-tight">
                       Ready
                     </span>
@@ -157,7 +160,7 @@ export function FirestoreNestedTraverse({
                       }}
                       className="p-1 rounded-md hover:bg-muted text-muted-foreground transition-colors"
                     >
-                      <Eye className="w-3 h-3" />
+                      <Eye className="size-3" />
                     </button>
                   </div>
                 </div>
@@ -175,7 +178,7 @@ export function FirestoreNestedTraverse({
                     onDrawerOpenChange?.(false)
                   }}
                 >
-                  <Folder className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <Folder className="size-3.5 text-amber-500 shrink-0" />
                   <span className="truncate font-medium">{node.id}</span>
                 </button>
               ))
@@ -197,7 +200,8 @@ export function FirestoreNestedTraverse({
             ) : null}
           </div>
         ) : null}
-      </div>
+        </div>
+      </ScrollArea>
     </>
   )
 
@@ -219,7 +223,7 @@ export function FirestoreNestedTraverse({
     <aside className="hidden w-64 shrink-0 border-r border-border bg-card md:flex md:flex-col h-full">
       <div className="flex shrink-0 items-center border-b border-border transition-all h-14 px-5 justify-between">
         <div className="flex items-center gap-2">
-          <Database className="w-4 h-4 text-emerald-500" />
+          <Database className="size-4 text-emerald-500" />
           <span className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-wider">Nested Traverse</span>
         </div>
 
@@ -231,10 +235,10 @@ export function FirestoreNestedTraverse({
           className="p-1 rounded hover:bg-muted text-primary transition-colors"
           title="Refresh nested browser list"
         >
-          <RefreshCw className="w-3.5 h-3.5" />
+          <RefreshCw className="size-3.5" />
         </button>
       </div>
-      <div className={cn("flex min-h-0 h-full flex-1 flex-col")}>{content}</div>
+      <div className="flex min-h-0 flex-1 flex-col">{content}</div>
     </aside>
   )
 }
