@@ -16,7 +16,9 @@ import {
 import { Spinner } from "@/shadcn/components/ui/spinner"
 import { cn } from "@/shadcn/lib/utils"
 import { ChevronLeft, Database, Folder, Layers, RefreshCw, Search } from "lucide-react"
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useCallback } from "react"
+import { useVirtualizer } from "@tanstack/react-virtual"
+import { ScrollArea } from "@/shadcn/components/ui/scroll-area"
 import { toast } from "sonner"
 import { useGcpStore, type ProjectTab } from "@/features/gcp/store/gcp-store"
 import {
@@ -139,12 +141,29 @@ export function FirestoreSidebar({
     return collections.filter(c => c.toLowerCase().includes(collectionSearch.toLowerCase()))
   }, [collections, collectionSearch])
 
+  const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+
+  const scrollRef = useCallback((node: HTMLDivElement | null) => {
+    if (node) {
+      setScrollElement(node.querySelector('[data-slot="scroll-area-viewport"]') as HTMLDivElement | null)
+    } else {
+      setScrollElement(null)
+    }
+  }, [])
+
+  const virtualizer = useVirtualizer({
+    count: filteredCollections.length,
+    getScrollElement: () => scrollElement,
+    estimateSize: () => 40,
+    overscan: 10,
+  })
+
   const contextSelectors = (
     <div className="p-3 border-b border-border bg-muted/20 flex flex-col gap-3 shrink-0">
       <div className="flex flex-col">
         <label className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
           Project ID
-          {loadingProjects ? <Spinner className="h-3 w-3" /> : null}
+          {loadingProjects ? <Spinner className="size-3" /> : null}
         </label>
         <Select
           value={selectedProjectId || undefined}
@@ -167,7 +186,7 @@ export function FirestoreSidebar({
       <div className="flex flex-col">
         <label className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
           Database
-          {loadingDatabases ? <Spinner className="h-3 w-3" /> : null}
+          {loadingDatabases ? <Spinner className="size-3" /> : null}
         </label>
         <Select
           value={selectedDatabaseId || "__default__"}
@@ -191,10 +210,10 @@ export function FirestoreSidebar({
   )
 
   const collectionList = (
-    <div className="flex-1 overflow-y-auto px-2 py-3 flex flex-col h-full min-h-0">
-      <div className="mb-3 px-3">
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="mb-3 px-3 pt-3 shrink-0">
         <div className="relative">
-          <Search className="absolute left-2.5 top-2 w-3.5 h-3.5 text-muted-foreground" />
+          <Search className="absolute left-2.5 top-2 size-3.5 text-muted-foreground" />
           <input
             type="text"
             placeholder="Search collections..."
@@ -205,31 +224,7 @@ export function FirestoreSidebar({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-1 space-y-0.5">
-        {filteredCollections.map((collection) => {
-          const isActive = collection === activeCollection
-          return (
-            <button
-              key={collection}
-              type="button"
-              className={cn(
-                "w-full flex items-center justify-start px-3 py-2.5 rounded-xl text-left text-xs transition-all",
-                isActive
-                  ? "bg-secondary text-primary font-bold border-l-4 border-primary shadow-sm"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
-              )}
-              onClick={() => {
-                runCollectionQuery(collection)
-                onDrawerOpenChange?.(false)
-              }}
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <Folder className={cn("w-3.5 h-3.5 shrink-0", isActive ? "text-primary" : "text-amber-500")} />
-                <span className="truncate">{collection}</span>
-              </div>
-            </button>
-          )
-        })}
+      <ScrollArea ref={scrollRef} className="flex-1 min-h-0 px-2">
         {!collectionsLoading && collections.length === 0 ? (
           <Empty className="border-none p-2">
             <EmptyHeader>
@@ -237,8 +232,48 @@ export function FirestoreSidebar({
               <EmptyDescription>Run a query to load collections.</EmptyDescription>
             </EmptyHeader>
           </Empty>
-        ) : null}
-      </div>
+        ) : (
+          <div
+            className="relative w-full"
+            style={{ height: `${virtualizer.getTotalSize()}px` }}
+          >
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const collection = filteredCollections[virtualRow.index]
+              const isActive = collection === activeCollection
+              return (
+                <div
+                  key={virtualRow.key}
+                  data-index={virtualRow.index}
+                  ref={virtualizer.measureElement}
+                  className="absolute top-0 left-0 w-full pb-0.5"
+                  style={{
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className={cn(
+                      "w-full flex items-center justify-start px-3 py-2.5 rounded-xl text-left text-xs transition-all",
+                      isActive
+                        ? "bg-secondary text-primary font-bold border-l-4 border-primary shadow-sm"
+                        : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                    )}
+                    onClick={() => {
+                      runCollectionQuery(collection)
+                      onDrawerOpenChange?.(false)
+                    }}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Folder className={cn("size-3.5 shrink-0", isActive ? "text-primary" : "text-amber-500")} />
+                      <span className="truncate">{collection}</span>
+                    </div>
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </ScrollArea>
     </div>
   )
 
@@ -271,7 +306,7 @@ export function FirestoreSidebar({
         {leftSidebarExpanded ? (
           <>
             <div className="flex items-center gap-2">
-              <Layers className="w-4.5 h-4.5 text-primary" />
+              <Layers className="size-[18px] text-primary" />
               <span className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-wider">Collections</span>
             </div>
             <div className="flex items-center gap-1">
@@ -281,14 +316,14 @@ export function FirestoreSidebar({
                 className="p-1 rounded-lg hover:bg-muted text-primary transition-colors"
                 title="Refresh collections schema"
               >
-                <RefreshCw className={cn("w-4 h-4", collectionsLoading && "animate-spin")} />
+                <RefreshCw className={cn("size-4", collectionsLoading && "animate-spin")} />
               </button>
               <button
                 onClick={() => setLeftSidebarExpanded(false)}
                 className="p-1 rounded-lg hover:bg-muted text-muted-foreground transition-colors"
                 title="Hide Left Side Panel"
               >
-                <ChevronLeft className="w-4 h-4" />
+                <ChevronLeft className="size-4" />
               </button>
             </div>
           </>
@@ -298,7 +333,7 @@ export function FirestoreSidebar({
             className="p-2.5 rounded-xl bg-secondary text-primary hover:bg-secondary/80 transition-all shadow-sm"
             title="Expand Left side panel"
           >
-            <Layers className="w-5 h-5" />
+            <Layers className="size-5" />
           </button>
         )}
       </div>
