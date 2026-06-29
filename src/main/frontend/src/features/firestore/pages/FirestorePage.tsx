@@ -32,14 +32,14 @@ import {
 import { useMediaQuery } from "@/shadcn/hooks/use-media-query"
 import { useIsMobile } from "@/shadcn/hooks/use-mobile"
 import type { ProjectTab } from "@/features/gcp/store/gcp-store"
-import { FirestoreCreateDrawer } from "@/features/firestore/components/FirestoreCreateDrawer"
-import { FirestoreDocumentPreviewPanel, type PreviewBusy, type PreviewTab } from "@/features/firestore/components/FirestoreDocumentPreviewPanel"
-import { FirestoreFilterPanel } from "@/features/firestore/components/FirestoreFilterPanel"
-import { WorkspaceControllerDeck } from "@/features/firestore/components/WorkspaceControllerDeck"
-import { FirestoreNestedTraverse } from "@/features/firestore/components/FirestoreNestedTraverse"
-import { FirestoreQueryResults } from "@/features/firestore/components/FirestoreQueryResults"
-import { FirestoreSidebar } from "@/features/firestore/components/FirestoreSidebar"
-import { FirestoreToFirestoreImportDialog } from "@/features/firestore/components/FirestoreToFirestoreImportDialog"
+import { FirestoreCreateDrawer } from "@/features/firestore/components/dialogs/FirestoreCreateDrawer"
+import { FirestoreDocumentPreviewPanel, type PreviewBusy, type PreviewTab } from "@/features/firestore/components/viewers/FirestoreDocumentPreviewPanel"
+import { FirestoreFilterPanel } from "@/features/firestore/components/query/FirestoreFilterPanel"
+import { WorkspaceControllerDeck } from "@/features/firestore/components/layout/WorkspaceControllerDeck"
+import { FirestoreNestedTraverse } from "@/features/firestore/components/query/FirestoreNestedTraverse"
+import { FirestoreQueryResults } from "@/features/firestore/components/query/FirestoreQueryResults"
+import { FirestoreSidebar } from "@/features/firestore/components/layout/FirestoreSidebar"
+import { FirestoreToFirestoreImportDialog } from "@/features/firestore/components/dialogs/FirestoreToFirestoreImportDialog"
 import {
   buildCollectionTransferJson,
   buildDocumentTransferJson,

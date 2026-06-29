@@ -56,17 +56,17 @@ import {
 import { lazy, Suspense, useEffect, useState } from "react"
 
 const FirestoreJsonCodeEditor = lazy(async () => {
-  const module = await import("@/features/firestore/components/FirestoreJsonCodeEditor")
+  const module = await import("@/features/firestore/components/viewers/FirestoreJsonCodeEditor")
   return { default: module.FirestoreJsonCodeEditor }
 })
 
 const FirestoreJsonTreeViewer = lazy(async () => {
-  const module = await import("@/features/firestore/components/FirestoreJsonTreeViewer")
+  const module = await import("@/features/firestore/components/viewers/FirestoreJsonTreeViewer")
   return { default: module.FirestoreJsonTreeViewer }
 })
 
 const FirestoreJsonGraphViewer = lazy(async () => {
-  const module = await import("@/features/firestore/components/FirestoreJsonGraphViewer")
+  const module = await import("@/features/firestore/components/viewers/FirestoreJsonGraphViewer")
   return { default: module.FirestoreJsonGraphViewer }
 })
 

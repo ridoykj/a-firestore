@@ -19,7 +19,7 @@ import { parseJsonPayload, pathIsCollection, normalizePath } from "@/features/fi
 import { FilePlus2, RefreshCcw, WandSparkles, X } from "lucide-react"
 
 const FirestoreJsonCodeEditor = lazy(async () => {
-  const module = await import("@/features/firestore/components/FirestoreJsonCodeEditor")
+  const module = await import("@/features/firestore/components/viewers/FirestoreJsonCodeEditor")
   return { default: module.FirestoreJsonCodeEditor }
 })
 

@@ -1,4 +1,4 @@
-import { AddTabDialog } from "@/features/firestore/components/AddTabDialog"
+import { AddTabDialog } from "@/features/firestore/components/dialogs/AddTabDialog"
 import FirestorePage from "@/features/firestore/pages/FirestorePage"
 import { useGcpStore, type ProjectTab } from "@/features/gcp/store/gcp-store"
 import { Button } from "@/shadcn/components/ui/button"

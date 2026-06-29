@@ -1,4 +1,4 @@
-import { FirestoreTabsLayout } from '@/features/firestore/components/FirestoreTabsLayout'
+import { FirestoreTabsLayout } from '@/features/firestore/components/layout/FirestoreTabsLayout'
 import { createFileRoute } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/app/firestore')({
