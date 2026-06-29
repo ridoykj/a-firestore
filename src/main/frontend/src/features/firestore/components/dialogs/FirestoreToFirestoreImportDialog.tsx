@@ -10,7 +10,6 @@ import { useGcpStore, type ProjectTab } from "@/features/gcp/store/gcp-store"
 import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/alert"
 import { Badge } from "@/shadcn/components/ui/badge"
 import { Button } from "@/shadcn/components/ui/button"
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/shadcn/components/ui/empty"
 import { Input } from "@/shadcn/components/ui/input"
 import { Label } from "@/shadcn/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/shadcn/components/ui/radio-group"
@@ -20,19 +19,14 @@ import { Spinner } from "@/shadcn/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shadcn/components/ui/table"
 import {
   AlertCircle,
-  CheckSquare,
-  ChevronDown,
-  ChevronRight,
   CloudDownload,
-  FileText,
   FileUp,
-  Folder,
   ShieldAlert,
-  Square,
   X,
 } from "lucide-react"
-import { useMemo, useState, type ChangeEvent, type ReactNode } from "react"
+import { useMemo, useState, type ChangeEvent } from "react"
 import { toast } from "sonner"
+import { FirestoreSelectionTree, type TreeNode } from "./FirestoreSelectionTree"
 
 interface FirestoreToFirestoreImportDialogProps {
   context: ProjectTab & { activePath: string }
@@ -43,15 +37,6 @@ interface FirestoreToFirestoreImportDialogProps {
 
 type Step = "AUTH" | "SELECT" | "SUMMARY" | "CONFLICT" | "EXECUTE"
 type ConflictResolution = "MERGE" | "OVERWRITE"
-
-interface TreeNode {
-  path: string
-  name: string
-  type: "collection" | "document"
-  children?: TreeNode[]
-  isLoaded: boolean
-  isLoading: boolean
-}
 
 const STEP_SEQUENCE: Step[] = ["AUTH", "SELECT", "SUMMARY", "CONFLICT", "EXECUTE"]
 
@@ -389,63 +374,6 @@ export function FirestoreToFirestoreImportDialog({
     setSelectedPaths(nextSelected)
   }
 
-  function renderTree(nodes: TreeNode[], depth = 0): ReactNode {
-    return nodes
-      .map((node) => {
-        const isExpanded = expandedPaths.has(node.path)
-        const isSelected = selectedPaths.has(node.path)
-
-        return (
-          <div key={node.path} className="flex flex-col">
-            <div
-              className="flex items-center rounded-md py-1 hover:bg-muted/50"
-              style={{ paddingLeft: `${depth * 1.25}rem` }}
-            >
-              <button
-                type="button"
-                className="mr-1 flex h-6 w-6 items-center justify-center rounded-sm hover:bg-muted"
-                onClick={() => toggleExpand(node.path, node.isLoaded)}
-                aria-label={`Toggle ${node.name}`}
-              >
-                {node.isLoading ? (
-                  <Spinner className="h-4 w-4" />
-                ) : isExpanded ? (
-                  <ChevronDown className="h-4 w-4" />
-                ) : (
-                  <ChevronRight className="h-4 w-4" />
-                )}
-              </button>
-
-              <button
-                type="button"
-                className="mr-2 rounded-sm p-0.5 hover:bg-muted"
-                onClick={() => toggleSelect(node.path)}
-                title={isSelected ? "Unselect" : "Select"}
-                aria-label={isSelected ? `Unselect ${node.name}` : `Select ${node.name}`}
-              >
-                {isSelected ? <CheckSquare className="h-4 w-4 text-primary" /> : <Square className="h-4 w-4" />}
-              </button>
-
-              <button
-                type="button"
-                className="flex flex-1 items-center gap-2 rounded-sm px-1 py-0.5 text-left hover:bg-muted"
-                onClick={() => toggleExpand(node.path, node.isLoaded)}
-              >
-                {node.type === "collection" ? (
-                  <Folder className="h-4 w-4 text-blue-500" />
-                ) : (
-                  <FileText className="h-4 w-4 text-orange-500" />
-                )}
-                <span className="truncate font-mono text-sm">{node.name}</span>
-              </button>
-            </div>
-
-            {isExpanded && node.children && renderTree(node.children, depth + 1)}
-          </div>
-        )
-      })
-  }
-
   const summaryItems = useMemo(
     () =>
       Array.from(selectedPaths).map((sourcePath) => {
@@ -499,7 +427,7 @@ export function FirestoreToFirestoreImportDialog({
       <SheetContent
         side="right"
         showCloseButton={false}
-        className="w-[90%]! sm:w-[85%]! sm:max-w-[85%]! p-0 gap-0 flex flex-col overflow-y-auto shadow-2xl"
+        className="w-[90%]! sm:w-[85%]! sm:max-w-[85%]! p-0 gap-0 flex flex-col overflow-hidden shadow-2xl"
       >
         <SheetHeader className="p-3 border-b border-border">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
@@ -552,10 +480,10 @@ export function FirestoreToFirestoreImportDialog({
           </div>
         </SheetHeader>
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col px-2 py-1 sm:px-4">
-          <div className="min-h-0 flex-1 overflow-auto py-3">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col px-2 sm:px-4">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden py-3">
             {step === "AUTH" ? (
-              <div className="space-y-4">
+              <div className="h-full space-y-4 overflow-y-auto pr-2">
                 <div className="rounded-lg border bg-card p-4">
                   <Label className="text-sm font-medium">Source Credentials</Label>
                   <div className="mt-2 grid gap-3">
@@ -662,8 +590,8 @@ export function FirestoreToFirestoreImportDialog({
             ) : null}
 
             {step === "SELECT" ? (
-              <div className="space-y-4">
-                <div className="rounded-lg border bg-card p-4">
+              <div className="flex h-full min-h-0 flex-col space-y-4">
+                <div className="flex min-h-0 flex-1 flex-col rounded-lg border bg-card p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <Label className="text-sm font-medium">Select Paths to Import</Label>
                     <Badge variant="outline">Selected: {selectedPaths.size}</Badge>
@@ -687,29 +615,28 @@ export function FirestoreToFirestoreImportDialog({
                     </Button>
                   </div>
 
-                  <div className="mt-3 max-h-[48vh] overflow-auto rounded-md border bg-background p-2">
-                    {tree.length > 0 ? renderTree(tree) : (
-                      <Empty className="border-none p-4">
-                        <EmptyHeader>
-                          <EmptyTitle>No paths loaded yet</EmptyTitle>
-                          <EmptyDescription>Load root collections or a Firebase path to start selecting.</EmptyDescription>
-                        </EmptyHeader>
-                      </Empty>
-                    )}
+                  <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-y-auto rounded-md border bg-background">
+                    <FirestoreSelectionTree
+                      tree={tree}
+                      expandedPaths={expandedPaths}
+                      selectedPaths={selectedPaths}
+                      onToggleExpand={toggleExpand}
+                      onToggleSelect={toggleSelect}
+                    />
                   </div>
                 </div>
               </div>
             ) : null}
 
             {step === "SUMMARY" ? (
-              <div className="space-y-4">
-                <div className="rounded-lg border bg-card p-4">
+              <div className="flex h-full min-h-0 flex-col space-y-4">
+                <div className="flex min-h-0 flex-1 flex-col rounded-lg border bg-card p-4">
                   <div className="flex items-center justify-between gap-2">
                     <Label className="text-sm font-medium">Import Summary</Label>
                     <Badge variant="outline">{summaryItems.length} item(s)</Badge>
                   </div>
 
-                  <div className="mt-3 max-h-[46vh] overflow-auto rounded-md border">
+                  <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-y-auto rounded-md border">
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -739,7 +666,7 @@ export function FirestoreToFirestoreImportDialog({
             ) : null}
 
             {step === "CONFLICT" ? (
-              <div className="space-y-4">
+              <div className="h-full space-y-4 overflow-y-auto pr-2">
                 <div className="rounded-lg border bg-card p-4">
                   <Label className="text-sm font-medium">Conflict Resolution</Label>
                   <RadioGroup
@@ -787,7 +714,7 @@ export function FirestoreToFirestoreImportDialog({
             ) : null}
 
             {step === "EXECUTE" ? (
-              <div className="flex min-h-80 flex-col items-center justify-center space-y-4 rounded-lg border bg-card p-6 text-center">
+              <div className="flex h-full min-h-80 flex-col items-center justify-center space-y-4 rounded-lg border bg-card p-6 text-center">
                 <Spinner className="h-12 w-12 text-primary" />
                 <div>
                   <h3 className="text-lg font-semibold">Copying Data...</h3>
