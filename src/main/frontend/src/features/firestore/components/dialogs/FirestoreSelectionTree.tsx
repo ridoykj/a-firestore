@@ -88,7 +88,7 @@ export function FirestoreSelectionTree({
         const segments = currentPath.split("/").filter(Boolean)
 
         return (
-            <div className="flex items-center justify-between mb-4 sticky top-0 bg-background z-10 py-2 px-1">
+            <div className="flex items-center justify-between border-b bg-muted/20 px-3 py-1.5 sticky top-0 z-10">
                 <Breadcrumb>
                     <BreadcrumbList>
                         <BreadcrumbItem>
@@ -141,7 +141,7 @@ export function FirestoreSelectionTree({
                     <button
                         type="button"
                         onClick={() => setViewMode("list")}
-                        className={`p-1.5 rounded-md transition-colors ${viewMode === "list" ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
+                        className={`p-1 rounded-md transition-colors ${viewMode === "list" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
                         title="List View"
                     >
                         <List className="h-4 w-4" />
@@ -149,7 +149,7 @@ export function FirestoreSelectionTree({
                     <button
                         type="button"
                         onClick={() => setViewMode("grid")}
-                        className={`p-1.5 rounded-md transition-colors ${viewMode === "grid" ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
+                        className={`p-1 rounded-md transition-colors ${viewMode === "grid" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
                         title="Grid View"
                     >
                         <LayoutGrid className="h-4 w-4" />
@@ -171,12 +171,12 @@ export function FirestoreSelectionTree({
     }
 
     return (
-        <div className="flex flex-col flex-1 h-full p-2 relative min-h-0">
+        <div className="flex flex-col flex-1 h-full relative min-h-0">
             {renderBreadcrumb()}
 
-            <ScrollArea className="flex-1 min-h-0 border-t pt-2">
+            <ScrollArea className="flex-1 min-h-0 p-2">
                 {isTreeLoading || activeNode?.isLoading ? (
-                    <div className="flex flex-1 items-center justify-center py-12 min-h-[150px]">
+                    <div className="flex flex-1 items-center justify-center py-12 min-h-37.5">
                         <Spinner className="h-12 w-12 text-primary" />
                     </div>
                 ) : (

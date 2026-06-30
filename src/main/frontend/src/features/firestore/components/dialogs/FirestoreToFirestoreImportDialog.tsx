@@ -662,17 +662,17 @@ export function FirestoreToFirestoreImportDialog({
             ) : null}
 
             {step === "SELECT" ? (
-              <div className="flex h-full min-h-0 flex-col space-y-4">
-                <div className="flex min-h-0 flex-1 flex-col rounded-lg border bg-card p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex h-full min-h-0 flex-col">
+                <div className="flex min-h-0 flex-1 flex-col rounded-lg border bg-card p-2 sm:p-3 shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2 px-1">
                     <Label className="text-sm font-medium">Select Paths to Import</Label>
                     <Badge variant="outline">Selected: {selectedPaths.size}</Badge>
                   </div>
 
-                  <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center mb-2 px-1">
                     <Input
                       placeholder="Firebase path (e.g. channels/UC-...)"
-                      className="h-9"
+                      className="h-8"
                       value={firebasePathInput}
                       onChange={(event) => setFirebasePathInput(event.target.value)}
                       onKeyDown={(event) => {
@@ -686,7 +686,7 @@ export function FirestoreToFirestoreImportDialog({
                       type="button"
                       size="sm"
                       variant="outline"
-                      className="h-9 sm:w-auto"
+                      className="h-8 sm:w-auto"
                       disabled={isPathLoading}
                       onClick={() => void handleLoadFirebasePath()}
                     >
@@ -695,7 +695,7 @@ export function FirestoreToFirestoreImportDialog({
                     </Button>
                   </div>
 
-                  <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border bg-background">
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border bg-background">
                     <FirestoreSelectionTree
                       tree={tree}
                       currentPath={currentPath}
