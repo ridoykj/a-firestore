@@ -83,8 +83,6 @@ export function FirestoreToFirestoreImportDialog({
   const [conflictResolution, setConflictResolution] = useState<ConflictResolution>("MERGE")
   const [authAttempted, setAuthAttempted] = useState(false)
   const [copiedDocuments, setCopiedDocuments] = useState(0)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [isCopying, setIsCopying] = useState(false)
 
   const activeCredentialsFile = useCustomCredentials ? customCredentialsFile : globalCredentialsFile
   const sourceCredentialsReady = Boolean(activeCredentialsFile)
@@ -128,7 +126,6 @@ export function FirestoreToFirestoreImportDialog({
     setConflictResolution("MERGE")
     setAuthAttempted(false)
     setCopiedDocuments(0)
-    setIsCopying(false)
   }
 
   function handleOpenChange(nextOpen: boolean) {
@@ -463,7 +460,6 @@ export function FirestoreToFirestoreImportDialog({
 
   async function executeCopy() {
     setStep("EXECUTE")
-    setIsCopying(true)
     setCopiedDocuments(0)
 
     try {
@@ -511,8 +507,6 @@ export function FirestoreToFirestoreImportDialog({
       const message = error instanceof Error ? error.message : "Deep copy failed"
       toast.error(message)
       setStep("CONFLICT")
-    } finally {
-      setIsCopying(false)
     }
   }
 

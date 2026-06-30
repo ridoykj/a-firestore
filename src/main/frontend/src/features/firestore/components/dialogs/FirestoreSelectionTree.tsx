@@ -69,7 +69,7 @@ export function FirestoreSelectionTree({
                 onLoadMore?.(currentPath)
             }
         },
-        [activeNode?.hasMore, activeNode?.isLoadingMore, currentPath, onLoadMore]
+        [activeNode, currentPath, onLoadMore]
     )
 
     useEffect(() => {
