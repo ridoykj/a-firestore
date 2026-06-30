@@ -26,7 +26,7 @@ import {
 } from "lucide-react"
 import { useMemo, useState, type ChangeEvent } from "react"
 import { toast } from "sonner"
-import { FirestoreSelectionTree, type TreeNode } from "./FirestoreSelectionTree"
+import { FirestoreSelectionTree, findNodeByPath, type TreeNode } from "./FirestoreSelectionTree"
 
 interface FirestoreToFirestoreImportDialogProps {
   context: ProjectTab & { activePath: string }
@@ -255,6 +255,8 @@ export function FirestoreToFirestoreImportDialog({
           type: rootType,
           isLoaded: true,
           isLoading: false,
+          hasMore: response.pageInfo?.hasMore ?? false,
+          nextCursor: response.pageInfo?.nextCursor ?? null,
           children: childNodes,
         },
       ])
@@ -288,6 +290,8 @@ export function FirestoreToFirestoreImportDialog({
               node.children = children
               node.isLoaded = true
               node.isLoading = false
+              node.hasMore = response.pageInfo?.hasMore ?? false
+              node.nextCursor = response.pageInfo?.nextCursor ?? null
               return true
             }
             if (node.children && updateNode(node.children)) {
@@ -318,6 +322,77 @@ export function FirestoreToFirestoreImportDialog({
           return false
         }
 
+        updateNode(nextTree)
+        return nextTree
+      })
+    }
+  }
+
+  async function loadMoreChildren(nodePath: string) {
+    const node = findNodeByPath(tree, nodePath)
+    if (!node || !node.hasMore || !node.nextCursor) return
+
+    setTree((prev) => {
+      const nextTree = structuredClone(prev)
+      const updateNode = (nodes: TreeNode[]): boolean => {
+        for (const n of nodes) {
+          if (n.path === nodePath) {
+            n.isLoadingMore = true
+            return true
+          }
+          if (n.children && updateNode(n.children)) return true
+        }
+        return false
+      }
+      updateNode(nextTree)
+      return nextTree
+    })
+
+    try {
+      const response = await firestoreService.getNested(
+        { projectId: sourceProjectId, databaseId: sourceDatabaseId },
+        nodePath,
+        100,
+        node.nextCursor,
+      )
+
+      const moreChildren: TreeNode[] = [
+        ...mapNestedNodesToTree(response.childCollectionNodes, "collection"),
+        ...mapNestedNodesToTree(response.documentNodes, "document"),
+      ]
+
+      setTree((prev) => {
+        const nextTree = structuredClone(prev)
+        const updateNode = (nodes: TreeNode[]): boolean => {
+          for (const n of nodes) {
+            if (n.path === nodePath) {
+              n.children = [...(n.children || []), ...moreChildren]
+              n.hasMore = response.pageInfo?.hasMore ?? false
+              n.nextCursor = response.pageInfo?.nextCursor ?? null
+              n.isLoadingMore = false
+              return true
+            }
+            if (n.children && updateNode(n.children)) return true
+          }
+          return false
+        }
+        updateNode(nextTree)
+        return nextTree
+      })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load more")
+      setTree((prev) => {
+        const nextTree = structuredClone(prev)
+        const updateNode = (nodes: TreeNode[]): boolean => {
+          for (const n of nodes) {
+            if (n.path === nodePath) {
+              n.isLoadingMore = false
+              return true
+            }
+            if (n.children && updateNode(n.children)) return true
+          }
+          return false
+        }
         updateNode(nextTree)
         return nextTree
       })
@@ -620,7 +695,7 @@ export function FirestoreToFirestoreImportDialog({
                     </Button>
                   </div>
 
-                  <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-y-auto rounded-md border bg-background">
+                  <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border bg-background">
                     <FirestoreSelectionTree
                       tree={tree}
                       currentPath={currentPath}
@@ -628,6 +703,7 @@ export function FirestoreToFirestoreImportDialog({
                       isTreeLoading={isPathLoading}
                       onNavigate={handleNavigate}
                       onToggleSelect={toggleSelect}
+                      onLoadMore={loadMoreChildren}
                     />
                   </div>
                 </div>
