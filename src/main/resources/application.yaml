@@ -1,6 +1,9 @@
 spring:
   application:
     name: afirestore
+  threads:
+    virtual:
+      enabled: true
 springdoc:
   swagger-ui:
     enabled: true

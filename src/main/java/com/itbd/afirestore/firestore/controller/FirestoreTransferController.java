@@ -9,10 +9,16 @@ import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.http.codec.ServerSentEvent;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 @RestController
 @RequestMapping("/api/transfer")
@@ -92,17 +98,42 @@ public class FirestoreTransferController {
                 });
     }
 
-    @PostMapping("/deep-copy")
-    public Mono<ResponseEntity<Map<String, Object>>> executeDeepCopy(@RequestBody DeepCopyRequest request) {
+    @PostMapping(value = "/deep-copy", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<Map<String, Object>>> executeDeepCopy(@RequestBody DeepCopyRequest request) {
         if (request.sourcePaths() == null || request.sourcePaths().isEmpty()) {
-            return Mono.just(ResponseEntity.badRequest().body(Map.of("error", (Object) "sourcePaths cannot be empty")));
+            return Flux.just(ServerSentEvent.<Map<String, Object>>builder()
+                    .event("error")
+                    .data(Map.of("error", (Object) "sourcePaths cannot be empty"))
+                    .build());
         }
-        return transferService.performDeepCopy(request)
-                .map(ResponseEntity::ok)
-                .onErrorResume(IllegalArgumentException.class, e ->
-                        Mono.just(ResponseEntity.badRequest().body(Map.of(
-                                "error", (Object) (e.getMessage() == null ? "Invalid source path." : e.getMessage())
-                        ))))
-                .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().body(Map.of("error", (Object) e.getMessage()))));
+
+        AtomicInteger totalCopied = new AtomicInteger(0);
+        AtomicBoolean isFinished = new AtomicBoolean(false);
+        AtomicReference<Throwable> errorRef = new AtomicReference<>(null);
+
+        // Start the async copy process using Virtual Threads
+        transferService.performDeepCopyAsync(request, totalCopied, isFinished, errorRef);
+
+        // Poll progress every 500ms and stream it to the frontend
+        return Flux.interval(Duration.ofMillis(500))
+                .takeUntil(i -> isFinished.get())
+                .map(i -> ServerSentEvent.<Map<String, Object>>builder()
+                        .event("progress")
+                        .data(Map.of("copied", totalCopied.get(), "status", "in-progress"))
+                        .build())
+                .concatWith(
+                        Mono.fromCallable(() -> {
+                            if (errorRef.get() != null) {
+                                return ServerSentEvent.<Map<String, Object>>builder()
+                                        .event("error")
+                                        .data(Map.of("error", (Object) errorRef.get().getMessage()))
+                                        .build();
+                            }
+                            return ServerSentEvent.<Map<String, Object>>builder()
+                                    .event("complete")
+                                    .data(Map.of("copied", totalCopied.get(), "status", "success"))
+                                    .build();
+                        })
+                );
     }
 }

@@ -5,6 +5,7 @@ import {
   useFirestoreTransferDeepCopyMutation,
 } from "@/features/firestore/api/firestore-query"
 import { firestoreService } from "@/features/firestore/api/firestore-service"
+import { fetchEventSource } from "@microsoft/fetch-event-source"
 import type { NestedNode } from "@/features/firestore/schemas/FirestoreSchema"
 import { useGcpStore, type ProjectTab } from "@/features/gcp/store/gcp-store"
 import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/alert"
@@ -82,6 +83,8 @@ export function FirestoreToFirestoreImportDialog({
   const [isPathLoading, setIsPathLoading] = useState(false)
   const [conflictResolution, setConflictResolution] = useState<ConflictResolution>("MERGE")
   const [authAttempted, setAuthAttempted] = useState(false)
+  const [copiedDocuments, setCopiedDocuments] = useState(0)
+  const [isCopying, setIsCopying] = useState(false)
 
   const activeCredentialsFile = useCustomCredentials ? customCredentialsFile : globalCredentialsFile
   const sourceCredentialsReady = Boolean(activeCredentialsFile)
@@ -125,6 +128,8 @@ export function FirestoreToFirestoreImportDialog({
     setIsPathLoading(false)
     setConflictResolution("MERGE")
     setAuthAttempted(false)
+    setCopiedDocuments(0)
+    setIsCopying(false)
   }
 
   function handleOpenChange(nextOpen: boolean) {
@@ -459,8 +464,11 @@ export function FirestoreToFirestoreImportDialog({
 
   async function executeCopy() {
     setStep("EXECUTE")
+    setIsCopying(true)
+    setCopiedDocuments(0)
+
     try {
-      const response = await copyMutation.mutateAsync({
+      const payload = {
         sourceProjectId,
         sourceDatabaseId,
         sourcePaths: Array.from(selectedPaths),
@@ -468,15 +476,44 @@ export function FirestoreToFirestoreImportDialog({
         targetDatabaseId: context.databaseId,
         targetBasePath: context.activePath,
         conflictResolution,
+      }
+
+      const baseUrl = import.meta.env.VITE_BASE_URL || ""
+      
+      await new Promise<void>((resolve, reject) => {
+        fetchEventSource(`${baseUrl}/api/transfer/deep-copy`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+          onmessage(event) {
+            const data = JSON.parse(event.data)
+            if (event.event === 'progress') {
+              setCopiedDocuments(data.copied)
+            } else if (event.event === 'complete') {
+              setCopiedDocuments(data.copied)
+              toast.success(`Copied ${data.copied} documents successfully!`)
+              resolve()
+            } else if (event.event === 'error') {
+              reject(new Error(data.error || 'Unknown error occurred'))
+            }
+          },
+          onerror(err) {
+            reject(err)
+            throw err // to prevent reconnecting
+          }
+        })
       })
 
-      toast.success(`Copied ${response.copiedDocuments} documents successfully!`)
       onImportSuccess()
       handleOpenChange(false)
     } catch (error) {
       const message = error instanceof Error ? error.message : "Deep copy failed"
       toast.error(message)
       setStep("CONFLICT")
+    } finally {
+      setIsCopying(false)
     }
   }
 
@@ -800,7 +837,10 @@ export function FirestoreToFirestoreImportDialog({
                 <Spinner className="h-12 w-12 text-primary" />
                 <div>
                   <h3 className="text-lg font-semibold">Copying Data...</h3>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Documents copied: <span className="font-mono font-bold text-foreground">{copiedDocuments.toLocaleString()}</span>
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-1">
                     This may take a few moments depending on the size of the selection.
                   </p>
                 </div>
