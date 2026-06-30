@@ -76,9 +76,10 @@ export function FirestoreToFirestoreImportDialog({
   const [sourceProjectId, setSourceProjectId] = useState("")
   const [sourceDatabaseId, setSourceDatabaseId] = useState("")
   const [tree, setTree] = useState<TreeNode[]>([])
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
+  const [currentPath, setCurrentPath] = useState<string>("")
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
   const [firebasePathInput, setFirebasePathInput] = useState("")
+  const [isPathLoading, setIsPathLoading] = useState(false)
   const [conflictResolution, setConflictResolution] = useState<ConflictResolution>("MERGE")
   const [authAttempted, setAuthAttempted] = useState(false)
 
@@ -118,9 +119,10 @@ export function FirestoreToFirestoreImportDialog({
     setSourceProjectId("")
     setSourceDatabaseId("")
     setTree([])
-    setExpandedPaths(new Set())
+    setCurrentPath("")
     setSelectedPaths(new Set())
     setFirebasePathInput("")
+    setIsPathLoading(false)
     setConflictResolution("MERGE")
     setAuthAttempted(false)
   }
@@ -190,7 +192,7 @@ export function FirestoreToFirestoreImportDialog({
           isLoading: false,
         })),
       )
-      setExpandedPaths(new Set())
+      setCurrentPath("")
       setSelectedPaths(new Set())
       setFirebasePathInput("")
       setStep("SELECT")
@@ -221,11 +223,12 @@ export function FirestoreToFirestoreImportDialog({
         isLoading: false,
       })),
     )
-    setExpandedPaths(new Set())
+    setCurrentPath("")
   }
 
   async function handleLoadFirebasePath() {
     const normalizedPath = normalizeFirebasePath(firebasePathInput)
+    setIsPathLoading(true)
     try {
       if (!normalizedPath) {
         await loadRootCollections()
@@ -255,10 +258,12 @@ export function FirestoreToFirestoreImportDialog({
           children: childNodes,
         },
       ])
-      setExpandedPaths(new Set([normalizedPath]))
+      setCurrentPath(normalizedPath)
     } catch (error) {
       const message = error instanceof Error ? error.message : "Invalid Firebase path."
       toast.error(message)
+    } finally {
+      setIsPathLoading(false)
     }
   }
 
@@ -319,17 +324,9 @@ export function FirestoreToFirestoreImportDialog({
     }
   }
 
-  function toggleExpand(nodePath: string, isLoaded: boolean) {
-    const nextExpanded = new Set(expandedPaths)
-
-    if (nextExpanded.has(nodePath)) {
-      nextExpanded.delete(nodePath)
-      setExpandedPaths(nextExpanded)
-      return
-    }
-
-    nextExpanded.add(nodePath)
-    setExpandedPaths(nextExpanded)
+  function handleNavigate(nodePath: string, isLoaded: boolean) {
+    setCurrentPath(nodePath)
+    setFirebasePathInput(nodePath)
 
     if (isLoaded) {
       return
@@ -610,7 +607,15 @@ export function FirestoreToFirestoreImportDialog({
                         }
                       }}
                     />
-                    <Button type="button" size="sm" variant="outline" className="h-9 sm:w-auto" onClick={() => void handleLoadFirebasePath()}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-9 sm:w-auto"
+                      disabled={isPathLoading}
+                      onClick={() => void handleLoadFirebasePath()}
+                    >
+                      {isPathLoading ? <Spinner data-icon="inline-start" /> : null}
                       Load
                     </Button>
                   </div>
@@ -618,9 +623,10 @@ export function FirestoreToFirestoreImportDialog({
                   <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-y-auto rounded-md border bg-background">
                     <FirestoreSelectionTree
                       tree={tree}
-                      expandedPaths={expandedPaths}
+                      currentPath={currentPath}
                       selectedPaths={selectedPaths}
-                      onToggleExpand={toggleExpand}
+                      isTreeLoading={isPathLoading}
+                      onNavigate={handleNavigate}
                       onToggleSelect={toggleSelect}
                     />
                   </div>

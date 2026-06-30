@@ -1,7 +1,15 @@
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/shadcn/components/ui/empty"
 import { Spinner } from "@/shadcn/components/ui/spinner"
-import { CheckSquare, ChevronDown, ChevronRight, FileText, Folder, Square } from "lucide-react"
-import type { ReactNode } from "react"
+import {
+    Breadcrumb,
+    BreadcrumbItem,
+    BreadcrumbLink,
+    BreadcrumbList,
+    BreadcrumbPage,
+    BreadcrumbSeparator,
+} from "@/shadcn/components/ui/breadcrumb"
+import { CheckSquare, ChevronRight, FileText, Folder, Home, Square } from "lucide-react"
+import React from "react"
 
 export interface TreeNode {
     path: string
@@ -14,73 +22,90 @@ export interface TreeNode {
 
 interface FirestoreSelectionTreeProps {
     tree: TreeNode[]
-    expandedPaths: Set<string>
+    currentPath: string
     selectedPaths: Set<string>
-    onToggleExpand: (path: string, isLoaded: boolean) => void
+    isTreeLoading?: boolean
+    onNavigate: (path: string, isLoaded: boolean) => void
     onToggleSelect: (path: string) => void
+}
+
+function findNodeByPath(nodes: TreeNode[], targetPath: string): TreeNode | undefined {
+    for (const node of nodes) {
+        if (node.path === targetPath) {
+            return node
+        }
+        if (node.children) {
+            const found = findNodeByPath(node.children, targetPath)
+            if (found) return found
+        }
+    }
+    return undefined
 }
 
 export function FirestoreSelectionTree({
     tree,
-    expandedPaths,
+    currentPath,
     selectedPaths,
-    onToggleExpand,
+    isTreeLoading,
+    onNavigate,
     onToggleSelect,
 }: FirestoreSelectionTreeProps) {
-    function renderTree(nodes: TreeNode[], depth = 0): ReactNode {
-        return nodes.map((node) => {
-            const isExpanded = expandedPaths.has(node.path)
-            const isSelected = selectedPaths.has(node.path)
+    const activeNode = currentPath ? findNodeByPath(tree, currentPath) : undefined
+    const displayNodes = activeNode?.children ?? (currentPath === "" ? tree : [])
 
-            return (
-                <div key={node.path} className="flex flex-col">
-                    <div
-                        className="flex items-center rounded-md py-1 hover:bg-muted/50"
-                        style={{ paddingLeft: `${depth * 1.25}rem` }}
-                    >
-                        <button
-                            type="button"
-                            className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-sm hover:bg-muted"
-                            onClick={() => onToggleExpand(node.path, node.isLoaded)}
-                            aria-label={`Toggle ${node.name}`}
-                        >
-                            {node.isLoading ? (
-                                <Spinner className="h-4 w-4" />
-                            ) : isExpanded ? (
-                                <ChevronDown className="h-4 w-4" />
-                            ) : (
-                                <ChevronRight className="h-4 w-4" />
-                            )}
-                        </button>
+    function renderBreadcrumb() {
+        const segments = currentPath.split("/").filter(Boolean)
 
-                        <button
-                            type="button"
-                            className="mr-2 shrink-0 rounded-sm p-0.5 hover:bg-muted"
-                            onClick={() => onToggleSelect(node.path)}
-                            title={isSelected ? "Unselect" : "Select"}
-                            aria-label={isSelected ? `Unselect ${node.name}` : `Select ${node.name}`}
-                        >
-                            {isSelected ? <CheckSquare className="h-4 w-4 text-primary" /> : <Square className="h-4 w-4" />}
-                        </button>
+        return (
+            <Breadcrumb className="mb-4 sticky top-0 bg-background z-10 py-2 px-1">
+                <BreadcrumbList>
+                    <BreadcrumbItem>
+                        {segments.length === 0 ? (
+                            <BreadcrumbPage className="flex items-center gap-1">
+                                <Home className="h-4 w-4" /> Root
+                            </BreadcrumbPage>
+                        ) : (
+                            <BreadcrumbLink
+                                asChild
+                                className="cursor-pointer flex items-center gap-1"
+                                onClick={() => onNavigate("", true)}
+                            >
+                                <span><Home className="h-4 w-4" /> Root</span>
+                            </BreadcrumbLink>
+                        )}
+                    </BreadcrumbItem>
+                    
+                    {segments.length > 0 && <BreadcrumbSeparator />}
+                    
+                    {segments.map((segment, index) => {
+                        const path = segments.slice(0, index + 1).join("/")
+                        const isLast = index === segments.length - 1
 
-                        <button
-                            type="button"
-                            className="flex min-w-0 flex-1 items-center gap-2 rounded-sm px-1 py-0.5 text-left hover:bg-muted"
-                            onClick={() => onToggleExpand(node.path, node.isLoaded)}
-                        >
-                            {node.type === "collection" ? (
-                                <Folder className="h-4 w-4 shrink-0 text-blue-500" />
-                            ) : (
-                                <FileText className="h-4 w-4 shrink-0 text-orange-500" />
-                            )}
-                            <span className="truncate font-mono text-sm">{node.name}</span>
-                        </button>
-                    </div>
-
-                    {isExpanded && node.children && renderTree(node.children, depth + 1)}
-                </div>
-            )
-        })
+                        return (
+                            <React.Fragment key={path}>
+                                <BreadcrumbItem>
+                                    {isLast ? (
+                                        <BreadcrumbPage>{segment}</BreadcrumbPage>
+                                    ) : (
+                                        <BreadcrumbLink
+                                            asChild
+                                            className="cursor-pointer"
+                                            onClick={() => {
+                                                const node = findNodeByPath(tree, path)
+                                                onNavigate(path, node?.isLoaded ?? false)
+                                            }}
+                                        >
+                                            <span>{segment}</span>
+                                        </BreadcrumbLink>
+                                    )}
+                                </BreadcrumbItem>
+                                {!isLast && <BreadcrumbSeparator />}
+                            </React.Fragment>
+                        )
+                    })}
+                </BreadcrumbList>
+            </Breadcrumb>
+        )
     }
 
     if (tree.length === 0) {
@@ -94,5 +119,68 @@ export function FirestoreSelectionTree({
         )
     }
 
-    return <div className="flex flex-col p-2">{renderTree(tree)}</div>
+    return (
+        <div className="flex flex-col flex-1 h-full p-2 relative">
+            {renderBreadcrumb()}
+            
+            <div className="flex flex-col flex-1 gap-1 border-t pt-2">
+                {isTreeLoading || activeNode?.isLoading ? (
+                    <div className="flex flex-1 items-center justify-center py-12 min-h-[150px]">
+                        <Spinner className="h-12 w-12 text-primary" />
+                    </div>
+                ) : (
+                    <>
+                {displayNodes.map((node) => {
+                    const isSelected = selectedPaths.has(node.path)
+
+                    return (
+                        <div
+                            key={node.path}
+                            className="flex items-center justify-between rounded-md px-2 py-1.5 hover:bg-muted/50 group cursor-pointer"
+                            onClick={() => onNavigate(node.path, node.isLoaded)}
+                        >
+                            <div className="flex items-center min-w-0 flex-1">
+                                <button
+                                    type="button"
+                                    className="mr-2 shrink-0 rounded-sm p-0.5 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        onToggleSelect(node.path)
+                                    }}
+                                    title={isSelected ? "Unselect" : "Select"}
+                                    aria-label={isSelected ? `Unselect ${node.name}` : `Select ${node.name}`}
+                                >
+                                    {isSelected ? <CheckSquare className="h-4 w-4 text-primary" /> : <Square className="h-4 w-4 text-muted-foreground group-hover:text-foreground" />}
+                                </button>
+
+                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                    {node.type === "collection" ? (
+                                        <Folder className="h-4 w-4 shrink-0 text-blue-500" />
+                                    ) : (
+                                        <FileText className="h-4 w-4 shrink-0 text-orange-500" />
+                                    )}
+                                    <span className="truncate font-mono text-sm">{node.name}</span>
+                                </div>
+                            </div>
+
+                            <div className="shrink-0 ml-2">
+                                {node.isLoading ? (
+                                    <Spinner className="h-4 w-4" />
+                                ) : (
+                                    <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                                )}
+                            </div>
+                        </div>
+                    )
+                })}
+                {displayNodes.length === 0 && (
+                    <div className="py-8 text-center text-sm text-muted-foreground">
+                        No children found.
+                    </div>
+                )}
+                    </>
+                )}
+            </div>
+        </div>
+    )
 }
