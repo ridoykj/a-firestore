@@ -1,11 +1,9 @@
 import {
   useFirestoreDatabasesQuery,
   useFirestoreInitMutation,
-  useFirestoreProjectsQuery,
-  useFirestoreTransferDeepCopyMutation,
+  useFirestoreProjectsQuery
 } from "@/features/firestore/api/firestore-query"
 import { firestoreService } from "@/features/firestore/api/firestore-service"
-import { fetchEventSource } from "@microsoft/fetch-event-source"
 import type { NestedNode } from "@/features/firestore/schemas/FirestoreSchema"
 import { useGcpStore, type ProjectTab } from "@/features/gcp/store/gcp-store"
 import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/alert"
@@ -18,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader } from "@/shadcn/components/ui/sheet"
 import { Spinner } from "@/shadcn/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shadcn/components/ui/table"
+import { fetchEventSource } from "@microsoft/fetch-event-source"
 import {
   AlertCircle,
   CloudDownload,
@@ -84,6 +83,7 @@ export function FirestoreToFirestoreImportDialog({
   const [conflictResolution, setConflictResolution] = useState<ConflictResolution>("MERGE")
   const [authAttempted, setAuthAttempted] = useState(false)
   const [copiedDocuments, setCopiedDocuments] = useState(0)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [isCopying, setIsCopying] = useState(false)
 
   const activeCredentialsFile = useCustomCredentials ? customCredentialsFile : globalCredentialsFile
@@ -106,7 +106,6 @@ export function FirestoreToFirestoreImportDialog({
   })
 
   const initFirestoreMutation = useFirestoreInitMutation()
-  const copyMutation = useFirestoreTransferDeepCopyMutation()
 
   const projects = projectsQuery.data ?? []
   const databases = databasesQuery.data ?? []
