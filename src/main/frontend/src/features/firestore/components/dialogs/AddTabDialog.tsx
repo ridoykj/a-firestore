@@ -36,6 +36,7 @@ function buildTab(projectId: string, databaseId: string): ProjectTab {
     projectId: normalizedProject,
     databaseId: normalizedDb === "(default)" ? "" : normalizedDb,
     label: `${normalizedProject} / ${normalizedDb}`,
+    connectionMode: "service-account", // Default to service-account; can be overridden based on credentials
   }
 }
 
