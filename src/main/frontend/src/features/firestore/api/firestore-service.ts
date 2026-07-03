@@ -5,7 +5,7 @@ import type {
   NestedResponse,
   QueryResponse,
 } from "@/features/firestore/schemas/FirestoreSchema"
-import { encodePath, extractApiMessage } from "@/features/firestore/api/firestore-utils"
+import { encodePath, extractApiMessage, mapDocumentDtoToFirestoreDocument, unwrapFirestoreValue } from "@/features/firestore/api/firestore-utils"
 import {
   useMutation,
   useQueryClient,
@@ -178,6 +178,11 @@ type FirestoreServiceApi = {
   loadDatabases: (projectId: string, credentialsFile: File) => Promise<string[]>
   initFirestore: (projectId: string, credentialsFile: File, databaseId?: string) => Promise<string>
   
+  // FFP-003: Connection lifecycle methods
+  getConnectionStatus: () => Promise<{ status: string; projectId?: string; databaseId?: string }>
+  disconnectConnection: (projectId: string, databaseId?: string) => Promise<string>
+  disconnectAllConnections: () => Promise<string>
+
   initTransfer: (file: File) => Promise<{ projectId: string; databases: string[]; serviceAccountJson: string }>
   initSourceDb: (projectId: string, databaseId: string, serviceAccountJson: string) => Promise<unknown>
   deepCopy: (payload: {
@@ -246,7 +251,7 @@ function toDocumentArray(value: unknown): FirestoreDocument[] {
   }
   return value
     .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
-    .map((item) => item as FirestoreDocument)
+    .map(mapDocumentDtoToFirestoreDocument)
 }
 
 function toDocumentDetails(value: unknown): FirestoreDocumentDetails {
@@ -258,16 +263,33 @@ function toDocumentDetails(value: unknown): FirestoreDocumentDetails {
   const id = typeof payload.id === "string" ? payload.id : ""
 
   const rawFields = payload.fields
-  const fields =
-    rawFields && typeof rawFields === "object" && !Array.isArray(rawFields)
-      ? (rawFields as Record<string, unknown>)
-      : {}
+  const unwrappedFields: Record<string, unknown> = {}
+  
+  if (rawFields && typeof rawFields === "object" && !Array.isArray(rawFields)) {
+    for (const [key, val] of Object.entries(rawFields)) {
+      unwrappedFields[key] = unwrapFirestoreValue(val)
+    }
+  } else {
+    // Fallback: If it's already an unwrapped document, use payload directly
+    for (const [key, val] of Object.entries(payload)) {
+      if (
+        key !== "id" && 
+        key !== "path" && 
+        key !== "_path" && 
+        key !== "createTime" && 
+        key !== "updateTime" && 
+        key !== "subcollections"
+      ) {
+        unwrappedFields[key] = val
+      }
+    }
+  }
 
-  const collections = Array.isArray(payload.collections)
-    ? payload.collections.filter((item): item is string => typeof item === "string")
+  const collections = Array.isArray(payload.subcollections)
+    ? payload.subcollections.filter((item): item is string => typeof item === "string")
     : []
 
-  return { id, fields, collections }
+  return { id, fields: unwrappedFields, collections }
 }
 
 function buildQueryParams(requestData: FirestoreQueryRequest): URLSearchParams {
@@ -355,11 +377,14 @@ const firestoreApi: FirestoreServiceApi = {
 
   runQuery: (context, requestData) => {
     const params = buildQueryParams(requestData)
-    return request(() =>
+    return request<QueryResponse>(() =>
       axiosInstance.get(`/api/workbench/query?${params.toString()}`, {
         headers: firestoreHeaders(context),
       }),
-    )
+    ).then((response) => ({
+      ...response,
+      documents: response.documents?.map(mapDocumentDtoToFirestoreDocument) ?? [],
+    }))
   },
 
   createDocument: (context, collectionPath, payload, docId) =>
@@ -417,6 +442,21 @@ const firestoreApi: FirestoreServiceApi = {
     form.append("file", credentialsFile)
     return request(() => axiosInstance.post("/api/firestore/init", form))
   },
+
+  // FFP-003: Connection lifecycle methods
+  getConnectionStatus: () =>
+    request(() => axiosInstance.get("/api/firestore/connection/status")),
+
+  disconnectConnection: (projectId, databaseId) => {
+    const params = new URLSearchParams({ projectId })
+    if (databaseId?.trim()) {
+      params.set("databaseId", databaseId.trim())
+    }
+    return request(() => axiosInstance.delete(`/api/firestore/connection?${params.toString()}`))
+  },
+
+  disconnectAllConnections: () =>
+    request(() => axiosInstance.delete("/api/firestore/connection/all")),
 
   initTransfer: (file: File) => {
     const formData = new FormData()
