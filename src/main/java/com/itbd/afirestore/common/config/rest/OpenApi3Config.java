@@ -21,9 +21,8 @@ import java.util.regex.Pattern;
 
 
 @Configuration
-//@SecurityScheme(name = "LeaseDrop-sec", type = SecuritySchemeType.HTTP, bearerFormat = "JWT", scheme = "bearer", in = SecuritySchemeIn.HEADER)
-//@OpenAPIDefinition(info = @Info(title = "LeaseDrop - Dev", version = "v3", description = "Develop RestFull spring boot application"))
 public class OpenApi3Config {
+
     @Bean
     public OpenAPI openApiSpec() {
         return new OpenAPI().components(new Components()
@@ -40,30 +39,30 @@ public class OpenApi3Config {
                                 .addProperty("rejectedValue", new ObjectSchema())
                                 .addProperty("path", new StringSchema())))
                 .servers(List.of(
-                        new Server().url("http://localhost:6001"),
-                        new Server().url("http://localhost:7001"),
-                        new Server().url("http://localhost:9001"),
-                        new Server().url("http://10.22.0.3:8080/bes-lease-drop")
-                ))
+                        new Server().url("/").description("Local server")))
                 .info(
                         new Info()
-                                .title("Lease-Drop API Documentation")
-                                .version("1.0.0")
-                                .description("Lease-Drop provides AI-powered lease document analysis with clause extraction, searchable PDFs, and smart summaries. It supports secure user sign-up/login, lease document storage, and customer banner management. Users can also share data publicly for collaboration and insights.")
-                                .contact(new Contact()
-                                        .name("Bedata Solutions")
-                                        .email("info@bedatasolutions.com"))
-                );
+                                .title("a-firestore API Documentation")
+                                .version("0.0.1-SNAPSHOT")
+                                .description("a-firestore is a local, single-user Firestore power tool for browsing, querying, and managing Cloud Firestore data from the command line."));
 
     }
 
 
     @Bean
     public OperationCustomizer operationCustomizer() {
-        // add error type to each operation
+        // FFP-005: Add structured error responses per status code instead of catch-all 4xx/5xx
         return (operation, handlerMethod) -> {
-            operation.getResponses().addApiResponse("4xx/5xx", new ApiResponse()
-                    .description("Error")
+            operation.getResponses().addApiResponse("400", new ApiResponse()
+                    .description("Bad Request")
+                    .content(new Content().addMediaType("*/*", new MediaType().schema(
+                            new Schema<MediaType>().$ref("ApiErrorResponse")))));
+            operation.getResponses().addApiResponse("409", new ApiResponse()
+                    .description("Conflict")
+                    .content(new Content().addMediaType("*/*", new MediaType().schema(
+                            new Schema<MediaType>().$ref("ApiErrorResponse")))));
+            operation.getResponses().addApiResponse("500", new ApiResponse()
+                    .description("Internal Server Error")
                     .content(new Content().addMediaType("*/*", new MediaType().schema(
                             new Schema<MediaType>().$ref("ApiErrorResponse")))));
             return operation;
