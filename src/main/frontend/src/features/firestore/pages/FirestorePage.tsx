@@ -40,6 +40,7 @@ import { FirestoreNestedTraverse } from "@/features/firestore/components/query/F
 import { FirestoreQueryResults } from "@/features/firestore/components/query/FirestoreQueryResults"
 import { FirestoreSidebar } from "@/features/firestore/components/layout/FirestoreSidebar"
 import { FirestoreToFirestoreImportDialog } from "@/features/firestore/components/dialogs/FirestoreToFirestoreImportDialog"
+import { Trash } from "lucide-react"
 import {
   buildCollectionTransferJson,
   buildDocumentTransferJson,
@@ -165,6 +166,10 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     null,
   )
   const [transferBusy, setTransferBusy] = useState(false)
+
+  // FFP-002: Bulk delete confirmation state
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [bulkDeletePaths, setBulkDeletePaths] = useState<string[]>([])
   const collectionImportJsonInputRef = useRef<HTMLInputElement | null>(null)
   const collectionImportCsvInputRef = useRef<HTMLInputElement | null>(null)
   const documentImportJsonInputRef = useRef<HTMLInputElement | null>(null)
@@ -288,10 +293,7 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     return `${queryResponse.resultCount} documents found in ${queryResponse.elapsedMs}ms`
   }, [queryResponse])
 
-  const selectedRowPaths = useMemo(
-    () => querySelectedRows.map((row) => row.normalizedDocumentPath).filter(Boolean),
-    [querySelectedRows],
-  )
+  // FFP-002: Bulk delete paths are prepared in requestBulkDelete() using querySelectedRows directly
 
   function resolveCollectionTransferPath(): string {
     const normalizedQueryPath = normalizePath(queryPath)
@@ -1110,39 +1112,8 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     }
   }
 
-  async function handleDeleteSelectedRows(documentPaths: string[]) {
-    const normalizedPaths = documentPaths.map(normalizePath).filter(Boolean)
-    if (normalizedPaths.length === 0) {
-      toast.warning("No valid document paths were selected for deletion.")
-      return
-    }
-
-    const validPaths = normalizedPaths.filter((path) => !pathIsCollection(path))
-    if (validPaths.length === 0) {
-      toast.warning("Selected rows include only collection paths and cannot be deleted.")
-      return
-    }
-
-    try {
-      for (const documentPath of validPaths) {
-        await firestoreService.deleteDocument(context, documentPath)
-      }
-
-      toast.success(`Deleted ${validPaths.length} selected document(s).`)
-      await runQuery(page)
-      await refreshNested(queryPath)
-
-      if (
-        previewSelection &&
-        validPaths.includes(normalizePath(previewSelection.documentPath))
-      ) {
-        clearPreviewSelection()
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to delete selected documents."
-      toast.error(message)
-    }
-  }
+  // FFP-002: Bulk delete now uses requestBulkDelete() → confirmBulkDelete() flow with confirmation dialog.
+  // handleDeleteSelectedRows kept for backward compatibility but not used in the UI anymore.
 
   function exportSelectedJSON() {
     if (!queryResponse || querySelectedRows.length === 0) {
@@ -1200,10 +1171,53 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     }
   }
   
+  // FFP-002: Prepare bulk delete paths from selected rows for confirmation dialog
+  function prepareBulkDeletePaths(): string[] {
+    const valid = querySelectedRows
+      .map((row) => row.normalizedDocumentPath)
+      .filter(Boolean)
+      .filter((path) => !pathIsCollection(path))
+
+    return [...new Set(valid)] // deduplicate while preserving order
+  }
+
+  function requestBulkDelete() {
+    const paths = prepareBulkDeletePaths()
+    if (paths.length === 0) {
+      toast.warning("No valid document paths selected for deletion.")
+      return
+    }
+    setBulkDeletePaths(paths)
+    setBulkDeleteOpen(true)
+  }
+
+  async function confirmBulkDelete() {
+    setBulkDeleteOpen(false)
+    const paths = bulkDeletePaths
+    if (paths.length === 0) return
+
+    try {
+      for (const documentPath of paths) {
+        await firestoreService.deleteDocument(context, documentPath)
+      }
+      toast.success(`Deleted ${paths.length} selected document(s).`)
+      await runQuery(page)
+      await refreshNested(queryPath)
+
+      if (previewSelection && paths.includes(normalizePath(previewSelection.documentPath))) {
+        clearPreviewSelection()
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to delete selected documents."
+      toast.error(message)
+    } finally {
+      setBulkDeletePaths([])
+    }
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async function handleDeleteSelectedRowsFromHeader(_documentPaths?: string[]) {
-    
-    await handleDeleteSelectedRows(selectedRowPaths)
+    requestBulkDelete()
   }
 
   return (
@@ -1430,6 +1444,44 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
               </AlertDialogCancel>
               <AlertDialogAction variant="destructive" onClick={handlePreviewDiscardConfirm}>
                 Discard Changes
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* FFP-002: Bulk delete confirmation dialog */}
+        <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+          <AlertDialogContent size="sm">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-destructive flex items-center gap-2">
+                <Trash className="w-5 h-5" />
+                Delete {bulkDeletePaths.length} Document(s)?
+              </AlertDialogTitle>
+              <AlertDialogDescription className="space-y-3">
+                <p>This action will permanently delete the following documents from:
+                  <br />
+                  <span className="font-mono text-xs bg-muted p-1 rounded block mt-1">
+                    {tab.projectId}/{tab.databaseId ?? "[default]"}
+                  </span>
+                </p>
+                <div className="max-h-40 overflow-y-auto border border-border rounded-md p-2 space-y-1">
+                  {bulkDeletePaths.map((path, index) => (
+                    <code key={index} className="text-xs block truncate text-muted-foreground">
+                      {path}
+                    </code>
+                  ))}
+                </div>
+                <p className="text-destructive/80 font-medium text-sm">
+                  ⚠ Subcollections are NOT recursively deleted. Orphaned subcollection data will remain.
+                </p>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setBulkDeleteOpen(false)}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction variant="destructive" onClick={confirmBulkDelete}>
+                Delete {bulkDeletePaths.length} Document(s)
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
