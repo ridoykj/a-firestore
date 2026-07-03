@@ -1,33 +1,22 @@
 package com.itbd.afirestore.firestore.controller;
 
+import com.google.cloud.Timestamp;
+import com.itbd.afirestore.firestore.dto.DocumentDto;
+import com.itbd.afirestore.firestore.dto.FirestoreValue;
 import com.itbd.afirestore.firestore.service.FirestoreManagerService;
 import com.itbd.afirestore.firestore.service.GenericFirestoreService;
-import com.google.cloud.Timestamp;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.multipart.FilePart;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RequestPart;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 import java.time.Instant;
+import java.util.*;
 
 @RestController
 @RequestMapping("/api/workbench")
@@ -66,7 +55,7 @@ public class FirestoreWorkbenchController {
         }
 
         String normalizedDatabaseId = normalizeDatabaseId(databaseId);
-        int safeLimit = Math.max(1, Math.min(limit == null ? 50 : limit, 500));
+        int safeLimit = Math.clamp(limit == null ? 50 : limit, 1, 500);
         int safePage = Math.max(0, page == null ? 0 : page);
         String normalizedOrderField = normalize(orderField);
         String normalizedOrderDirection = "asc".equalsIgnoreCase(orderDirection) ? "asc" : "desc";
@@ -108,8 +97,12 @@ public class FirestoreWorkbenchController {
                     );
                     return ResponseEntity.ok((Object) response);
                 })
-                .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().body(Map.of(
-                        "message", e.getMessage() == null ? "Query failed." : e.getMessage()))));
+                .onErrorResume(e -> {
+                    String errorMessage = resolveErrorMessage(e);
+                    LOGGER.error("Workbench query failed for path='{}': {}", normalizedPath, errorMessage, e);
+                    return Mono.just(ResponseEntity.internalServerError().body(Map.of(
+                            "message", errorMessage)));
+                });
     }
 
     @GetMapping("/nested")
@@ -122,7 +115,7 @@ public class FirestoreWorkbenchController {
             @RequestParam(value = "idFilter", required = false) String idFilter) {
         String normalizedPath = normalize(path);
         String normalizedDatabaseId = normalizeDatabaseId(databaseId);
-        int safeLimit = Math.max(1, Math.min(limit == null ? 25 : limit, 100));
+        int safeLimit = Math.clamp(limit == null ? 25 : limit, 1, 100);
         String normalizedCursor = normalize(cursor);
         String normalizedIdFilter = normalize(idFilter);
         String cursorValue = normalizedCursor.isBlank() ? null : normalizedCursor;
@@ -161,8 +154,8 @@ public class FirestoreWorkbenchController {
 
                         String hint = documentNodes.isEmpty()
                                 ? (normalizedIdFilter.isBlank()
-                                ? "No documents found under this collection."
-                                : "No matching document IDs found in this collection.")
+                                   ? "No documents found under this collection."
+                                   : "No matching document IDs found in this collection.")
                                 : "Scroll to load more.";
 
                         long elapsedMs = Math.max(1L, (System.nanoTime() - startNanos) / 1_000_000L);
@@ -207,8 +200,8 @@ public class FirestoreWorkbenchController {
                             .toList();
                     String hint = childCollectionNodes.isEmpty()
                             ? (normalizedIdFilter.isBlank()
-                            ? "No child collections found for this document."
-                            : "No matching child collection IDs found for this document.")
+                               ? "No child collections found for this document."
+                               : "No matching child collection IDs found for this document.")
                             : "Select a child collection to run a query and continue traversal.";
 
                     long elapsedMs = Math.max(1L, (System.nanoTime() - startNanos) / 1_000_000L);
@@ -271,19 +264,22 @@ public class FirestoreWorkbenchController {
                         "message", e.getMessage() == null ? "Replace failed." : e.getMessage()))));
     }
 
-    private List<Map<String, String>> buildColumns(List<Map<String, Object>> documents) {
+    private List<Map<String, String>> buildColumns(List<DocumentDto> documents) {
         LinkedHashSet<String> orderedNames = new LinkedHashSet<>();
         orderedNames.add("id");
         if (documents != null) {
-            for (Map<String, Object> document : documents) {
+            for (DocumentDto document : documents) {
                 if (document == null) {
                     continue;
                 }
-                for (String key : document.keySet()) {
-                    if (key == null || key.isBlank() || key.startsWith("_") || "id".equals(key)) {
-                        continue;
+                Map<String, FirestoreValue> fields = document.fields();
+                if (fields != null) {
+                    for (String key : fields.keySet()) {
+                        if (key == null || key.isBlank() || key.startsWith("_") || "id".equals(key)) {
+                            continue;
+                        }
+                        orderedNames.add(key);
                     }
-                    orderedNames.add(key);
                 }
             }
         }
@@ -296,7 +292,7 @@ public class FirestoreWorkbenchController {
         return columns;
     }
 
-    private String inferColumnType(String columnName, List<Map<String, Object>> documents) {
+    private String inferColumnType(String columnName, List<DocumentDto> documents) {
         if ("id".equals(columnName)) {
             return "string";
         }
@@ -304,30 +300,39 @@ public class FirestoreWorkbenchController {
             return "unknown";
         }
 
-        for (Map<String, Object> document : documents) {
-            if (document == null || !document.containsKey(columnName)) {
+        for (DocumentDto document : documents) {
+            if (document == null) {
                 continue;
             }
-            Object value = document.get(columnName);
-            if (value == null) {
+            FirestoreValue value = document.fields().get(columnName);
+            if (value == null || value instanceof FirestoreValue.NullValue) {
                 continue;
             }
-            if (value instanceof String) {
-                return "string";
+
+            Object rawValue = value.toFirestoreObject();
+            switch (rawValue) {
+                case null -> {
+                    continue;
+                }
+                case String s -> {
+                    return "string";
+                }
+                case Number number -> {
+                    return "number";
+                }
+                case Boolean b -> {
+                    return "boolean";
+                }
+                case List<?> objects -> {
+                    return "array";
+                }
+                case Map<?, ?> map -> {
+                    return "object";
+                }
+                default -> {
+                }
             }
-            if (value instanceof Number) {
-                return "number";
-            }
-            if (value instanceof Boolean) {
-                return "boolean";
-            }
-            if (value instanceof List<?>) {
-                return "array";
-            }
-            if (value instanceof Map<?, ?>) {
-                return "object";
-            }
-            return value.getClass().getSimpleName().toLowerCase(Locale.ROOT);
+            return rawValue.getClass().getSimpleName().toLowerCase(Locale.ROOT);
         }
         return "unknown";
     }
@@ -468,6 +473,24 @@ public class FirestoreWorkbenchController {
         return error.getMessage() == null ? "Failed to load nested node." : error.getMessage();
     }
 
+    private String resolveErrorMessage(Throwable error) {
+        if (error == null) {
+            return "An unknown error occurred.";
+        }
+
+        Throwable current = error;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null && !message.isBlank()) {
+                // Unwrap ExecutionException/CompletionException to show the real Firestore error
+                return message;
+            }
+            current = current.getCause();
+        }
+
+        return "Query failed.";
+    }
+
     private Mono<String> readUploadedJsonFile(FilePart filePart) {
         return DataBufferUtils.join(filePart.content())
                 .map(dataBuffer -> {
@@ -501,7 +524,7 @@ public class FirestoreWorkbenchController {
 
     private record QueryResponse(
             String path,
-            List<Map<String, Object>> documents,
+            List<DocumentDto> documents,
             List<Map<String, String>> columns,
             int resultCount,
             long elapsedMs,
