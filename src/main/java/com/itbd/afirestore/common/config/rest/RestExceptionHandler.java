@@ -62,19 +62,29 @@ public class RestExceptionHandler {
     }
 
     @ExceptionHandler(Throwable.class)
-    @ApiResponse(responseCode = "4xx/5xx", description = "Error")
-    public ResponseEntity<ErrorResponse> handleThrowable(final Throwable exception) {
-//        log.error("Rest API call exception: {}", exception.toString());
-        exception.printStackTrace(); // TODO: remove and add logging
+    @ApiResponse(responseCode = "500", description = "Internal Server Error")
+    public ResponseEntity<ErrorResponse> handleThrowable(final Throwable exception,
+            final org.springframework.web.context.request.WebRequest request) {
+
+        // FFP-005: Replace stack-trace printing with structured logging
+        String correlationId = null;
+        if (request instanceof org.springframework.web.context.request.NativeWebRequest nativeReq) {
+            correlationId = nativeReq.getHeader("X-Request-ID");
+        }
+        log.error("Internal error [correlationId={}]: {} - {}",
+                correlationId, exception.getClass().getSimpleName(), exception.getMessage());
 
         if (exception instanceof AsyncRequestNotUsableException) {
             log.warn("Client disconnected during request. Suppressing error response. Exception: {}", exception.getMessage());
-            // Return NO_CONTENT (204) or OK (200) with an empty body.
-            // Do NOT try to write an ErrorResponse body, as the connection is already closed
-            // or expecting binary data.
             return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
         }
-        final ErrorResponse errorResponse = new ErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR.value(), exception.getClass().getSimpleName(), exception.getMessage(), Collections.emptyList());
+
+        final String errorCode = "INTERNAL_ERROR";
+        final ErrorResponse errorResponse = new ErrorResponse(
+                HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                errorCode,
+                "An unexpected error occurred. Please contact support with reference ID: " + correlationId,
+                Collections.emptyList());
         return new ResponseEntity<>(errorResponse, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
