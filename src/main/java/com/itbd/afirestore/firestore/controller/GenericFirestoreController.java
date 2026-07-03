@@ -1,5 +1,6 @@
 package com.itbd.afirestore.firestore.controller;
 
+import com.itbd.afirestore.firestore.dto.DocumentDto;
 import com.itbd.afirestore.firestore.service.GenericFirestoreService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.server.reactive.ServerHttpRequest;
@@ -36,7 +37,7 @@ public class GenericFirestoreController {
      * READ either ALL documents from a collection OR a single document, depending on path depth.
      */
     @GetMapping("/**")
-    public Mono<ResponseEntity<?>> get(
+    public Mono<ResponseEntity<Object>> get(
             ServerHttpRequest request,
             @RequestHeader("X-Project-Id") String projectId,
             @RequestHeader(value = "X-Database-Id", required = false) String databaseId,
@@ -50,29 +51,32 @@ public class GenericFirestoreController {
             // Odd number of segments -> Collection Path
             if (limit == null && page == null) {
                 return genericFirestoreService.getAllDocuments(projectId, normalizedDatabaseId, path)
-                        .<ResponseEntity<?>>map(ResponseEntity::ok)
+                        .map(docs -> ResponseEntity.ok((Object) docs))
                         .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().build()));
             }
 
-            int safeLimit = Math.max(1, Math.min(limit == null ? 50 : limit, 500));
+            int safeLimit = Math.clamp(limit == null ? 50 : limit, 1, 500);
             int safePage = Math.max(0, page == null ? 0 : page);
             return genericFirestoreService.getAllDocumentsPage(projectId, normalizedDatabaseId, path, safePage, safeLimit)
-                    .<ResponseEntity<?>>map(result -> {
+                    .map(result -> {
                         Map<String, Object> payload = new LinkedHashMap<>();
                         payload.put("documents", result.documents());
                         payload.put("page", result.pageIndex());
                         payload.put("limit", result.pageSize());
                         payload.put("hasNextPage", result.hasNextPage());
                         payload.put("hasPreviousPage", result.pageIndex() > 0);
-                        return ResponseEntity.ok(payload);
+                        return ResponseEntity.ok((Object) payload);
                     })
                     .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().build()));
         } else {
             // Even number of segments -> Document Path
-            return genericFirestoreService.getDocument(projectId, normalizedDatabaseId, path)
-                    .<ResponseEntity<?>>map(ResponseEntity::ok)
+            return genericFirestoreService.getDocumentDetails(projectId, normalizedDatabaseId, path)
+                    .map(doc -> ResponseEntity.ok((Object) doc))
                     .defaultIfEmpty(ResponseEntity.notFound().build())
-                    .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().build()));
+                    .onErrorResume(e -> {
+                        e.printStackTrace();
+                        return Mono.just(ResponseEntity.internalServerError().body(errorBody(e.getMessage())));
+                    });
         }
     }
 
@@ -122,14 +126,18 @@ public class GenericFirestoreController {
      * UPDATE a document dynamically.
      */
     @PutMapping("/**")
-    public Mono<ResponseEntity<Map<String, Object>>> update(
+    public Mono<ResponseEntity<DocumentDto>> update(
             ServerHttpRequest request,
             @RequestHeader("X-Project-Id") String projectId,
             @RequestHeader(value = "X-Database-Id", required = false) String databaseId,
             @RequestBody Map<String, Object> data) {
         String path = extractFirestorePath(request);
-        return genericFirestoreService.updateDocument(projectId, normalizeDatabaseId(databaseId), path, data)
+        return genericFirestoreService.updateDocument(projectId, normalizeDatabaseId(databaseId), path, data, true)
                 .map(ResponseEntity::ok)
+                .onErrorResume(GenericFirestoreService.OptimisticConcurrencyException.class, e -> 
+                        Mono.just(ResponseEntity.status(409).body(e.getDocumentDto())))
+                .onErrorResume(IllegalArgumentException.class, e ->
+                        Mono.just(ResponseEntity.badRequest().body(null)))
                 .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().build()));
     }
 
@@ -142,8 +150,10 @@ public class GenericFirestoreController {
             @RequestHeader("X-Project-Id") String projectId,
             @RequestHeader(value = "X-Database-Id", required = false) String databaseId) {
         String path = extractFirestorePath(request);
-        return genericFirestoreService.deleteDocument(projectId, normalizeDatabaseId(databaseId), path)
-                .map(deletedId -> ResponseEntity.ok("Document " + deletedId + " deleted successfully."))
+        return genericFirestoreService.deleteDocument(projectId, normalizeDatabaseId(databaseId), path, null)
+                .map(v -> ResponseEntity.ok("Document deleted successfully."))
+                .onErrorResume(GenericFirestoreService.OptimisticConcurrencyException.class, e -> 
+                        Mono.just(ResponseEntity.status(409).body("Document has been modified since last read: " + e.getMessage())))
                 .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().body("Error deleting document: " + e.getMessage())));
     }
 
