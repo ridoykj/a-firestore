@@ -41,7 +41,7 @@ interface WorkspaceControllerDeckProps {
   transferBusy: boolean
 
   selectedRowCount: number
-  onRequestDeleteSelected: (documentPaths: string[]) => Promise<void>
+  onRequestDeleteSelected: () => void
 
   filterPanelOpen: boolean
   setFilterPanelOpen: (open: boolean) => void
@@ -131,7 +131,7 @@ export function WorkspaceControllerDeck({
             </DropdownMenuItem>
 
             <DropdownMenuItem
-              onClick={() => onRequestDeleteSelected([])}
+              onClick={onRequestDeleteSelected}
               disabled={selectedRowCount === 0}
             >
               <Trash className="w-4 h-4 mr-2 text-red-500" />
