@@ -54,7 +54,7 @@ export function parseJsonPayload(text: string): Record<string, unknown> {
 export function documentIdIsValid(docId: string): boolean {
   const normalized = docId.trim()
   if (!normalized) {
-    return true
+    return false
   }
   if (normalized === "." || normalized === "..") {
     return false
@@ -106,4 +106,45 @@ export function safePreviewValue(value: unknown): string {
   } catch {
     return String(value)
   }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function unwrapFirestoreValue(fv: any): any {
+  if (fv == null) return null
+  if (fv.value !== undefined) return fv.value
+  if (fv.fields !== undefined) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const obj: any = {}
+    for (const key in fv.fields) {
+      obj[key] = unwrapFirestoreValue(fv.fields[key])
+    }
+    return obj
+  }
+  if (fv.items !== undefined) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return fv.items.map((item: any) => unwrapFirestoreValue(item))
+  }
+  return null
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function mapDocumentDtoToFirestoreDocument(dto: any): FirestoreDocument {
+  const doc: FirestoreDocument = {
+    id: dto.id,
+    _path: dto.path || dto._path,
+  }
+  
+  if (dto.fields && typeof dto.fields === "object" && !Array.isArray(dto.fields)) {
+    for (const [key, value] of Object.entries(dto.fields)) {
+      doc[key] = unwrapFirestoreValue(value)
+    }
+  } else {
+    for (const [key, value] of Object.entries(dto)) {
+      if (key !== "id" && key !== "path" && key !== "_path") {
+        doc[key] = value
+      }
+    }
+  }
+  
+  return doc
 }
