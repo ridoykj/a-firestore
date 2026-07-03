@@ -8,17 +8,23 @@ import {
   type ReactNode,
 } from "react"
 
+export type ConnectionMode = "emulator" | "service-account"
+
 export interface ProjectTab {
   id: string;
   projectId: string;
   databaseId: string;
   label: string;
+  connectionMode: ConnectionMode;
 }
 
 export interface GcpState {
   credentialsFile: File | null;
   openTabs: ProjectTab[];
   activeTabId: string;
+  // FFP-003: Real connection status tracking
+  isInitialized: boolean;
+  activeConnectionMode: ConnectionMode | null;
 
   setCredentialsFile: (file: File | null) => void;
   findTabByContext: (projectId: string, databaseId: string) => ProjectTab | undefined;
@@ -27,20 +33,43 @@ export interface GcpState {
   removeTab: (tabId: string) => void;
   setActiveTabId: (tabId: string) => void;
   clearTabs: () => void;
+  // FFP-003: Disconnect lifecycle
+  disconnectActiveTab: () => void;
 }
 
 function normalizeDatabaseId(databaseId: string): string {
   return databaseId.trim() ? databaseId.trim() : "(default)"
 }
 
-function buildTab(projectId: string, databaseId: string): ProjectTab {
+function detectConnectionMode(credentialsFile: File | null, projectId: string): ConnectionMode {
+  // If no credentials file is provided, assume emulator mode
+  if (!credentialsFile) {
+    return "emulator"
+  }
+  
+  // Check if the project ID looks like an emulator identifier
+  const emulatorPatterns = ["localhost", "127.0.0.1", "test-project"]
+  if (emulatorPatterns.some(pattern => projectId.toLowerCase().includes(pattern))) {
+    return "emulator"
+  }
+  
+  // Default to service-account mode when credentials are present
+  return "service-account"
+}
+
+function buildTab(projectId: string, databaseId: string, credentialsFile: File | null): ProjectTab {
   const normalizedProjectId = projectId.trim()
   const normalizedDatabaseId = normalizeDatabaseId(databaseId)
+  
+  // FFP-003: Detect connection mode based on credentials and project ID
+  const connectionMode = detectConnectionMode(credentialsFile, normalizedProjectId)
+  
   return {
     id: `${normalizedProjectId}:${normalizedDatabaseId}`,
     projectId: normalizedProjectId,
     databaseId: normalizedDatabaseId === "(default)" ? "" : normalizedDatabaseId,
     label: `${normalizedProjectId} / ${normalizedDatabaseId}`,
+    connectionMode,
   }
 }
 
@@ -67,12 +96,13 @@ export function GcpStoreProvider({ children }: { children: ReactNode }) {
         return previousTabs
       }
 
-      const nextTab = buildTab(projectId, databaseId)
+      // FFP-003: Pass credentialsFile to detect connection mode
+      const nextTab = buildTab(projectId, databaseId, credentialsFile)
       const nextTabs = previousTabs.map((tab) => (tab.id === tabId ? nextTab : tab))
       setActiveTabId((currentActiveTabId) => (currentActiveTabId === tabId ? nextTab.id : currentActiveTabId))
       return nextTabs
     })
-  }, [])
+  }, [credentialsFile])
 
   const addTab = useCallback((tab: ProjectTab) => {
     setOpenTabs((previousTabs) => {
@@ -106,11 +136,27 @@ export function GcpStoreProvider({ children }: { children: ReactNode }) {
     setActiveTabId("")
   }, [])
 
+  // FFP-003: Disconnect the active tab (clears connection state)
+  const disconnectActiveTab = useCallback(() => {
+    if (!activeTabId) return
+    
+    setOpenTabs((previousTabs) => {
+      const nextTabs = previousTabs.filter((tab) => tab.id !== activeTabId)
+      setActiveTabId(nextTabs.length > 0 ? nextTabs[nextTabs.length - 1].id : "")
+      return nextTabs
+    })
+    
+    // Clear credentials file on disconnect
+    setCredentialsFile(null)
+  }, [activeTabId])
+
   const value = useMemo<GcpState>(
     () => ({
       credentialsFile,
       openTabs,
       activeTabId,
+      isInitialized: openTabs.length > 0,
+      activeConnectionMode: openTabs.length > 0 ? (openTabs.find(t => t.id === activeTabId) || openTabs[0])?.connectionMode ?? null : null,
       setCredentialsFile,
       findTabByContext,
       updateTabContext,
@@ -118,6 +164,7 @@ export function GcpStoreProvider({ children }: { children: ReactNode }) {
       removeTab,
       setActiveTabId,
       clearTabs,
+      disconnectActiveTab,
     }),
     [
       credentialsFile,
@@ -129,6 +176,7 @@ export function GcpStoreProvider({ children }: { children: ReactNode }) {
       removeTab,
       setActiveTabId,
       clearTabs,
+      disconnectActiveTab,
     ],
   )
 
