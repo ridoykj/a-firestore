@@ -1,25 +1,50 @@
 import { AddTabDialog } from "@/features/firestore/components/dialogs/AddTabDialog"
 import FirestorePage from "@/features/firestore/pages/FirestorePage"
-import { useGcpStore, type ProjectTab } from "@/features/gcp/store/gcp-store"
+import { useGcpStore, type ConnectionMode, type ProjectTab } from "@/features/gcp/store/gcp-store"
 import { Button } from "@/shadcn/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/shadcn/components/ui/dropdown-menu"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shadcn/components/ui/tabs"
 import { useIsMobile } from "@/shadcn/hooks/use-mobile"
 import { cn } from "@/shadcn/lib/utils"
 import { useTheme } from "@/shared/components/ui/shadcn/components/theme-provider"
-import { Database, Folder, Moon, Plus, Sun, X } from "lucide-react"
+import { Database, Folder, Moon, Plus, Sun, X, LogOut, WifiOff } from "lucide-react"
 import { useMemo, useState } from "react"
 
+function getConnectionBadge(mode: ConnectionMode) {
+  switch (mode) {
+    case "emulator":
+      return {
+        color: "bg-yellow-500",
+        shadow: "shadow-[0_0_8px_rgba(234,179,8,0.6)]",
+        label: "Emulator",
+      }
+    case "service-account":
+      return {
+        color: "bg-green-500",
+        shadow: "shadow-[0_0_8px_rgba(34,197,94,0.6)]",
+        label: "Connected",
+      }
+  }
+}
+
 export function FirestoreTabsLayout() {
-  const { openTabs, activeTabId, addTab, removeTab, setActiveTabId } = useGcpStore()
+  const { openTabs, activeTabId, addTab, removeTab, setActiveTabId, disconnectActiveTab } = useGcpStore()
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const isMobile = useIsMobile()
   const { theme, setTheme } = useTheme()
+
+  // FFP-003: Determine active connection mode from the active tab or credentials
+  const activeConnectionMode = useMemo((): ConnectionMode | null => {
+    if (openTabs.length === 0) return null
+    
+    const activeTab = openTabs.find(t => t.id === activeTabId) || openTabs[0]
+    return activeTab.connectionMode
+  }, [activeTabId, openTabs])
+
+  // FFP-003: Remove hardcoded account profile UI; show real connection info instead
+  const activeTab = useMemo((): ProjectTab | null => {
+    if (openTabs.length === 0) return null
+    return openTabs.find(t => t.id === activeTabId) || openTabs[0]
+  }, [activeTabId, openTabs])
 
   const activeValue = useMemo(() => {
     if (activeTabId) {
@@ -33,6 +58,11 @@ export function FirestoreTabsLayout() {
     setAddDialogOpen(false)
   }
 
+  // FFP-003: Handle disconnect action
+  function handleDisconnect() {
+    disconnectActiveTab()
+  }
+
   return (
     <div className="flex min-h-0 h-full w-full flex-1 flex-col overflow-hidden bg-background">
       {/* Top Header Console Banner */}
@@ -43,7 +73,27 @@ export function FirestoreTabsLayout() {
           </div>
           <div className="flex items-center gap-2">
             <span className="font-semibold tracking-tight">Firestore Workspace</span>
-            <span className="flex h-2 w-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" title="Emulator Connected"></span>
+            {/* FFP-003: Show real connection status instead of hardcoded "Emulator Connected" */}
+            {activeConnectionMode ? (
+              <>
+                <span
+                  className={cn(
+                    "flex h-2 w-2 rounded-full",
+                    getConnectionBadge(activeConnectionMode).color,
+                    getConnectionBadge(activeConnectionMode).shadow,
+                  )}
+                  title={`${getConnectionBadge(activeConnectionMode).label}: ${activeTab?.projectId ?? ""}`}
+                ></span>
+                <span className="text-xs text-neutral-400">
+                  {getConnectionBadge(activeConnectionMode).label} · {activeTab?.projectId}
+                </span>
+              </>
+            ) : (
+              <span className="flex items-center gap-2 text-xs text-neutral-500">
+                <WifiOff className="h-3 w-3" />
+                Disconnected
+              </span>
+            )}
           </div>
         </div>
 
@@ -59,21 +109,23 @@ export function FirestoreTabsLayout() {
             <span className="sr-only">Toggle theme</span>
           </Button>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-700 text-sm font-medium text-white hover:ring-2 ring-white transition-all active:scale-95"
-                title="Account Profile: tanstack.router@gmail.com"
+          {/* FFP-003: Replace placeholder account dropdown with real disconnect control */}
+          {activeTab && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-neutral-400 font-mono">
+                {activeTab.projectId}/{activeTab.databaseId || "(default)"}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={handleDisconnect}
+                className="h-8 w-8 text-neutral-400 hover:text-red-400 hover:bg-neutral-800"
+                title="Disconnect from current connection"
               >
-                TR
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => (window.location.href = "/")}>Dashboard</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => (window.location.href = "/logout")}>Logout</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
         </div>
       </header>
 
