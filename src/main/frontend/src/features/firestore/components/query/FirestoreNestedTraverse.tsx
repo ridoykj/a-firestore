@@ -13,6 +13,7 @@ import { ScrollArea } from "@/shadcn/components/ui/scroll-area"
 import { AlertCircle, ChevronLeft, Database, Eye, Files, Folder, RefreshCw, Search } from "lucide-react"
 import { type NestedResponse } from "@/features/firestore/schemas/FirestoreSchema"
 import { pathIsCollection } from "@/features/firestore/api/firestore-utils"
+import { Button } from "@/shared/components/ui/shadcn/components/ui/button"
 
 interface FirestoreNestedTraverseProps {
   nestedLoading: boolean
@@ -202,7 +203,9 @@ export function FirestoreNestedTraverse({
                         <span className="text-[8px] bg-green-100/70 text-green-700 dark:bg-green-950/40 dark:text-green-300 px-1 py-0.5 rounded font-mono font-bold tracking-tight">
                           Ready
                         </span>
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"              
                           onClick={(e) => {
                             e.stopPropagation()
                             onOpenDocumentPreview(item.path, item.label)
@@ -211,7 +214,7 @@ export function FirestoreNestedTraverse({
                           className="p-1 rounded-md hover:bg-muted text-muted-foreground transition-colors"
                         >
                           <Eye className="size-3" />
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   )}
