@@ -1,0 +1,25 @@
+# FFP-006: Firestore Emulator Test Profile
+# Activate with: -Dspring.profiles.active=test,emulator
+
+spring:
+  cloud:
+    gcp:
+      firestore:
+        enabled: true
+        project-id: test-project
+        database: "(default)"
+        host-address: localhost:8080
+        credentials: ""
+        emulator-host: localhost:8080
+        use-emulator: true
+
+# Disable SSL for local emulator connections
+server:
+  ssl:
+    enabled: false
+
+# Logging for test visibility
+logging:
+  level:
+    com.itbd.afirestore: DEBUG
+    org.springframework.cloud.gcp: DEBUG
