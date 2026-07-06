@@ -25,26 +25,26 @@ public class OpenApi3Config {
 
     @Bean
     public OpenAPI openApiSpec() {
+        // FFP-005: Error schemas mirror ErrorResponse/FieldError exactly.
         return new OpenAPI().components(new Components()
                         .addSchemas("ApiErrorResponse", new ObjectSchema()
-                                .addProperty("status", new IntegerSchema())
-                                .addProperty("code", new StringSchema())
+                                .addProperty("httpStatus", new IntegerSchema())
+                                .addProperty("errorCode", new StringSchema())
                                 .addProperty("message", new StringSchema())
+                                .addProperty("correlationId", new StringSchema())
                                 .addProperty("fieldErrors", new ArraySchema().items(
                                         new Schema<ArraySchema>().$ref("ApiFieldError"))))
                         .addSchemas("ApiFieldError", new ObjectSchema()
-                                .addProperty("code", new StringSchema())
-                                .addProperty("message", new StringSchema())
-                                .addProperty("property", new StringSchema())
-                                .addProperty("rejectedValue", new ObjectSchema())
-                                .addProperty("path", new StringSchema())))
+                                .addProperty("field", new StringSchema())
+                                .addProperty("errorCode", new StringSchema())
+                                .addProperty("errorMessage", new StringSchema())))
                 .servers(List.of(
                         new Server().url("/").description("Local server")))
                 .info(
                         new Info()
                                 .title("a-firestore API Documentation")
                                 .version("0.0.1-SNAPSHOT")
-                                .description("a-firestore is a local, single-user Firestore power tool for browsing, querying, and managing Cloud Firestore data from the command line."));
+                                .description("a-firestore is a local, single-user web workbench for browsing, querying, and managing Cloud Firestore data across multiple projects and databases."));
 
     }
 
@@ -71,7 +71,6 @@ public class OpenApi3Config {
 
     @Bean
     public OpenApiCustomizer sortTagsAlphabetically() {
-        // TODO: Sort by the api indexing name
         return this::extractedOpenApiTagOrder;
     }
 
