@@ -7,6 +7,7 @@ import {
   EMPTY_JSON_TEMPLATE,
   EMPTY_NESTED_RESPONSE,
   type CrudBusy,
+  type DocumentWriteRequest,
   type FirestoreDocument,
   type FirestoreQueryRequest,
   type NestedResponse,
@@ -17,8 +18,20 @@ import {
   type QueryResponse,
   type TransferFormat,
   type WhereRow,
+  type WriteMode,
 } from "@/features/firestore/schemas/FirestoreSchema"
-import { firestoreService } from "@/features/firestore/api/firestore-service"
+import {
+  FirestoreConflictError,
+  firestoreService,
+  type FirestoreDocumentDetails,
+} from "@/features/firestore/api/firestore-service"
+import {
+  buildWriteFields,
+  computeDeleteFieldPaths,
+  computeWritePreview,
+  type FirestoreWireValue,
+  type WritePreview,
+} from "@/features/firestore/api/firestore-value-utils"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -66,6 +79,16 @@ type PreviewDocumentSelection = {
   documentPath: string
   documentId: string
   payload: Record<string, unknown>
+  /** FFP-101: canonical wire values of the loaded document, used to preserve types on save. */
+  typedFields: Record<string, FirestoreWireValue>
+  /** FFP-104: concurrency token; required for saving or deleting an existing document. */
+  updateTime: string | null
+}
+
+type PreviewConflictState = {
+  message: string
+  latestDocument: FirestoreDocumentDetails | null
+  pendingDraft: string
 }
 
 type PendingPreviewIntent =
@@ -123,6 +146,8 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
   const [orderDirection, setOrderDirection] = useState<OrderDirection>("desc")
   const [limit, setLimit] = useState(50)
   const [page, setPage] = useState(0)
+  // FFP-105: cursors used to reach each page; index 0 is the first page (no cursor).
+  const pageCursorsRef = useRef<(string | null)[]>([null])
   const [whereRows, setWhereRows] = useState<WhereRow[]>([{ ...DEFAULT_WHERE_ROW }])
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -165,6 +190,10 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
   const [pendingPreviewIntent, setPendingPreviewIntent] = useState<PendingPreviewIntent | null>(
     null,
   )
+  // FFP-102: explicit save mode; merge is the safe default.
+  const [previewSaveMode, setPreviewSaveMode] = useState<WriteMode>("MERGE")
+  // FFP-104: pending conflict returned by a stale write.
+  const [previewConflict, setPreviewConflict] = useState<PreviewConflictState | null>(null)
   const [transferBusy, setTransferBusy] = useState(false)
 
   // FFP-002: Bulk delete confirmation state
@@ -260,6 +289,14 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     return typeof document._path === "string" ? normalizePath(document._path) : ""
   }
 
+  function extractTypedFields(document: FirestoreDocument): Record<string, FirestoreWireValue> {
+    const typed = document._typedFields
+    if (typed && typeof typed === "object" && !Array.isArray(typed)) {
+      return typed as Record<string, FirestoreWireValue>
+    }
+    return {}
+  }
+
   function getDocumentPreviewSelection(
     response: QueryResponse,
     documentPath: string,
@@ -280,10 +317,26 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
         documentPath: currentPath,
         documentId,
         payload: getPayloadOnly(document),
+        typedFields: extractTypedFields(document),
+        updateTime: typeof document._updateTime === "string" ? document._updateTime : null,
       }
     }
 
     return null
+  }
+
+  function selectionFromDetails(
+    documentPath: string,
+    details: FirestoreDocumentDetails,
+    fallbackDocumentId = "",
+  ): PreviewDocumentSelection {
+    return {
+      documentPath,
+      documentId: details.id.trim() || fallbackDocumentId,
+      payload: details.fields,
+      typedFields: details.typedFields,
+      updateTime: details.updateTime,
+    }
   }
 
   const queryStats = useMemo(() => {
@@ -292,6 +345,33 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     }
     return `${queryResponse.resultCount} documents found in ${queryResponse.elapsedMs}ms`
   }, [queryResponse])
+
+  // FFP-102: live preview of the fields the selected save mode would add, change, and delete.
+  const previewWriteSummary = useMemo<{ preview: WritePreview | null; error: string }>(() => {
+    if (!previewOpen || !previewSelection) {
+      return { preview: null, error: "" }
+    }
+
+    let payload: Record<string, unknown>
+    try {
+      payload = parseJsonPayload(previewDraft)
+    } catch {
+      // The JSON editor already surfaces syntax errors while typing.
+      return { preview: null, error: "" }
+    }
+
+    try {
+      return {
+        preview: computeWritePreview(payload, previewSelection.typedFields, previewSaveMode),
+        error: "",
+      }
+    } catch (error) {
+      return {
+        preview: null,
+        error: error instanceof Error ? error.message : "Could not compute the save preview.",
+      }
+    }
+  }, [previewOpen, previewSelection, previewDraft, previewSaveMode])
 
   // FFP-002: Bulk delete paths are prepared in requestBulkDelete() using querySelectedRows directly
 
@@ -703,6 +783,11 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     await nestedQuery.refetch()
   }
 
+  /**
+   * FFP-105: Runs the query for the given page index using the opaque cursor recorded when the
+   * page was first reached. Page 0 resets the cursor history; the next page's cursor is stored
+   * from each response.
+   */
   async function runQuery(nextPage: number, pathOverride?: string): Promise<QueryResponse | null> {
     const normalizedPath = normalizePath(pathOverride ?? queryPath)
     if (!normalizedPath) {
@@ -716,9 +801,15 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
       return null
     }
 
+    if (nextPage <= 0) {
+      pageCursorsRef.current = [null]
+    }
+    const boundedPage = Math.max(0, Math.min(nextPage, pageCursorsRef.current.length - 1))
+    const cursor = pageCursorsRef.current[boundedPage] ?? null
+
     const request: FirestoreQueryRequest = {
       path: normalizedPath,
-      page: Math.max(0, nextPage),
+      cursor,
       limit,
       orderDirection,
       orderField,
@@ -738,12 +829,30 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
         queryKey: ["firestore", tab.id, "query", request],
         queryFn: () => firestoreService.runQuery(context, request),
       })
-      setQueryResponse(response)
-      setPage(response.pageIndex)
-      setQueryPath(`/${response.path}`)
-      const root = response.path.split("/")[0]
+
+      if (response.hasNextPage && response.nextCursor) {
+        pageCursorsRef.current = [
+          ...pageCursorsRef.current.slice(0, boundedPage + 1),
+          response.nextCursor,
+        ]
+      } else {
+        pageCursorsRef.current = pageCursorsRef.current.slice(0, boundedPage + 1)
+      }
+
+      const augmented: QueryResponse = {
+        ...response,
+        pageIndex: boundedPage,
+        hasPreviousPage: boundedPage > 0,
+        pageStart: response.documents.length > 0 ? boundedPage * limit + 1 : 0,
+        pageEnd: boundedPage * limit + response.documents.length,
+      }
+
+      setQueryResponse(augmented)
+      setPage(boundedPage)
+      setQueryPath(`/${augmented.path}`)
+      const root = augmented.path.split("/")[0]
       setActiveCollection(root)
-      return response
+      return augmented
     } catch (error) {
       const message = error instanceof Error ? error.message : "Query failed."
       setQueryError(message)
@@ -877,6 +986,8 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     setPreviewSavedDraft(nextDraft)
     setPreviewActiveTab("tree")
     setPreviewValidation(EMPTY_PREVIEW_VALIDATION)
+    setPreviewSaveMode("MERGE")
+    setPreviewConflict(null)
     setPreviewOpen(true)
   }
 
@@ -887,6 +998,8 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     setPreviewSavedDraft(EMPTY_JSON_TEMPLATE)
     setPreviewActiveTab("tree")
     setPreviewValidation(EMPTY_PREVIEW_VALIDATION)
+    setPreviewSaveMode("MERGE")
+    setPreviewConflict(null)
     setPendingPreviewIntent(null)
     setPreviewDiscardOpen(false)
   }
@@ -934,10 +1047,17 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
       return
     }
 
-    const nextSelection: PreviewDocumentSelection = {
+    // Prefer the typed fields and update time captured by the query so saves can preserve
+    // native value types and detect concurrent edits.
+    const fromQuery = queryResponse
+      ? getDocumentPreviewSelection(queryResponse, normalizedPath)
+      : null
+    const nextSelection: PreviewDocumentSelection = fromQuery ?? {
       documentPath: normalizedPath,
       documentId,
       payload,
+      typedFields: {},
+      updateTime: null,
     }
 
     const currentPath = normalizePath(previewSelection?.documentPath ?? "")
@@ -962,10 +1082,14 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
 
     try {
       const details = await firestoreService.getDocumentDetails(context, normalizedPath)
-      const previewDocumentId = details.id.trim() || documentId
-      const previewPayload =
-        details.fields && typeof details.fields === "object" ? details.fields : {}
-      openPreviewFromRow(normalizedPath, previewDocumentId, previewPayload)
+      const nextSelection = selectionFromDetails(normalizedPath, details, documentId)
+
+      const currentPath = normalizePath(previewSelection?.documentPath ?? "")
+      if (previewOpen && currentPath === normalizedPath) {
+        setPreviewOpen(true)
+        return
+      }
+      requestPreviewClose("switch", nextSelection)
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load document preview."
       toast.error(message)
@@ -1015,17 +1139,17 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     setPreviewBusy("refresh")
     try {
       const details = await firestoreService.getDocumentDetails(context, normalizedPath)
-      const previewPayload =
-        details.fields && typeof details.fields === "object" ? details.fields : {}
-      const nextDraft = JSON.stringify(previewPayload, null, 2)
-      setPreviewSelection({
-        documentPath: normalizedPath,
-        documentId: details.id.trim() || previewSelection?.documentId || "",
-        payload: previewPayload,
-      })
+      const nextSelection = selectionFromDetails(
+        normalizedPath,
+        details,
+        previewSelection?.documentId ?? "",
+      )
+      const nextDraft = JSON.stringify(nextSelection.payload, null, 2)
+      setPreviewSelection(nextSelection)
       setPreviewDraft(nextDraft)
       setPreviewSavedDraft(nextDraft)
       setPreviewValidation(EMPTY_PREVIEW_VALIDATION)
+      setPreviewConflict(null)
       toast.success("Document reloaded.")
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to reload document."
@@ -1035,9 +1159,19 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     }
   }
 
-  async function handlePreviewUpdate(draftOverride?: string) {
-    const normalizedPath = normalizePath(previewSelection?.documentPath ?? "")
-    if (!normalizedPath) {
+  /**
+   * FFP-102/FFP-103/FFP-104: Saves the preview draft using the safe write contract. The selected
+   * mode is explicit, merge saves send explicit delete paths for removed fields, untouched values
+   * keep their native Firestore types, and stale writes surface a conflict dialog instead of
+   * silently overwriting.
+   */
+  async function handlePreviewUpdate(
+    draftOverride?: string,
+    expectedUpdateTimeOverride?: string | null,
+  ) {
+    const selection = previewSelection
+    const normalizedPath = normalizePath(selection?.documentPath ?? "")
+    if (!selection || !normalizedPath) {
       toast.warning("Document path is required.")
       return
     }
@@ -1046,44 +1180,87 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
       return
     }
 
+    const draft = draftOverride ?? previewDraft
     let payload: Record<string, unknown>
     try {
-      payload = parseJsonPayload(draftOverride ?? previewDraft)
+      payload = parseJsonPayload(draft)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Invalid JSON payload.")
       return
     }
 
-    setPreviewBusy("update")
+    let writeRequest: DocumentWriteRequest
     try {
-      await firestoreService.updateDocument(context, normalizedPath, payload)
-      toast.success("Document updated.")
-      const persistedDraft = JSON.stringify(payload, null, 2)
-      setPreviewDraft(persistedDraft)
-      setPreviewSavedDraft(persistedDraft)
-      const nextResponse = await runQuery(page)
-      await refreshNested(queryPath)
-
-      if (nextResponse) {
-        const updatedSelection = getDocumentPreviewSelection(nextResponse, normalizedPath)
-        if (updatedSelection) {
-          const nextDraft = JSON.stringify(updatedSelection.payload, null, 2)
-          setPreviewSelection(updatedSelection)
-          setPreviewDraft(nextDraft)
-          setPreviewSavedDraft(nextDraft)
-          setPreviewValidation(EMPTY_PREVIEW_VALIDATION)
-        } else {
-          toast.warning("Document updated, but it is outside the current query results.")
-        }
-      } else {
-        toast.warning("Document updated, but refreshed query results are unavailable.")
+      writeRequest = {
+        mode: previewSaveMode,
+        fields: buildWriteFields(payload, selection.typedFields),
+        deleteFieldPaths:
+          previewSaveMode === "MERGE"
+            ? computeDeleteFieldPaths(selection.typedFields, payload)
+            : [],
+        expectedUpdateTime:
+          expectedUpdateTimeOverride !== undefined
+            ? expectedUpdateTimeOverride
+            : selection.updateTime,
       }
     } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not prepare the save request.")
+      return
+    }
+
+    setPreviewBusy("update")
+    try {
+      const savedDetails = await firestoreService.writeDocument(context, normalizedPath, writeRequest)
+      const deletedCount = writeRequest.deleteFieldPaths.length
+      toast.success(
+        previewSaveMode === "MERGE"
+          ? `Document merged${deletedCount > 0 ? ` (${deletedCount} field(s) deleted)` : ""}.`
+          : "Document replaced.",
+      )
+
+      const nextSelection = selectionFromDetails(normalizedPath, savedDetails, selection.documentId)
+      const nextDraft = JSON.stringify(nextSelection.payload, null, 2)
+      setPreviewSelection(nextSelection)
+      setPreviewDraft(nextDraft)
+      setPreviewSavedDraft(nextDraft)
+      setPreviewValidation(EMPTY_PREVIEW_VALIDATION)
+      setPreviewConflict(null)
+
+      await runQuery(page)
+      await refreshNested(queryPath)
+    } catch (error) {
+      if (error instanceof FirestoreConflictError) {
+        setPreviewConflict({
+          message: error.message,
+          latestDocument: error.latestDocument,
+          pendingDraft: draft,
+        })
+        return
+      }
       const message = error instanceof Error ? error.message : "Update failed."
       toast.error(message)
     } finally {
       setPreviewBusy(null)
     }
+  }
+
+  /** FFP-104: Conflict dialog action - discard the local draft and load the latest server version. */
+  async function handleConflictReload() {
+    setPreviewConflict(null)
+    await handlePreviewRefresh()
+  }
+
+  /**
+   * FFP-104: Conflict dialog action - intentionally overwrite the concurrent edit by retrying
+   * the save against the latest server update time.
+   */
+  async function handleConflictOverwrite() {
+    const conflict = previewConflict
+    if (!conflict) {
+      return
+    }
+    setPreviewConflict(null)
+    await handlePreviewUpdate(conflict.pendingDraft, conflict.latestDocument?.updateTime ?? null)
   }
 
   async function handlePreviewDelete() {
@@ -1099,12 +1276,19 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
 
     setPreviewBusy("delete")
     try {
-      await firestoreService.deleteDocument(context, normalizedPath)
+      // FFP-104: guard the delete with the update time observed when the preview was loaded.
+      await firestoreService.deleteDocument(context, normalizedPath, previewSelection?.updateTime)
       toast.success("Document deleted.")
       await runQuery(page)
       await refreshNested(queryPath)
       clearPreviewSelection()
     } catch (error) {
+      if (error instanceof FirestoreConflictError) {
+        toast.error(
+          "The document changed since it was loaded. Refresh the preview and retry the delete.",
+        )
+        return
+      }
       const message = error instanceof Error ? error.message : "Delete failed."
       toast.error(message)
     } finally {
@@ -1181,30 +1365,51 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     return [...new Set(valid)] // deduplicate while preserving order
   }
 
+  const BULK_DELETE_LIMIT = 500
+
   function requestBulkDelete() {
     const paths = prepareBulkDeletePaths()
     if (paths.length === 0) {
       toast.warning("No valid document paths selected for deletion.")
       return
     }
+    if (paths.length > BULK_DELETE_LIMIT) {
+      toast.error(
+        `Bulk delete supports at most ${BULK_DELETE_LIMIT} documents per request. ` +
+          `Reduce the selection (${paths.length} selected).`,
+      )
+      return
+    }
     setBulkDeletePaths(paths)
     setBulkDeleteOpen(true)
   }
 
+  /**
+   * FFP-106: Deletes the confirmed selection through the atomic backend batch endpoint;
+   * either every document is deleted or none are.
+   */
   async function confirmBulkDelete() {
     setBulkDeleteOpen(false)
     const paths = bulkDeletePaths
     if (paths.length === 0) return
 
     try {
-      for (const documentPath of paths) {
-        await firestoreService.deleteDocument(context, documentPath)
+      const result = await firestoreService.bulkDeleteDocuments(context, paths)
+      if (result.complete) {
+        toast.success(`Deleted ${result.deletedCount} selected document(s) atomically.`)
+      } else {
+        toast.error(
+          `Bulk delete failed; no documents were deleted (${result.failedCount} path(s) reported).`,
+        )
       }
-      toast.success(`Deleted ${paths.length} selected document(s).`)
       await runQuery(page)
       await refreshNested(queryPath)
 
-      if (previewSelection && paths.includes(normalizePath(previewSelection.documentPath))) {
+      if (
+        result.complete &&
+        previewSelection &&
+        paths.includes(normalizePath(previewSelection.documentPath))
+      ) {
         clearPreviewSelection()
       }
     } catch (error) {
@@ -1264,6 +1469,10 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
             setQueryPath={setQueryPath}
             runQuery={(pageVal) => void runQuery(pageVal ?? 0)}
             isQuerying={queryLoading}
+            drawerMode={drawerMode}
+            onOpenCollectionsDrawer={() => setDrawerCollectionsOpen(true)}
+            onOpenNestedDrawer={() => setDrawerNestedOpen(true)}
+            onOpenFiltersDrawer={() => setDrawerFiltersOpen(true)}
             exportCollectionCurrentPage={(format) => void exportCollectionCurrentPage(format)}
             exportCollectionFull={(format) => void exportCollectionFull(format)}
             exportSelectedJSON={exportSelectedJSON}
@@ -1277,8 +1486,8 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
             transferBusy={transferBusy}
             selectedRowCount={querySelectedRows.length}
             onRequestDeleteSelected={handleDeleteSelectedRowsFromHeader}
-            filterPanelOpen={rightSidebarExpanded}
-            setFilterPanelOpen={setRightSidebarExpanded}
+            filterPanelOpen={drawerMode ? drawerFiltersOpen : rightSidebarExpanded}
+            setFilterPanelOpen={drawerMode ? setDrawerFiltersOpen : setRightSidebarExpanded}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
           // totalRows={queryResponse?.resultCount || 0}
@@ -1396,6 +1605,10 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
                     onExportDocument={(format) => void exportDocument(format)}
                     onImportDocument={(format) => requestDocumentImport(format)}
                     transferBusy={transferBusy}
+                    saveMode={previewSaveMode}
+                    onSaveModeChange={setPreviewSaveMode}
+                    writePreview={previewWriteSummary.preview}
+                    writePreviewError={previewWriteSummary.error}
                   />
                 </div>
               </div>
@@ -1444,6 +1657,61 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
               </AlertDialogCancel>
               <AlertDialogAction variant="destructive" onClick={handlePreviewDiscardConfirm}>
                 Discard Changes
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* FFP-104: Stale-write conflict dialog with reload / compare / overwrite choices */}
+        <AlertDialog
+          open={previewConflict !== null}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) {
+              setPreviewConflict(null)
+            }
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Document changed on the server</AlertDialogTitle>
+              <AlertDialogDescription>
+                {previewConflict?.message ||
+                  "Someone else modified this document after you loaded it. Compare the versions, then reload or intentionally overwrite."}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="min-w-0">
+                <p className="mb-1 text-xs font-semibold text-muted-foreground">
+                  Latest server version
+                  {previewConflict?.latestDocument?.updateTime
+                    ? ` (updated ${previewConflict.latestDocument.updateTime})`
+                    : ""}
+                </p>
+                <pre className="max-h-48 overflow-auto rounded-md border bg-muted p-2 text-xs">
+                  {previewConflict?.latestDocument
+                    ? JSON.stringify(previewConflict.latestDocument.fields, null, 2)
+                    : "(document was deleted)"}
+                </pre>
+              </div>
+              <div className="min-w-0">
+                <p className="mb-1 text-xs font-semibold text-muted-foreground">Your draft</p>
+                <pre className="max-h-48 overflow-auto rounded-md border bg-muted p-2 text-xs">
+                  {previewConflict?.pendingDraft ?? ""}
+                </pre>
+              </div>
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setPreviewConflict(null)}>
+                Keep Editing
+              </AlertDialogCancel>
+              <AlertDialogAction variant="outline" onClick={() => void handleConflictReload()}>
+                Reload Server Version
+              </AlertDialogAction>
+              <AlertDialogAction
+                variant="destructive"
+                onClick={() => void handleConflictOverwrite()}
+              >
+                Overwrite Anyway
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
