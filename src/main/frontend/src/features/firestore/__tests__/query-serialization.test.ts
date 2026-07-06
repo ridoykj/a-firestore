@@ -12,7 +12,7 @@ describe('Firestore Query Serialization', () => {
 
       const request: FirestoreQueryRequest = {
         path: 'users',
-        page: 0,
+        cursor: null,
         limit: 50,
         orderDirection: 'desc',
         orderField: 'name',
@@ -33,7 +33,7 @@ describe('Firestore Query Serialization', () => {
     it('should handle empty filters', () => {
       const request: FirestoreQueryRequest = {
         path: 'users',
-        page: 0,
+        cursor: null,
         limit: 50,
         orderDirection: 'asc',
         orderField: '',
@@ -46,7 +46,7 @@ describe('Firestore Query Serialization', () => {
     it('should validate required fields', () => {
       const request: FirestoreQueryRequest = {
         path: '', // Invalid - empty path
-        page: 0,
+        cursor: null,
         limit: 50,
         orderDirection: 'asc',
         orderField: '',
@@ -64,7 +64,7 @@ describe('Firestore Query Serialization', () => {
       for (const operator of validOperators) {
         const request: FirestoreQueryRequest = {
           path: 'users',
-          page: 0,
+          cursor: null,
           limit: 50,
           orderDirection: 'asc',
           orderField: '',
@@ -85,7 +85,7 @@ describe('Firestore Query Serialization', () => {
       for (const testCase of testCases) {
         const request: FirestoreQueryRequest = {
           path: 'users',
-          page: 0,
+          cursor: null,
           limit: 50,
           orderDirection: 'asc',
           orderField: '',
