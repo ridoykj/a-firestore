@@ -31,3 +31,8 @@ build/
 
 ### VS Code ###
 /src/main/resources/static/
+
+### Playwright / frontend test artifacts ###
+src/main/frontend/test-results/
+src/main/frontend/playwright-report/
+src/main/frontend/coverage/

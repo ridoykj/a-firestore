@@ -28,6 +28,7 @@
     </scm>
     <properties>
         <java.version>21</java.version>
+        <skipTests>false</skipTests>
         <spring-cloud-gcp.version>8.0.2</spring-cloud-gcp.version>
         <spring-cloud.version>2025.1.1</spring-cloud.version>
         <node.version>v24.12.0</node.version>
@@ -93,28 +94,6 @@
             <groupId>org.testcontainers</groupId>
             <artifactId>gcloud</artifactId>
             <version>1.20.4</version>
-            <scope>test</scope>
-        </dependency>
-
-        <!-- FFP-006: Mockito for backend unit tests -->
-        <dependency>
-            <groupId>org.mockito</groupId>
-            <artifactId>mockito-core</artifactId>
-            <version>5.14.2</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.mockito</groupId>
-            <artifactId>mockito-junit-jupiter</artifactId>
-            <version>5.14.2</version>
-            <scope>test</scope>
-        </dependency>
-
-        <!-- FFP-006: AssertJ for fluent assertions -->
-        <dependency>
-            <groupId>org.assertj</groupId>
-            <artifactId>assertj-core</artifactId>
-            <version>3.26.3</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -228,6 +207,19 @@
                         <phase>generate-resources</phase>
                         <configuration>
                             <arguments>run build</arguments>
+                        </configuration>
+                    </execution>
+
+                    <!-- FFP-006: Run frontend unit tests with the Maven test phase -->
+                    <execution>
+                        <id>npm test</id>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <phase>test</phase>
+                        <configuration>
+                            <arguments>run test</arguments>
+                            <skip>${skipTests}</skip>
                         </configuration>
                     </execution>
 

@@ -11,8 +11,10 @@ See the [future feature plan](docs/FUTURE_FEATURE_PLAN.md) for the prioritized p
 - Upload a Google Cloud service-account JSON file and discover accessible projects and Firestore databases.
 - Open several project/database contexts as tabs and switch between them without leaving the workspace.
 - Change the project or database inside an open tab.
+- See the real connection status (emulator or service account) for the active tab and disconnect it, which also closes the backend Firestore client.
 - Search and refresh root collections.
 - Switch between light and dark themes.
+- On narrow screens, open the collections, nested-browser, and filter drawers from dedicated toolbar buttons.
 
 ### Browse and query data
 
@@ -22,7 +24,7 @@ See the [future feature plan](docs/FUTURE_FEATURE_PLAN.md) for the prioritized p
 - Add multiple server-side `where` clauses using AND logic.
 - Use Firestore operators including `==`, `!=`, comparisons, `array-contains`, `array-contains-any`, `in`, and `not-in`.
 - Enter typed filter values as strings, numbers, booleans, nulls, arrays, or ISO-8601 timestamps.
-- Order results by field and direction, set the page size, and move between result pages.
+- Order results by field and direction, set the page size, and move between result pages using stable cursors (document IDs always break ties, so pages never skip or repeat documents while data changes).
 - Quick-search the rows on the current page.
 - Select individual or all visible rows for bulk actions.
 
@@ -38,9 +40,12 @@ See the [future feature plan](docs/FUTURE_FEATURE_PLAN.md) for the prioritized p
   - **Graph:** visualize nested data, search nodes, zoom, fit the graph, and export it as PNG.
   - **JSON:** edit and format raw JSON with validation and light/dark editor themes.
 
-- Refresh a document from Firestore, save merge updates, or delete it with confirmation.
+- Save with an explicit, labeled mode: **Merge** (default; updates submitted fields and explicitly deletes fields you removed from the draft) or **Replace** (the draft becomes the whole document), with a live preview of the fields the save will add, change, and delete.
+- Native Firestore value types survive editing round trips: timestamps, references, geo points, bytes, and the integer/double distinction are preserved for values you did not change.
+- Concurrent edits are detected: a stale save returns a conflict dialog that shows the latest server version next to your draft so you can reload, keep editing, or intentionally overwrite.
+- Refresh a document from Firestore or delete it with confirmation (deletes are guarded by the document's last-seen update time).
 - Receive a warning before closing or switching away from an unsaved JSON draft.
-- Delete several selected documents in one action.
+- Delete up to 500 selected documents in one atomic backend batch after a confirmation that lists the target project, database, and document paths and warns that subcollections are not recursively deleted; either all confirmed documents are deleted or none are.
 
 ### Import, export, and migration
 
@@ -102,11 +107,37 @@ Run the complete Maven build:
 ./mvnw clean verify
 ```
 
-Run tests:
+### Testing
+
+Run backend and frontend unit tests together (the Maven `test` phase also runs the vitest suite):
 
 ```bash
 ./mvnw test
 ```
+
+Run only the backend tests (skips the Node/npm steps):
+
+```bash
+./mvnw test -Dskip.installnodenpm -Dskip.npm
+```
+
+Run frontend unit tests directly:
+
+```bash
+cd src/main/frontend
+npm test          # single run (vitest)
+npm run test:watch
+```
+
+Run browser E2E tests (Playwright starts the vite dev server on port 5173 automatically):
+
+```bash
+cd src/main/frontend
+npx playwright install   # one-time browser download
+npm run test:e2e         # or: npx playwright test --project=chromium
+```
+
+Run backend integration tests against a local Firestore emulator using the `test,emulator` profile described in `src/test/resources/application-emulator.yaml`.
 
 Run frontend tasks directly:
 
@@ -161,10 +192,11 @@ Requests that operate on an initialized Firestore context use `X-Project-Id` and
 |---|---|
 | `POST /api/gcp/projects` | Discover projects from an uploaded credential file |
 | `POST /api/firestore/init` | Initialize a project/database client |
-| `/api/collections` and `/api/collections/**` | List collections and read, create, merge-update, or delete documents |
-| `/api/workbench/query` | Run filtered, ordered, paginated collection queries |
+| `/api/collections` and `/api/collections/**` | List collections and read, create, write (typed merge/replace contract with optimistic concurrency), or delete documents |
+| `/api/workbench/query` | Run filtered, ordered, cursor-paginated collection queries |
 | `/api/workbench/nested` | Traverse documents and subcollections |
-| `POST /api/workbench/replace` | Fully replace or upsert a document |
+| `POST /api/workbench/bulk-delete` | Atomically delete up to 500 validated document paths |
+| `POST /api/workbench/replace` | Fully replace or upsert a document (used by file imports) |
 | `/api/transfer/**` | Initialize transfer contexts and stream recursive deep-copy progress |
 
 ## Credential handling
