@@ -1,4 +1,5 @@
 import { AddTabDialog } from "@/features/firestore/components/dialogs/AddTabDialog"
+import { firestoreService } from "@/features/firestore/api/firestore-service"
 import FirestorePage from "@/features/firestore/pages/FirestorePage"
 import { useGcpStore, type ConnectionMode, type ProjectTab } from "@/features/gcp/store/gcp-store"
 import { Button } from "@/shadcn/components/ui/button"
@@ -58,8 +59,15 @@ export function FirestoreTabsLayout() {
     setAddDialogOpen(false)
   }
 
-  // FFP-003: Handle disconnect action
-  function handleDisconnect() {
+  // FFP-003: Close the matching backend client, then clear frontend context.
+  async function handleDisconnect() {
+    if (activeTab) {
+      try {
+        await firestoreService.disconnectConnection(activeTab.projectId, activeTab.databaseId)
+      } catch {
+        // The backend client may already be gone; still clear the frontend context.
+      }
+    }
     disconnectActiveTab()
   }
 
