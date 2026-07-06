@@ -13,6 +13,8 @@ import {
 import {
   Download,
   Filter,
+  FolderTree,
+  ListTree,
   MoreVertical,
   Play,
   Plus,
@@ -27,6 +29,11 @@ interface WorkspaceControllerDeckProps {
   setQueryPath: (path: string) => void
   runQuery: (page?: number) => void
   isQuerying: boolean
+
+  drawerMode?: boolean
+  onOpenCollectionsDrawer?: () => void
+  onOpenNestedDrawer?: () => void
+  onOpenFiltersDrawer?: () => void
 
   exportCollectionCurrentPage: (format: TransferFormat) => void
   exportCollectionFull: (format: TransferFormat) => void
@@ -55,6 +62,10 @@ export function WorkspaceControllerDeck({
   setQueryPath,
   runQuery,
   isQuerying,
+  drawerMode = false,
+  onOpenCollectionsDrawer,
+  onOpenNestedDrawer,
+  onOpenFiltersDrawer,
   exportCollectionCurrentPage,
   exportCollectionFull,
   exportSelectedJSON,
@@ -76,6 +87,39 @@ export function WorkspaceControllerDeck({
   return (
     <div className="mx-4 mt-4 bg-card border border-border rounded-xl shadow-sm overflow-hidden transition-colors">
       <div className="p-2 bg-muted/50 border-b border-border flex items-center gap-2">
+        {/* FFP-001: Drawer triggers for narrow layouts */}
+        {drawerMode && (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              aria-label="Open collections"
+              title="Open collections"
+              onClick={onOpenCollectionsDrawer}
+              className="px-2 py-1.5 bg-card hover:bg-accent text-foreground rounded-lg border border-border flex items-center justify-center transition-all shadow-sm h-8"
+            >
+              <FolderTree className="w-4 h-4 text-muted-foreground" />
+            </button>
+            <button
+              type="button"
+              aria-label="Open nested browser"
+              title="Open nested browser"
+              onClick={onOpenNestedDrawer}
+              className="px-2 py-1.5 bg-card hover:bg-accent text-foreground rounded-lg border border-border flex items-center justify-center transition-all shadow-sm h-8"
+            >
+              <ListTree className="w-4 h-4 text-muted-foreground" />
+            </button>
+            <button
+              type="button"
+              aria-label="Open filters"
+              title="Open filters"
+              onClick={onOpenFiltersDrawer}
+              className="px-2 py-1.5 bg-card hover:bg-accent text-foreground rounded-lg border border-border flex items-center justify-center transition-all shadow-sm h-8"
+            >
+              <Filter className="w-4 h-4 text-muted-foreground" />
+            </button>
+          </div>
+        )}
+
         {/* Collection Path input */}
         <div className="flex-1 relative">
           <span className="absolute left-3 top-2 text-xs text-muted-foreground font-mono">/</span>
