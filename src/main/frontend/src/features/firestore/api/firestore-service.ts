@@ -1,11 +1,17 @@
 import createAxiosInstance from "@/shared/api/axiosClient"
 import type {
+  BulkDeleteResponse,
+  DocumentWriteRequest,
   FirestoreDocument,
   FirestoreQueryRequest,
   NestedResponse,
   QueryResponse,
 } from "@/features/firestore/schemas/FirestoreSchema"
-import { encodePath, extractApiMessage, mapDocumentDtoToFirestoreDocument, unwrapFirestoreValue } from "@/features/firestore/api/firestore-utils"
+import { encodePath, extractApiMessage, mapDocumentDtoToFirestoreDocument } from "@/features/firestore/api/firestore-utils"
+import {
+  unwrapFirestoreFields,
+  type FirestoreWireValue,
+} from "@/features/firestore/api/firestore-value-utils"
 import {
   useMutation,
   useQueryClient,
@@ -15,10 +21,29 @@ import { AxiosError } from "axios"
 
 type FirestoreMutationError = Error
 type FirestoreDocumentPayload = Record<string, unknown>
-type FirestoreDocumentDetails = {
+
+export type FirestoreDocumentDetails = {
   id: string
+  path: string
   fields: Record<string, unknown>
+  typedFields: Record<string, FirestoreWireValue>
   collections: string[]
+  createTime: string | null
+  updateTime: string | null
+}
+
+/**
+ * FFP-104: Raised when a write or delete fails its update-time precondition (HTTP 409).
+ * Carries the latest server document so the UI can offer reload/compare/overwrite.
+ */
+export class FirestoreConflictError extends Error {
+  readonly latestDocument: FirestoreDocumentDetails | null
+
+  constructor(message: string, latestDocument: FirestoreDocumentDetails | null) {
+    super(message)
+    this.name = "FirestoreConflictError"
+    this.latestDocument = latestDocument
+  }
 }
 
 export type FirestoreContext = {
@@ -33,10 +58,10 @@ type CreateDocumentVariables = {
   payload: FirestoreDocumentPayload
 }
 
-type UpdateDocumentVariables = {
+type WriteDocumentVariables = {
   context: FirestoreContext
   documentPath: string
-  payload: FirestoreDocumentPayload
+  writeRequest: DocumentWriteRequest
 }
 
 type ReplaceDocumentVariables = {
@@ -48,6 +73,7 @@ type ReplaceDocumentVariables = {
 type DeleteDocumentVariables = {
   context: FirestoreContext
   documentPath: string
+  expectedUpdateTime?: string | null
 }
 
 type LoadProjectsVariables = {
@@ -89,17 +115,22 @@ type FirestoreImpl = {
     payload: FirestoreDocumentPayload,
     docId?: string,
   ) => Promise<FirestoreDocumentPayload>
-  updateDocument: (
+  writeDocument: (
     context: FirestoreContext,
     documentPath: string,
-    payload: FirestoreDocumentPayload,
-  ) => Promise<FirestoreDocumentPayload>
+    writeRequest: DocumentWriteRequest,
+  ) => Promise<FirestoreDocumentDetails>
   replaceDocument: (
     context: FirestoreContext,
     documentPath: string,
     payload: FirestoreDocumentPayload,
   ) => Promise<FirestoreDocumentPayload>
-  deleteDocument: (context: FirestoreContext, documentPath: string) => Promise<string>
+  deleteDocument: (
+    context: FirestoreContext,
+    documentPath: string,
+    expectedUpdateTime?: string | null,
+  ) => Promise<string>
+  bulkDeleteDocuments: (context: FirestoreContext, paths: string[]) => Promise<BulkDeleteResponse>
   loadProjects: (credentialsFile: File) => Promise<string[]>
   loadDatabases: (projectId: string, credentialsFile: File) => Promise<string[]>
   initFirestore: (projectId: string, credentialsFile: File, databaseId?: string) => Promise<string>
@@ -109,10 +140,10 @@ type FirestoreImpl = {
     CreateDocumentVariables,
     unknown
   >
-  updateDocumentMutation: UseMutationResult<
-    FirestoreDocumentPayload,
+  writeDocumentMutation: UseMutationResult<
+    FirestoreDocumentDetails,
     FirestoreMutationError,
-    UpdateDocumentVariables,
+    WriteDocumentVariables,
     unknown
   >
   replaceDocumentMutation: UseMutationResult<
@@ -163,21 +194,26 @@ type FirestoreServiceApi = {
     payload: FirestoreDocumentPayload,
     docId?: string,
   ) => Promise<FirestoreDocumentPayload>
-  updateDocument: (
+  writeDocument: (
     context: FirestoreContext,
     documentPath: string,
-    payload: FirestoreDocumentPayload,
-  ) => Promise<FirestoreDocumentPayload>
+    writeRequest: DocumentWriteRequest,
+  ) => Promise<FirestoreDocumentDetails>
   replaceDocument: (
     context: FirestoreContext,
     documentPath: string,
     payload: FirestoreDocumentPayload,
   ) => Promise<FirestoreDocumentPayload>
-  deleteDocument: (context: FirestoreContext, documentPath: string) => Promise<string>
+  deleteDocument: (
+    context: FirestoreContext,
+    documentPath: string,
+    expectedUpdateTime?: string | null,
+  ) => Promise<string>
+  bulkDeleteDocuments: (context: FirestoreContext, paths: string[]) => Promise<BulkDeleteResponse>
   loadProjects: (credentialsFile: File) => Promise<string[]>
   loadDatabases: (projectId: string, credentialsFile: File) => Promise<string[]>
   initFirestore: (projectId: string, credentialsFile: File, databaseId?: string) => Promise<string>
-  
+
   // FFP-003: Connection lifecycle methods
   getConnectionStatus: () => Promise<{ status: string; projectId?: string; databaseId?: string }>
   disconnectConnection: (projectId: string, databaseId?: string) => Promise<string>
@@ -261,26 +297,14 @@ function toDocumentDetails(value: unknown): FirestoreDocumentDetails {
 
   const payload = value as Record<string, unknown>
   const id = typeof payload.id === "string" ? payload.id : ""
+  const path = typeof payload.path === "string" ? payload.path : ""
 
   const rawFields = payload.fields
-  const unwrappedFields: Record<string, unknown> = {}
-  
+  const typedFields: Record<string, FirestoreWireValue> = {}
   if (rawFields && typeof rawFields === "object" && !Array.isArray(rawFields)) {
     for (const [key, val] of Object.entries(rawFields)) {
-      unwrappedFields[key] = unwrapFirestoreValue(val)
-    }
-  } else {
-    // Fallback: If it's already an unwrapped document, use payload directly
-    for (const [key, val] of Object.entries(payload)) {
-      if (
-        key !== "id" && 
-        key !== "path" && 
-        key !== "_path" && 
-        key !== "createTime" && 
-        key !== "updateTime" && 
-        key !== "subcollections"
-      ) {
-        unwrappedFields[key] = val
+      if (val && typeof val === "object") {
+        typedFields[key] = val as FirestoreWireValue
       }
     }
   }
@@ -289,13 +313,63 @@ function toDocumentDetails(value: unknown): FirestoreDocumentDetails {
     ? payload.subcollections.filter((item): item is string => typeof item === "string")
     : []
 
-  return { id, fields: unwrappedFields, collections }
+  return {
+    id,
+    path,
+    fields: unwrapFirestoreFields(rawFields),
+    typedFields,
+    collections,
+    createTime: typeof payload.createTime === "string" ? payload.createTime : null,
+    updateTime: typeof payload.updateTime === "string" ? payload.updateTime : null,
+  }
+}
+
+function toBulkDeleteResponse(value: unknown): BulkDeleteResponse {
+  if (!value || typeof value !== "object") {
+    throw new Error(extractApiMessage(value))
+  }
+  const payload = value as Record<string, unknown>
+  const deletedPaths = Array.isArray(payload.deletedPaths)
+    ? payload.deletedPaths.filter((item): item is string => typeof item === "string")
+    : []
+  const failedPaths = Array.isArray(payload.failedPaths)
+    ? payload.failedPaths.filter((item): item is string => typeof item === "string")
+    : []
+  return {
+    deletedCount: typeof payload.deletedCount === "number" ? payload.deletedCount : deletedPaths.length,
+    failedCount: typeof payload.failedCount === "number" ? payload.failedCount : failedPaths.length,
+    deletedPaths,
+    failedPaths,
+    complete: payload.complete === true,
+  }
+}
+
+function toConflictError(error: unknown): FirestoreConflictError | null {
+  if (!(error instanceof AxiosError) || error.response?.status !== 409) {
+    return null
+  }
+  const body = error.response.data as Record<string, unknown> | undefined
+  const message =
+    body && typeof body.message === "string" && body.message.trim()
+      ? body.message
+      : "The document was modified since it was last read."
+  let latestDocument: FirestoreDocumentDetails | null = null
+  if (body && body.latestDocument && typeof body.latestDocument === "object") {
+    try {
+      latestDocument = toDocumentDetails(body.latestDocument)
+    } catch {
+      latestDocument = null
+    }
+  }
+  return new FirestoreConflictError(message, latestDocument)
 }
 
 function buildQueryParams(requestData: FirestoreQueryRequest): URLSearchParams {
   const params = new URLSearchParams()
   params.set("path", requestData.path)
-  params.set("page", String(Math.max(0, requestData.page)))
+  if (requestData.cursor && requestData.cursor.trim()) {
+    params.set("cursor", requestData.cursor.trim())
+  }
   params.set("limit", String(requestData.limit))
   params.set("orderDirection", requestData.orderDirection)
 
@@ -384,6 +458,12 @@ const firestoreApi: FirestoreServiceApi = {
     ).then((response) => ({
       ...response,
       documents: response.documents?.map(mapDocumentDtoToFirestoreDocument) ?? [],
+      nextCursor: response.nextCursor ?? null,
+      // FFP-105: page bookkeeping is derived by the caller from its cursor history.
+      pageIndex: 0,
+      hasPreviousPage: false,
+      pageStart: response.documents?.length ? 1 : 0,
+      pageEnd: response.documents?.length ?? 0,
     }))
   },
 
@@ -395,12 +475,22 @@ const firestoreApi: FirestoreServiceApi = {
       }),
     ),
 
-  updateDocument: (context, documentPath, payload) =>
-    request(() =>
-      axiosInstance.put(`/api/collections/${encodePath(documentPath)}`, payload, {
-        headers: firestoreHeaders(context),
-      }),
-    ),
+  writeDocument: async (context, documentPath, writeRequest) => {
+    try {
+      const { data } = await axiosInstance.put(
+        `/api/collections/${encodePath(documentPath)}`,
+        writeRequest,
+        { headers: firestoreHeaders(context) },
+      )
+      return toDocumentDetails(data)
+    } catch (error) {
+      const conflict = toConflictError(error)
+      if (conflict) {
+        throw conflict
+      }
+      throw toRequestError(error)
+    }
+  },
 
   replaceDocument: (context, documentPath, payload) =>
     request(() =>
@@ -411,12 +501,37 @@ const firestoreApi: FirestoreServiceApi = {
       ),
     ),
 
-  deleteDocument: (context, documentPath) =>
-    request(() =>
-      axiosInstance.delete(`/api/collections/${encodePath(documentPath)}`, {
-        headers: firestoreHeaders(context),
-      }),
-    ),
+  deleteDocument: async (context, documentPath, expectedUpdateTime) => {
+    const params = new URLSearchParams()
+    if (expectedUpdateTime && expectedUpdateTime.trim()) {
+      params.set("expectedUpdateTime", expectedUpdateTime.trim())
+    }
+    const suffix = params.size > 0 ? `?${params.toString()}` : ""
+    try {
+      const { data } = await axiosInstance.delete(
+        `/api/collections/${encodePath(documentPath)}${suffix}`,
+        { headers: firestoreHeaders(context) },
+      )
+      return extractApiMessage(data)
+    } catch (error) {
+      const conflict = toConflictError(error)
+      if (conflict) {
+        throw conflict
+      }
+      throw toRequestError(error)
+    }
+  },
+
+  bulkDeleteDocuments: async (context, paths) => {
+    const response = await request<unknown>(() =>
+      axiosInstance.post(
+        "/api/workbench/bulk-delete",
+        { paths },
+        { headers: firestoreHeaders(context) },
+      ),
+    )
+    return toBulkDeleteResponse(response)
+  },
 
   loadProjects: async (credentialsFile) => {
     const form = new FormData()
@@ -534,9 +649,9 @@ export function useFirestoreService(): FirestoreImpl {
     },
   })
 
-  const updateDocumentMutation = useMutation({
-    mutationFn: ({ context, documentPath, payload }: UpdateDocumentVariables) =>
-      firestoreApi.updateDocument(context, documentPath, payload),
+  const writeDocumentMutation = useMutation({
+    mutationFn: ({ context, documentPath, writeRequest }: WriteDocumentVariables) =>
+      firestoreApi.writeDocument(context, documentPath, writeRequest),
     onSuccess: async (_, variables) => {
       await queryClient.invalidateQueries({ queryKey: firestoreQueryKeys.contextRoot(variables.context) })
     },
@@ -551,8 +666,8 @@ export function useFirestoreService(): FirestoreImpl {
   })
 
   const deleteDocumentMutation = useMutation({
-    mutationFn: ({ context, documentPath }: DeleteDocumentVariables) =>
-      firestoreApi.deleteDocument(context, documentPath),
+    mutationFn: ({ context, documentPath, expectedUpdateTime }: DeleteDocumentVariables) =>
+      firestoreApi.deleteDocument(context, documentPath, expectedUpdateTime),
     onSuccess: async (_, variables) => {
       await queryClient.invalidateQueries({ queryKey: firestoreQueryKeys.contextRoot(variables.context) })
     },
@@ -581,12 +696,12 @@ export function useFirestoreService(): FirestoreImpl {
     return createDocumentMutation.mutateAsync({ context, collectionPath, docId, payload })
   }
 
-  async function updateDocument(
+  async function writeDocument(
     context: FirestoreContext,
     documentPath: string,
-    payload: FirestoreDocumentPayload,
+    writeRequest: DocumentWriteRequest,
   ) {
-    return updateDocumentMutation.mutateAsync({ context, documentPath, payload })
+    return writeDocumentMutation.mutateAsync({ context, documentPath, writeRequest })
   }
 
   async function replaceDocument(
@@ -597,8 +712,12 @@ export function useFirestoreService(): FirestoreImpl {
     return replaceDocumentMutation.mutateAsync({ context, documentPath, payload })
   }
 
-  async function deleteDocument(context: FirestoreContext, documentPath: string) {
-    return deleteDocumentMutation.mutateAsync({ context, documentPath })
+  async function deleteDocument(
+    context: FirestoreContext,
+    documentPath: string,
+    expectedUpdateTime?: string | null,
+  ) {
+    return deleteDocumentMutation.mutateAsync({ context, documentPath, expectedUpdateTime })
   }
 
   async function loadProjects(credentialsFile: File) {
@@ -628,9 +747,10 @@ export function useFirestoreService(): FirestoreImpl {
     getNested,
     runQuery,
     createDocument,
-    updateDocument,
+    writeDocument,
     replaceDocument,
     deleteDocument,
+    bulkDeleteDocuments: firestoreApi.bulkDeleteDocuments,
     loadProjects,
     loadDatabases,
     initFirestore,
@@ -638,7 +758,7 @@ export function useFirestoreService(): FirestoreImpl {
     initSourceDb: firestoreApi.initSourceDb,
     deepCopy: firestoreApi.deepCopy,
     createDocumentMutation,
-    updateDocumentMutation,
+    writeDocumentMutation,
     replaceDocumentMutation,
     deleteDocumentMutation,
     loadProjectsMutation,
