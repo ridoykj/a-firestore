@@ -1,4 +1,5 @@
 import type { FirestoreDocument } from "@/features/firestore/schemas/FirestoreSchema"
+import { unwrapFirestoreFields } from "@/features/firestore/api/firestore-value-utils"
 
 const FIRESTORE_AUTO_ID_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
@@ -108,35 +109,25 @@ export function safePreviewValue(value: unknown): string {
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function unwrapFirestoreValue(fv: any): any {
-  if (fv == null) return null
-  if (fv.value !== undefined) return fv.value
-  if (fv.fields !== undefined) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const obj: any = {}
-    for (const key in fv.fields) {
-      obj[key] = unwrapFirestoreValue(fv.fields[key])
-    }
-    return obj
-  }
-  if (fv.items !== undefined) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return fv.items.map((item: any) => unwrapFirestoreValue(item))
-  }
-  return null
-}
+export { unwrapFirestoreValue } from "@/features/firestore/api/firestore-value-utils"
 
+/**
+ * FFP-101: Maps a typed DocumentDto (canonical wire values) to the flat, display-friendly
+ * document shape used by the results table. The typed fields and the concurrency token are
+ * kept on underscore-prefixed keys, which are excluded from payload/export helpers.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function mapDocumentDtoToFirestoreDocument(dto: any): FirestoreDocument {
   const doc: FirestoreDocument = {
     id: dto.id,
     _path: dto.path || dto._path,
   }
-  
+
   if (dto.fields && typeof dto.fields === "object" && !Array.isArray(dto.fields)) {
-    for (const [key, value] of Object.entries(dto.fields)) {
-      doc[key] = unwrapFirestoreValue(value)
+    doc._typedFields = dto.fields
+    doc._updateTime = typeof dto.updateTime === "string" ? dto.updateTime : null
+    for (const [key, value] of Object.entries(unwrapFirestoreFields(dto.fields))) {
+      doc[key] = value
     }
   } else {
     for (const [key, value] of Object.entries(dto)) {
@@ -145,6 +136,6 @@ export function mapDocumentDtoToFirestoreDocument(dto: any): FirestoreDocument {
       }
     }
   }
-  
+
   return doc
 }
