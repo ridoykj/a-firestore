@@ -6,19 +6,24 @@ import com.google.cloud.firestore.CollectionReference;
 import com.google.cloud.firestore.DocumentReference;
 import com.google.cloud.firestore.DocumentSnapshot;
 import com.google.cloud.firestore.FieldPath;
+import com.google.cloud.firestore.FieldValue;
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.FirestoreOptions;
+import com.google.cloud.firestore.Precondition;
 import com.google.cloud.firestore.Query;
 import com.google.cloud.firestore.QueryDocumentSnapshot;
-import com.google.cloud.firestore.QuerySnapshot;
 import com.google.cloud.firestore.SetOptions;
 import com.google.cloud.firestore.WriteBatch;
 import com.google.cloud.firestore.WriteResult;
 import com.google.cloud.firestore.v1.FirestoreAdminClient;
 import com.google.cloud.firestore.v1.FirestoreAdminSettings;
 import com.google.firestore.admin.v1.Database;
+import com.itbd.afirestore.common.exception.NotFoundException;
 import com.itbd.afirestore.firestore.dto.DocumentDto;
+import com.itbd.afirestore.firestore.dto.DocumentWriteRequest;
 import com.itbd.afirestore.firestore.dto.FirestoreValue;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -27,22 +32,21 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
+@Slf4j
 @Service
+@RequiredArgsConstructor
 public class GenericFirestoreService {
 
-    public record QueryResult(
-            List<DocumentDto> documents,
-            long elapsedMs,
-            int pageIndex,
-            int pageSize,
-            boolean hasNextPage) {
-    }
+    /** FFP-106: A bulk delete request is a single atomic batch of at most this many paths. */
+    public static final int MAX_BULK_DELETE_PATHS = 500;
 
     public record PaginatedDocuments(
             List<DocumentDto> documents,
@@ -54,28 +58,15 @@ public class GenericFirestoreService {
     public record WhereClause(String field, String operator, Object value) {}
 
     /**
-     * FFP-105: Cursor for stable pagination.
-     * Contains the sort field values and document ID to resume from.
-     */
-    public record Cursor(
-            Map<String, Object> sortValues,
-            String documentId
-    ) {
-        public Cursor {
-            if (sortValues == null) sortValues = Map.of();
-        }
-    }
-
-    /**
-     * FFP-105: Query result with cursor support.
+     * FFP-105: Result of a cursor-paginated query. {@code nextCursor} is opaque; pass it back
+     * verbatim to fetch the next page.
      */
     public record CursorQueryResult(
             List<DocumentDto> documents,
             long elapsedMs,
             int pageSize,
-            boolean hasNextPage,
-            Cursor nextCursor,
-            Cursor previousCursor
+            boolean hasMore,
+            String nextCursor
     ) {
         public CursorQueryResult {
             if (documents == null) documents = List.of();
@@ -91,292 +82,9 @@ public class GenericFirestoreService {
             int limit) {
     }
 
-    private final FirestoreManagerService firestoreManagerService;
-
-    public GenericFirestoreService(FirestoreManagerService firestoreManagerService) {
-        this.firestoreManagerService = firestoreManagerService;
-    }
-
     /**
-     * FFP-101: Query collection returning typed DocumentDto objects.
-     */
-    public Mono<QueryResult> queryCollection(
-            String projectId,
-            String databaseId,
-            String path,
-            List<WhereClause> whereClauses,
-            String orderField,
-            String orderDirection,
-            int limit,
-            int page) {
-        return Mono.fromCallable(() -> {
-            long startNanos = System.nanoTime();
-            
-            Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
-            CollectionReference collectionRef = firestore.collection(path);
-            
-            Query query = applyWhereClauses(collectionRef, whereClauses);
-            if (orderField != null && !orderField.isBlank()) {
-                query = "asc".equalsIgnoreCase(orderDirection) 
-                    ? query.orderBy(orderField).orderBy(FieldPath.documentId())
-                    : query.orderBy(orderField, Query.Direction.DESCENDING).orderBy(FieldPath.documentId());
-            }
-            
-            query = query.limit(limit);
-            if (page > 0) {
-                // FFP-105: Cursor-based pagination would go here
-                // For now, using offset-based for backward compatibility
-            }
-            
-            QuerySnapshot snapshot = query.get().get();
-            List<DocumentDto> documents = new ArrayList<>();
-            
-            for (QueryDocumentSnapshot doc : snapshot.getDocuments()) {
-                Map<String, Object> rawData = doc.getData() != null ? doc.getData() : new HashMap<>();
-                DocumentDto dto = DocumentDto.of(
-                    doc.getId(),
-                    doc.getReference().getPath(),
-                    rawData,
-                    doc.getCreateTime() != null ? doc.getCreateTime().toDate().toInstant() : null,
-                    doc.getUpdateTime() != null ? doc.getUpdateTime().toDate().toInstant() : null,
-                    List.of() // Subcollections would be fetched separately
-                );
-                documents.add(dto);
-            }
-            
-            long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000;
-            boolean hasNextPage = snapshot.getDocuments().size() == limit;
-            
-            return new QueryResult(documents, elapsedMs, page, limit, hasNextPage);
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    /**
-     * FFP-105: Query collection with cursor-based pagination.
-     * Replaces offset-based pagination with stable cursor navigation.
-     */
-    public Mono<CursorQueryResult> queryCollectionWithCursor(
-            String projectId,
-            String databaseId,
-            String path,
-            List<WhereClause> whereClauses,
-            String orderField,
-            String orderDirection,
-            int limit,
-            Cursor cursor) {
-        return Mono.fromCallable(() -> {
-            long startNanos = System.nanoTime();
-            
-            Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
-            CollectionReference collectionRef = firestore.collection(path);
-            
-            Query query = applyWhereClauses(collectionRef, whereClauses);
-            
-            // Apply cursor-based pagination instead of offset
-            if (cursor != null && !cursor.sortValues().isEmpty()) {
-                boolean isAscending = "asc".equalsIgnoreCase(orderDirection);
-                
-                for (Map.Entry<String, Object> entry : cursor.sortValues().entrySet()) {
-                    String field = entry.getKey();
-                    Object value = entry.getValue();
-                    
-                    if (isAscending) {
-                        query = query.whereGreaterThan(field, value);
-                    } else {
-                        query = query.whereLessThan(field, value);
-                    }
-                }
-                
-                // Add document ID as tiebreaker for stable ordering
-                String lastDocId = cursor.documentId();
-                if (lastDocId != null && !lastDocId.isBlank()) {
-                    Query.Direction docDirection = isAscending ? 
-                        Query.Direction.ASCENDING : Query.Direction.DESCENDING;
-                    query = query.whereGreaterThan(FieldPath.documentId(), lastDocId);
-                }
-            }
-            
-            // Apply ordering
-            if (orderField != null && !orderField.isBlank()) {
-                boolean isAscending = "asc".equalsIgnoreCase(orderDirection);
-                Query.Direction direction = isAscending ? 
-                    Query.Direction.ASCENDING : Query.Direction.DESCENDING;
-                
-                query = query.orderBy(orderField, direction)
-                            .orderBy(FieldPath.documentId(), 
-                                isAscending ? Query.Direction.ASCENDING : Query.Direction.DESCENDING);
-            } else {
-                // Default ordering by document ID if no order field specified
-                query = query.orderBy(FieldPath.documentId());
-            }
-            
-            query = query.limit(limit + 1); // Fetch one extra to check for next page
-            
-            QuerySnapshot snapshot = query.get().get();
-            List<QueryDocumentSnapshot> fetchedDocs = snapshot.getDocuments();
-            boolean hasNextPage = fetchedDocs.size() > limit;
-            
-            // Limit results to requested size (exclude the extra document used for cursor)
-            List<QueryDocumentSnapshot> pageDocs = fetchedDocs.stream()
-                    .limit(limit)
-                    .toList();
-            
-            List<DocumentDto> documents = new ArrayList<>();
-            Cursor nextCursor = null;
-            Cursor previousCursor = null;
-            
-            if (!pageDocs.isEmpty()) {
-                // Build cursor from last document in the page for next page navigation
-                QueryDocumentSnapshot lastDoc = pageDocs.get(pageDocs.size() - 1);
-                Map<String, Object> sortValues = new LinkedHashMap<>();
-                
-                if (orderField != null && !orderField.isBlank()) {
-                    Object fieldValue = lastDoc.getData().get(orderField);
-                    if (fieldValue != null) {
-                        sortValues.put(orderField, fieldValue);
-                    }
-                }
-                
-                nextCursor = new Cursor(sortValues, lastDoc.getId());
-            }
-            
-            // Build previous cursor from first document in the page for back navigation
-            if (!pageDocs.isEmpty() && cursor != null) {
-                QueryDocumentSnapshot firstDoc = pageDocs.get(0);
-                Map<String, Object> prevSortValues = new LinkedHashMap<>();
-                
-                if (orderField != null && !orderField.isBlank()) {
-                    Object fieldValue = firstDoc.getData().get(orderField);
-                    if (fieldValue != null) {
-                        prevSortValues.put(orderField, fieldValue);
-                    }
-                }
-                
-                previousCursor = new Cursor(prevSortValues, firstDoc.getId());
-            }
-            
-            for (QueryDocumentSnapshot doc : pageDocs) {
-                Map<String, Object> rawData = doc.getData() != null ? doc.getData() : new HashMap<>();
-                DocumentDto dto = DocumentDto.of(
-                    doc.getId(),
-                    doc.getReference().getPath(),
-                    rawData,
-                    doc.getCreateTime() != null ? doc.getCreateTime().toDate().toInstant() : null,
-                    doc.getUpdateTime() != null ? doc.getUpdateTime().toDate().toInstant() : null,
-                    List.of() // Subcollections would be fetched separately
-                );
-                documents.add(dto);
-            }
-            
-            long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000;
-            
-            return new CursorQueryResult(documents, elapsedMs, limit, hasNextPage, nextCursor, previousCursor);
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    /**
-     * FFP-105: Query collection with cursor-based pagination (simplified version).
-     */
-    public Mono<CursorQueryResult> queryCollectionWithCursor(
-            String projectId,
-            String databaseId,
-            String path,
-            int limit,
-            Cursor cursor) {
-        return queryCollectionWithCursor(projectId, databaseId, path, null, null, "asc", limit, cursor);
-    }
-
-    /**
-     * FFP-101: Query collection returning typed DocumentDto objects.
-     */
-    public Mono<DocumentDto> getDocumentDetails(String projectId, String databaseId, String documentPath) {
-        return Mono.fromCallable(() -> {
-            Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
-            DocumentReference docRef = firestore.document(documentPath);
-            DocumentSnapshot document = docRef.get().get();
-
-            if (!document.exists()) {
-                throw new RuntimeException("Document not found: " + documentPath);
-            }
-
-            Map<String, Object> rawData = document.getData() != null ? document.getData() : new HashMap<>();
-            
-            Iterable<CollectionReference> collections = docRef.listCollections();
-            List<String> subcollections = StreamSupport.stream(collections.spliterator(), false)
-                    .map(CollectionReference::getId)
-                    .collect(Collectors.toList());
-
-            return DocumentDto.of(
-                docRef.getId(),
-                documentPath,
-                rawData,
-                document.getCreateTime() != null ? document.getCreateTime().toDate().toInstant() : null,
-                document.getUpdateTime() != null ? document.getUpdateTime().toDate().toInstant() : null,
-                subcollections
-            );
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    /**
-     * FFP-101: Create document with typed value support.
-     */
-    public Mono<DocumentDto> createDocument(String projectId, String databaseId, 
-                                             String collectionPath, Map<String, Object> data) {
-        return Mono.fromCallable(() -> {
-            Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
-            CollectionReference collectionRef = firestore.collection(collectionPath);
-            
-            // Convert typed values back to raw for Firestore SDK
-            Map<String, Object> rawData = convertToRawData(data);
-            
-            DocumentReference docRef = collectionRef.document();
-            docRef.set(rawData).get();
-            
-            return getDocumentDetails(projectId, databaseId, docRef.getPath()).block();
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    /**
-     * FFP-106: Atomic bulk delete up to 500 documents per batch.
-     * Uses Firestore's atomic transaction capability for guaranteed consistency.
-     */
-    public Mono<BulkDeleteResult> batchDeleteDocuments(String projectId, String databaseId, List<String> documentPaths) {
-        return Mono.fromCallable(() -> {
-            if (documentPaths == null || documentPaths.isEmpty()) {
-                throw new IllegalArgumentException("Document paths list cannot be empty");
-            }
-            
-            Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
-            int batchSize = 500; // Firestore limit per batch
-            List<String> deletedPaths = new ArrayList<>();
-            List<String> failedPaths = new ArrayList<>();
-            
-            for (int i = 0; i < documentPaths.size(); i += batchSize) {
-                int end = Math.min(i + batchSize, documentPaths.size());
-                List<String> currentBatch = documentPaths.subList(i, end);
-                
-                try {
-                    // Use atomic batch write for guaranteed consistency
-                    WriteBatch writeBatch = firestore.batch();
-                    for (String path : currentBatch) {
-                        writeBatch.delete(firestore.document(path));
-                    }
-                    writeBatch.commit().get();
-                    
-                    deletedPaths.addAll(currentBatch);
-                } catch (Exception e) {
-                    failedPaths.addAll(currentBatch);
-                    // Log but continue with next batch
-                    System.err.println("Batch delete failed for " + currentBatch.size() + " documents: " + e.getMessage());
-                }
-            }
-            
-            return new BulkDeleteResult(deletedPaths, failedPaths);
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    /**
-     * FFP-106: Result of atomic bulk delete operation.
+     * FFP-106: Result of an atomic bulk delete. Because the batch commits atomically, either
+     * every requested path was deleted or none were.
      */
     public record BulkDeleteResult(
             List<String> deletedPaths,
@@ -386,163 +94,429 @@ public class GenericFirestoreService {
             if (deletedPaths == null) deletedPaths = List.of();
             if (failedPaths == null) failedPaths = List.of();
         }
-        
+
         public boolean isCompleteSuccess() {
             return failedPaths.isEmpty();
         }
-        
+
         public int totalProcessed() {
             return deletedPaths.size() + failedPaths.size();
         }
     }
 
     /**
-     * FFP-102: Update document with merge mode support.
-     */
-    public Mono<DocumentDto> updateDocument(String projectId, String databaseId, 
-                                             String documentPath, Map<String, Object> data, boolean merge) {
-        return updateDocument(projectId, databaseId, documentPath, data, merge, null);
-    }
-
-    /**
-     * FFP-102: Update document with merge mode support and optimistic concurrency.
-     */
-    public Mono<DocumentDto> updateDocument(String projectId, String databaseId, 
-                                             String documentPath, Map<String, Object> data, boolean merge, Instant expectedUpdateTime) {
-        return Mono.fromCallable(() -> {
-            Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
-            DocumentReference docRef = firestore.document(documentPath);
-            
-            // FFP-104: Optimistic concurrency check for update operations
-            if (expectedUpdateTime != null) {
-                DocumentSnapshot snapshot = docRef.get().get();
-                com.google.cloud.Timestamp currentTimestamp = snapshot.getUpdateTime();
-                if (currentTimestamp == null || !currentTimestamp.toDate().toInstant().equals(expectedUpdateTime)) {
-                    throw new OptimisticConcurrencyException(
-                        "Document has been modified since last read. Expected update time: " + expectedUpdateTime + 
-                        ", actual: " + (currentTimestamp != null ? currentTimestamp.toDate().toInstant() : "null"),
-                        getDocumentDetails(projectId, databaseId, documentPath).block());
-                }
-            }
-            
-            // Convert typed values back to raw for Firestore SDK
-            Map<String, Object> rawData = convertToRawData(data);
-            
-            if (merge) {
-                docRef.update(rawData).get();
-            } else {
-                docRef.set(rawData).get();
-            }
-            
-            return getDocumentDetails(projectId, databaseId, documentPath).block();
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    /**
-     * FFP-104: Optimistic concurrency exception for HTTP 409 responses.
+     * FFP-104: Thrown when a write or delete misses its {@code expectedUpdateTime} precondition.
+     * Carries the latest document (when it still exists) so callers can render a conflict diff.
      */
     public static class OptimisticConcurrencyException extends RuntimeException {
-        private final DocumentDto documentDto;
-        
-        public OptimisticConcurrencyException(String message, DocumentDto documentDto) {
+        private final transient DocumentDto latestDocument;
+
+        public OptimisticConcurrencyException(String message, DocumentDto latestDocument) {
             super(message);
-            this.documentDto = documentDto;
+            this.latestDocument = latestDocument;
         }
-        
-        public DocumentDto getDocumentDto() {
-            return documentDto;
+
+        public DocumentDto getLatestDocument() {
+            return latestDocument;
         }
     }
 
+    private final FirestoreManagerService firestoreManagerService;
+
     /**
-     * FFP-103: Delete fields from a document using FieldPath.delete() sentinel.
+     * FFP-105: Cursor-paginated collection query. Ordering always ends with the document ID so
+     * pages are stable even when the ordered field has duplicate values; the cursor is applied
+     * with {@code startAfter} so no documents are skipped or repeated.
      */
-    public Mono<DocumentDto> deleteFields(String projectId, String databaseId, 
-                                           String documentPath, List<String> fieldPaths) {
+    public Mono<CursorQueryResult> queryCollection(
+            String projectId,
+            String databaseId,
+            String path,
+            List<WhereClause> whereClauses,
+            String orderField,
+            String orderDirection,
+            int limit,
+            String cursorToken) {
         return Mono.fromCallable(() -> {
+            long startNanos = System.nanoTime();
+            int safeLimit = Math.clamp(limit, 1, 500);
+
             Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
-            DocumentReference docRef = firestore.document(documentPath);
-            
-            // Use individual field updates with FieldPath for deletion
-            for (String path : fieldPaths) {
-                docRef.update(FieldPath.of(path.split("\\.")), com.google.cloud.firestore.FieldValue.delete()).get();
+            Query query = firestore.collection(path);
+
+            if (whereClauses != null) {
+                for (WhereClause clause : whereClauses) {
+                    if (clause == null || clause.field() == null || clause.field().isBlank()
+                            || clause.operator() == null || clause.operator().isBlank()) {
+                        continue;
+                    }
+                    query = applyWhere(query, clause.field(), clause.operator(), clause.value());
+                }
             }
-            
-            return getDocumentDetails(projectId, databaseId, documentPath).block();
+
+            Query.Direction direction = "asc".equalsIgnoreCase(orderDirection)
+                    ? Query.Direction.ASCENDING
+                    : Query.Direction.DESCENDING;
+            String normalizedOrderField = orderField == null ? "" : orderField.trim();
+            boolean orderByField = !normalizedOrderField.isBlank()
+                    && !"id".equalsIgnoreCase(normalizedOrderField);
+
+            if (orderByField) {
+                query = query.orderBy(normalizedOrderField, direction)
+                        .orderBy(FieldPath.documentId(), direction);
+            } else {
+                // Firestore's built-in index on __name__ is ascending-only; a descending
+                // document-ID sort requires a manually created index. Always order ascending
+                // when no order field is chosen so plain browse queries never demand one.
+                query = query.orderBy(FieldPath.documentId(), Query.Direction.ASCENDING);
+            }
+
+            if (cursorToken != null && !cursorToken.isBlank()) {
+                QueryCursorCodec.DecodedCursor cursor = QueryCursorCodec.decode(cursorToken);
+                if (orderByField) {
+                    Object orderValue = cursor.orderValue() == null
+                            ? null
+                            : cursor.orderValue().toFirestoreObject(firestore);
+                    query = query.startAfter(orderValue, cursor.documentId());
+                } else {
+                    query = query.startAfter(cursor.documentId());
+                }
+            }
+
+            query = query.limit(safeLimit + 1);
+
+            List<QueryDocumentSnapshot> fetched = query.get().get().getDocuments();
+            boolean hasMore = fetched.size() > safeLimit;
+            List<QueryDocumentSnapshot> pageDocs = fetched.stream().limit(safeLimit).toList();
+
+            List<DocumentDto> documents = pageDocs.stream()
+                    .map(this::toDocumentDto)
+                    .collect(Collectors.toList());
+
+            String nextCursor = null;
+            if (hasMore && !pageDocs.isEmpty()) {
+                QueryDocumentSnapshot lastDoc = pageDocs.get(pageDocs.size() - 1);
+                FirestoreValue orderValue = orderByField
+                        ? FirestoreValue.from(lastDoc.get(normalizedOrderField))
+                        : null;
+                nextCursor = QueryCursorCodec.encode(orderValue, lastDoc.getId());
+            }
+
+            long elapsedMs = Math.max(1L, (System.nanoTime() - startNanos) / 1_000_000L);
+            return new CursorQueryResult(documents, elapsedMs, safeLimit, hasMore, nextCursor);
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
     /**
-     * FFP-104: Delete document with optimistic concurrency check.
+     * FFP-101: Reads a single document as a typed DTO including its update time and
+     * direct subcollection names.
      */
-    public Mono<Void> deleteDocument(String projectId, String databaseId, 
-                                      String documentPath, Instant expectedUpdateTime) {
+    public Mono<DocumentDto> getDocumentDetails(String projectId, String databaseId, String documentPath) {
         return Mono.fromCallable(() -> {
             Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
-            DocumentReference docRef = firestore.document(documentPath);
-            
-            if (expectedUpdateTime != null) {
-                // FFP-104: Optimistic concurrency check - verify update time before delete
-                DocumentSnapshot snapshot = docRef.get().get();
-                com.google.cloud.Timestamp currentTimestamp = snapshot.getUpdateTime();
-                if (currentTimestamp == null || !currentTimestamp.toDate().toInstant().equals(expectedUpdateTime)) {
-                    throw new RuntimeException("Document has been modified since last read. Expected update time: " + expectedUpdateTime + ", actual: " + 
-                        (currentTimestamp != null ? currentTimestamp.toDate().toInstant() : "null"));
-                }
+            return readDocumentDetails(firestore, documentPath);
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * FFP-102/FFP-103/FFP-104: Applies a {@link DocumentWriteRequest} inside a transaction so the
+     * {@code expectedUpdateTime} precondition, the merge/replace write, and explicit field
+     * deletions are atomic. Returns the resulting document.
+     */
+    public Mono<DocumentDto> writeDocument(
+            String projectId,
+            String databaseId,
+            String documentPath,
+            DocumentWriteRequest request) {
+        return Mono.fromCallable(() -> {
+            String normalizedPath = normalizeDocumentPath(documentPath);
+            DocumentWriteRequest write = request == null
+                    ? new DocumentWriteRequest(null, null, null, null)
+                    : request;
+            List<String> deleteFieldPaths = validateDeleteFieldPaths(write);
+
+            Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
+            DocumentReference docRef = firestore.document(normalizedPath);
+
+            Map<String, Object> rawFields = new LinkedHashMap<>();
+            write.fields().forEach((key, value) ->
+                    rawFields.put(key, value == null ? null : value.toFirestoreObject(firestore)));
+            Map<String, Object> payload = write.mode() == DocumentWriteRequest.WriteMode.MERGE
+                    ? withDeleteSentinels(rawFields, deleteFieldPaths)
+                    : rawFields;
+
+            try {
+                firestore.runTransaction(transaction -> {
+                    DocumentSnapshot snapshot = transaction.get(docRef).get();
+                    enforceUpdateTimePrecondition(snapshot, write.expectedUpdateTime(), normalizedPath);
+                    if (write.mode() == DocumentWriteRequest.WriteMode.REPLACE) {
+                        transaction.set(docRef, payload);
+                    } else {
+                        transaction.set(docRef, payload, SetOptions.merge());
+                    }
+                    return null;
+                }).get();
+            } catch (ExecutionException e) {
+                throw unwrapCause(e);
             }
-            docRef.delete().get();
-            
+
+            return readDocumentDetails(firestore, normalizedPath);
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * FFP-104: Deletes a document, optionally guarded by an atomic server-side
+     * {@code updateTime} precondition.
+     */
+    public Mono<Void> deleteDocument(
+            String projectId,
+            String databaseId,
+            String documentPath,
+            Instant expectedUpdateTime) {
+        return Mono.fromCallable(() -> {
+            String normalizedPath = normalizeDocumentPath(documentPath);
+            Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
+            DocumentReference docRef = firestore.document(normalizedPath);
+
+            try {
+                if (expectedUpdateTime != null) {
+                    com.google.cloud.Timestamp expected = com.google.cloud.Timestamp.ofTimeSecondsAndNanos(
+                            expectedUpdateTime.getEpochSecond(), expectedUpdateTime.getNano());
+                    docRef.delete(Precondition.updatedAt(expected)).get();
+                } else {
+                    docRef.delete().get();
+                }
+            } catch (ExecutionException e) {
+                if (expectedUpdateTime != null && isFailedPrecondition(e)) {
+                    DocumentDto latest = readDocumentIfExists(firestore, normalizedPath);
+                    throw new OptimisticConcurrencyException(
+                            "Document '" + normalizedPath + "' was modified since it was last read.", latest);
+                }
+                throw unwrapCause(e);
+            }
             return (Void) null;
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
     /**
-     * Helper to convert typed values back to raw Firestore-compatible objects.
+     * FFP-106: Atomically deletes at most {@value #MAX_BULK_DELETE_PATHS} unique, validated
+     * document paths in a single batch. Larger or invalid requests are rejected up front.
      */
-    private Map<String, Object> convertToRawData(Map<String, Object> data) {
-        Map<String, Object> rawData = new HashMap<>();
-        for (Map.Entry<String, Object> entry : data.entrySet()) {
-            if (entry.getValue() instanceof FirestoreValue fv) {
-                rawData.put(entry.getKey(), fv.toFirestoreObject());
-            } else {
-                rawData.put(entry.getKey(), entry.getValue());
+    public Mono<BulkDeleteResult> batchDeleteDocuments(
+            String projectId,
+            String databaseId,
+            List<String> documentPaths) {
+        return Mono.fromCallable(() -> {
+            List<String> validatedPaths = validateBulkDeletePaths(documentPaths);
+
+            Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
+            WriteBatch writeBatch = firestore.batch();
+            for (String path : validatedPaths) {
+                writeBatch.delete(firestore.document(path));
+            }
+
+            try {
+                writeBatch.commit().get();
+            } catch (Exception e) {
+                log.warn("Atomic bulk delete of {} document(s) failed: {}", validatedPaths.size(), e.getMessage());
+                return new BulkDeleteResult(List.of(), validatedPaths);
+            }
+            return new BulkDeleteResult(validatedPaths, List.of());
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /** Visible for testing: dedupes, validates, and bounds a bulk delete path list. */
+    static List<String> validateBulkDeletePaths(List<String> documentPaths) {
+        if (documentPaths == null || documentPaths.isEmpty()) {
+            throw new IllegalArgumentException("At least one document path is required.");
+        }
+        LinkedHashSet<String> unique = new LinkedHashSet<>();
+        for (String rawPath : documentPaths) {
+            String normalized = rawPath == null ? "" : rawPath.trim().replaceAll("^/+|/+$", "");
+            if (normalized.isBlank()) {
+                throw new IllegalArgumentException("Bulk delete paths cannot be blank.");
+            }
+            if (normalized.split("/").length % 2 != 0) {
+                throw new IllegalArgumentException("Not a document path: '" + normalized + "'.");
+            }
+            unique.add(normalized);
+        }
+        if (unique.size() > MAX_BULK_DELETE_PATHS) {
+            throw new IllegalArgumentException(
+                    "Bulk delete accepts at most " + MAX_BULK_DELETE_PATHS
+                            + " unique document paths per request, got " + unique.size() + ".");
+        }
+        return List.copyOf(unique);
+    }
+
+    /** Visible for testing: rejects malformed delete-field paths and REPLACE-mode deletions. */
+    static List<String> validateDeleteFieldPaths(DocumentWriteRequest request) {
+        List<String> deleteFieldPaths = request.deleteFieldPaths().stream()
+                .filter(path -> path != null && !path.isBlank())
+                .map(String::trim)
+                .toList();
+        if (deleteFieldPaths.isEmpty()) {
+            return List.of();
+        }
+        if (request.mode() == DocumentWriteRequest.WriteMode.REPLACE) {
+            throw new IllegalArgumentException(
+                    "deleteFieldPaths is only valid in MERGE mode; REPLACE already removes omitted fields.");
+        }
+        for (String path : deleteFieldPaths) {
+            for (String segment : path.split("\\.", -1)) {
+                if (segment.isBlank()) {
+                    throw new IllegalArgumentException("Invalid delete field path: '" + path + "'.");
+                }
             }
         }
-        return rawData;
+        return deleteFieldPaths;
     }
 
     /**
-     * Helper to apply where clauses to a query.
+     * FFP-103: Inserts {@link FieldValue#delete()} sentinels for each delete path into the merge
+     * payload, creating intermediate maps as needed. A delete path that collides with a submitted
+     * value is rejected so a save can never both set and delete the same field.
      */
-    private Query applyWhereClauses(Query query, List<WhereClause> whereClauses) {
-        for (WhereClause clause : whereClauses) {
-            if (clause.field == null || clause.field.isBlank()) continue;
-            
-            switch (clause.operator.toLowerCase()) {
-                case "==":
-                    query = query.whereEqualTo(clause.field, clause.value);
-                    break;
-                case "!=":
-                    query = query.whereNotEqualTo(clause.field, clause.value);
-                    break;
-                case "<":
-                    query = query.whereLessThan(clause.field, clause.value);
-                    break;
-                case "<=":
-                    query = query.whereLessThanOrEqualTo(clause.field, clause.value);
-                    break;
-                case ">":
-                    query = query.whereGreaterThan(clause.field, clause.value);
-                    break;
-                case ">=":
-                    query = query.whereGreaterThanOrEqualTo(clause.field, clause.value);
-                    break;
-                default:
-                    // Unsupported operator - skip
-                    break;
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> withDeleteSentinels(Map<String, Object> fields, List<String> deleteFieldPaths) {
+        Map<String, Object> merged = new LinkedHashMap<>(fields);
+        for (String path : deleteFieldPaths) {
+            String[] segments = path.split("\\.");
+            Map<String, Object> current = merged;
+            for (int i = 0; i < segments.length - 1; i += 1) {
+                Object next = current.get(segments[i]);
+                if (next == null && !current.containsKey(segments[i])) {
+                    Map<String, Object> created = new LinkedHashMap<>();
+                    current.put(segments[i], created);
+                    next = created;
+                }
+                if (!(next instanceof Map)) {
+                    throw new IllegalArgumentException(
+                            "Delete field path '" + path + "' conflicts with a submitted non-map field.");
+                }
+                current = (Map<String, Object>) next;
             }
+            String leaf = segments[segments.length - 1];
+            if (current.containsKey(leaf)) {
+                throw new IllegalArgumentException(
+                        "Delete field path '" + path + "' conflicts with a submitted field value.");
+            }
+            current.put(leaf, FieldValue.delete());
         }
-        return query;
+        return merged;
+    }
+
+    private void enforceUpdateTimePrecondition(
+            DocumentSnapshot snapshot,
+            Instant expectedUpdateTime,
+            String documentPath) {
+        if (snapshot.exists()) {
+            if (expectedUpdateTime == null) {
+                throw new IllegalArgumentException(
+                        "expectedUpdateTime is required when writing to an existing document. "
+                                + "Reload the document and retry.");
+            }
+            Instant actual = toInstant(snapshot.getUpdateTime());
+            if (!expectedUpdateTime.equals(actual)) {
+                throw new OptimisticConcurrencyException(
+                        "Document '" + documentPath + "' was modified since it was last read.",
+                        toDocumentDto(snapshot, documentPath));
+            }
+        } else if (expectedUpdateTime != null) {
+            throw new OptimisticConcurrencyException(
+                    "Document '" + documentPath + "' no longer exists.", null);
+        }
+    }
+
+    private DocumentDto readDocumentDetails(Firestore firestore, String documentPath) throws Exception {
+        DocumentReference docRef = firestore.document(documentPath);
+        DocumentSnapshot document = docRef.get().get();
+
+        if (!document.exists()) {
+            throw new NotFoundException("Document not found: " + documentPath);
+        }
+
+        Iterable<CollectionReference> collections = docRef.listCollections();
+        List<String> subcollections = StreamSupport.stream(collections.spliterator(), false)
+                .map(CollectionReference::getId)
+                .collect(Collectors.toList());
+
+        Map<String, Object> rawData = document.getData() != null ? document.getData() : new HashMap<>();
+        return DocumentDto.of(
+                docRef.getId(),
+                documentPath,
+                rawData,
+                toInstant(document.getCreateTime()),
+                toInstant(document.getUpdateTime()),
+                subcollections);
+    }
+
+    private DocumentDto readDocumentIfExists(Firestore firestore, String documentPath) {
+        try {
+            return readDocumentDetails(firestore, documentPath);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private DocumentDto toDocumentDto(DocumentSnapshot doc) {
+        return toDocumentDto(doc, doc.getReference().getPath());
+    }
+
+    private DocumentDto toDocumentDto(DocumentSnapshot doc, String path) {
+        Map<String, Object> rawData = doc.getData() != null ? doc.getData() : new HashMap<>();
+        return DocumentDto.of(
+                doc.getId(),
+                path,
+                rawData,
+                toInstant(doc.getCreateTime()),
+                toInstant(doc.getUpdateTime()),
+                List.of());
+    }
+
+    /** Full-precision conversion; {@code toDate().toInstant()} would truncate to milliseconds. */
+    private static Instant toInstant(com.google.cloud.Timestamp timestamp) {
+        return timestamp == null ? null : Instant.ofEpochSecond(timestamp.getSeconds(), timestamp.getNanos());
+    }
+
+    private static String normalizeDocumentPath(String documentPath) {
+        String normalized = documentPath == null ? "" : documentPath.trim().replaceAll("^/+|/+$", "");
+        if (normalized.isBlank() || normalized.split("/").length % 2 != 0) {
+            throw new IllegalArgumentException(
+                    "A document path with an even number of segments is required, got: '"
+                            + documentPath + "'.");
+        }
+        return normalized;
+    }
+
+    private static RuntimeException unwrapCause(ExecutionException e) {
+        Throwable cause = e.getCause();
+        while (cause != null) {
+            if (cause instanceof OptimisticConcurrencyException oce) {
+                return oce;
+            }
+            if (cause instanceof IllegalArgumentException iae) {
+                return iae;
+            }
+            cause = cause.getCause();
+        }
+        Throwable root = e.getCause() != null ? e.getCause() : e;
+        return root instanceof RuntimeException re ? re : new RuntimeException(root);
+    }
+
+    private static boolean isFailedPrecondition(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof com.google.api.gax.rpc.FailedPreconditionException) {
+                return true;
+            }
+            String message = current.getMessage();
+            if (message != null && message.contains("FAILED_PRECONDITION")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     public Mono<List<String>> getAllDatabases(String projectId, String databaseId) {
@@ -608,17 +582,6 @@ public class GenericFirestoreService {
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
-//    public Mono<Map<String, Object>> createDocument(
-//            String projectId,
-//            String databaseId,
-//            String collectionPath,
-//            Map<String, Object> data) {
-//        return Mono.fromCallable(() -> {
-//            Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
-//            return createDocumentInternal(firestore, collectionPath, null, data);
-//        }).subscribeOn(Schedulers.boundedElastic());
-//    }
-
     public Mono<Map<String, Object>> createDocument(
             String projectId,
             String databaseId,
@@ -648,80 +611,10 @@ public class GenericFirestoreService {
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
-    public Mono<Map<String, Object>> getDocument(String projectId, String databaseId, String documentPath) {
-        return Mono.fromCallable(() -> {
-            Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
-            DocumentReference docRef = firestore.document(documentPath);
-            DocumentSnapshot document = docRef.get().get();
-
-            Map<String, Object> responseData = new HashMap<>();
-            responseData.put("id", docRef.getId());
-            boolean hasContent = false;
-
-            if (document.exists() && document.getData() != null && !document.getData().isEmpty()) {
-                responseData.put("fields", document.getData());
-                hasContent = true;
-            } else {
-                responseData.put("fields", new HashMap<>());
-            }
-
-            Iterable<CollectionReference> collections = docRef.listCollections();
-            List<String> subcollections = StreamSupport.stream(collections.spliterator(), false)
-                    .map(CollectionReference::getId)
-                    .collect(Collectors.toList());
-
-            if (!subcollections.isEmpty()) {
-                responseData.put("collections", subcollections);
-                hasContent = true;
-            } else {
-                responseData.put("collections", new ArrayList<>());
-            }
-
-            if (hasContent) {
-                return responseData;
-            }
-
-            return (Map<String, Object>) null;
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    public Mono<Map<String, Object>> getDocument(String documentPath) {
-        return Mono.fromCallable(() -> {
-            DocumentReference docRef = firestoreManagerService.getFirestore().document(documentPath);
-            DocumentSnapshot document = docRef.get().get();
-
-            Map<String, Object> responseData = new HashMap<>();
-            responseData.put("id", docRef.getId());
-            boolean hasContent = false;
-
-            if (document.exists() && document.getData() != null && !document.getData().isEmpty()) {
-                responseData.put("fields", document.getData());
-                hasContent = true;
-            } else {
-                responseData.put("fields", new HashMap<>());
-            }
-
-            Iterable<CollectionReference> collections = docRef.listCollections();
-            List<String> subcollections = StreamSupport.stream(collections.spliterator(), false)
-                    .map(CollectionReference::getId)
-                    .collect(Collectors.toList());
-
-            if (!subcollections.isEmpty()) {
-                responseData.put("collections", subcollections);
-                hasContent = true;
-            } else {
-                responseData.put("collections", new ArrayList<>());
-            }
-
-            if (hasContent) {
-                return responseData;
-            }
-
-            return (Map<String, Object>) null;
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    public Mono<List<Map<String, Object>>> getAllDocuments(String projectId, String databaseId, String collectionPath) {
+    /**
+     * FFP-101: Full collection read returning typed documents so exports keep native types.
+     */
+    public Mono<List<DocumentDto>> getAllDocuments(String projectId, String databaseId, String collectionPath) {
         return Mono.fromCallable(() -> {
             Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
             List<QueryDocumentSnapshot> documents = firestore
@@ -730,20 +623,7 @@ public class GenericFirestoreService {
                     .get()
                     .getDocuments();
             return documents.stream()
-                    .map(this::toDocumentData)
-                    .collect(Collectors.toList());
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    public Mono<List<Map<String, Object>>> getAllDocuments(String collectionPath) {
-        return Mono.fromCallable(() -> {
-            List<QueryDocumentSnapshot> documents = firestoreManagerService.getFirestore()
-                    .collection(collectionPath)
-                    .get()
-                    .get()
-                    .getDocuments();
-            return documents.stream()
-                    .map(this::toDocumentData)
+                    .map(this::toDocumentDto)
                     .collect(Collectors.toList());
         }).subscribeOn(Schedulers.boundedElastic());
     }
@@ -766,7 +646,7 @@ public class GenericFirestoreService {
             if (!normalizedFilter.isBlank()) {
                 query = query
                         .whereGreaterThanOrEqualTo(FieldPath.documentId(), normalizedFilter)
-                        .whereLessThanOrEqualTo(FieldPath.documentId(), normalizedFilter + "\uf8ff");
+                        .whereLessThanOrEqualTo(FieldPath.documentId(), normalizedFilter + "");
             }
 
             if (cursor != null && !cursor.isBlank()) {
@@ -858,40 +738,7 @@ public class GenericFirestoreService {
             boolean hasNextPage = fetched.size() > safeLimit;
             List<DocumentDto> documents = fetched.stream()
                     .limit(safeLimit)
-                    .map(doc -> DocumentDto.of(
-                            doc.getId(),
-                            doc.getReference().getPath(),
-                            doc.getData() != null ? doc.getData() : new HashMap<>(),
-                            doc.getCreateTime() != null ? doc.getCreateTime().toDate().toInstant() : null,
-                            doc.getUpdateTime() != null ? doc.getUpdateTime().toDate().toInstant() : null,
-                            List.of()))
-                    .collect(Collectors.toList());
-
-            return new PaginatedDocuments(documents, safePage, safeLimit, hasNextPage);
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    public Mono<PaginatedDocuments> getAllDocumentsPage(String collectionPath, int page, int limit) {
-        return Mono.fromCallable(() -> {
-            int safeLimit = Math.max(1, Math.min(limit, 500));
-            int safePage = Math.max(0, page);
-            Query query = firestoreManagerService.getFirestore().collection(collectionPath);
-            if (safePage > 0) {
-                query = query.offset(safePage * safeLimit);
-            }
-            query = query.limit(safeLimit + 1);
-
-            List<QueryDocumentSnapshot> fetched = query.get().get().getDocuments();
-            boolean hasNextPage = fetched.size() > safeLimit;
-            List<DocumentDto> documents = fetched.stream()
-                    .limit(safeLimit)
-                    .map(doc -> DocumentDto.of(
-                            doc.getId(),
-                            doc.getReference().getPath(),
-                            doc.getData() != null ? doc.getData() : new HashMap<>(),
-                            doc.getCreateTime() != null ? doc.getCreateTime().toDate().toInstant() : null,
-                            doc.getUpdateTime() != null ? doc.getUpdateTime().toDate().toInstant() : null,
-                            List.of()))
+                    .map(this::toDocumentDto)
                     .collect(Collectors.toList());
 
             return new PaginatedDocuments(documents, safePage, safeLimit, hasNextPage);
@@ -906,162 +753,6 @@ public class GenericFirestoreService {
             return StreamSupport.stream(collections.spliterator(), false)
                     .map(CollectionReference::getId)
                     .collect(Collectors.toList());
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    public Mono<List<String>> listSubcollections(String documentPath) {
-        return Mono.fromCallable(() -> {
-            DocumentReference docRef = firestoreManagerService.getFirestore().document(documentPath);
-            Iterable<CollectionReference> collections = docRef.listCollections();
-            return StreamSupport.stream(collections.spliterator(), false)
-                    .map(CollectionReference::getId)
-                    .collect(Collectors.toList());
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-//    public Mono<QueryResult> queryCollection(
-//            String projectId,
-//            String databaseId,
-//            String collectionPath,
-//            List<WhereClause> whereClauses,
-//            String orderField,
-//            String orderDirection,
-//            int limit,
-//            int page) {
-//        return Mono.fromCallable(() -> {
-//            Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
-//            long startNanos = System.nanoTime();
-//            int safeLimit = Math.max(1, Math.min(limit, 500));
-//            int safePage = Math.max(0, page);
-//            Query query = firestore.collection(collectionPath);
-//
-//            if (whereClauses != null && !whereClauses.isEmpty()) {
-//                for (WhereClause whereClause : whereClauses) {
-//                    if (whereClause == null) {
-//                        continue;
-//                    }
-//                    String field = whereClause.field();
-//                    String operator = whereClause.operator();
-//                    if (field == null || field.isBlank() || operator == null || operator.isBlank()) {
-//                        continue;
-//                    }
-//                    query = applyWhere(query, field, operator, whereClause.value());
-//                }
-//            }
-//
-//            if (orderField != null && !orderField.isBlank()) {
-//                Query.Direction direction = "asc".equalsIgnoreCase(orderDirection)
-//                        ? Query.Direction.ASCENDING
-//                        : Query.Direction.DESCENDING;
-//                if ("id".equalsIgnoreCase(orderField.trim())) {
-//                    query = query.orderBy(FieldPath.documentId(), direction);
-//                } else {
-//                    query = query.orderBy(orderField, direction);
-//                }
-//            }
-//
-//            if (safePage > 0) {
-//                query = query.offset(safePage * safeLimit);
-//            }
-//            query = query.limit(safeLimit + 1);
-//
-//            QuerySnapshot querySnapshot = query.get().get();
-//            List<QueryDocumentSnapshot> fetchedDocuments = querySnapshot.getDocuments();
-//            boolean hasNextPage = fetchedDocuments.size() > safeLimit;
-//            List<Map<String, Object>> documents = fetchedDocuments.stream()
-//                    .limit(safeLimit)
-//                    .map(this::toDocumentData)
-//                    .collect(Collectors.toList());
-//
-//            long elapsedMs = Math.max(1L, (System.nanoTime() - startNanos) / 1_000_000L);
-//            return new QueryResult(documents, elapsedMs, safePage, safeLimit, hasNextPage);
-//        }).subscribeOn(Schedulers.boundedElastic());
-//    }
-//
-//    public Mono<QueryResult> queryCollection(
-//            String collectionPath,
-//            List<WhereClause> whereClauses,
-//            String orderField,
-//            String orderDirection,
-//            int limit,
-//            int page) {
-//        return Mono.fromCallable(() -> {
-//            long startNanos = System.nanoTime();
-//            int safeLimit = Math.max(1, Math.min(limit, 500));
-//            int safePage = Math.max(0, page);
-//            Query query = firestoreManagerService.getFirestore().collection(collectionPath);
-//
-//            if (whereClauses != null && !whereClauses.isEmpty()) {
-//                for (WhereClause whereClause : whereClauses) {
-//                    if (whereClause == null) {
-//                        continue;
-//                    }
-//                    String field = whereClause.field();
-//                    String operator = whereClause.operator();
-//                    if (field == null || field.isBlank() || operator == null || operator.isBlank()) {
-//                        continue;
-//                    }
-//                    query = applyWhere(query, field, operator, whereClause.value());
-//                }
-//            }
-//
-//            if (orderField != null && !orderField.isBlank()) {
-//                Query.Direction direction = "asc".equalsIgnoreCase(orderDirection)
-//                        ? Query.Direction.ASCENDING
-//                        : Query.Direction.DESCENDING;
-//                if ("id".equalsIgnoreCase(orderField.trim())) {
-//                    query = query.orderBy(FieldPath.documentId(), direction);
-//                } else {
-//                    query = query.orderBy(orderField, direction);
-//                }
-//            }
-//
-//            if (safePage > 0) {
-//                query = query.offset(safePage * safeLimit);
-//            }
-//            query = query.limit(safeLimit + 1);
-//
-//            QuerySnapshot querySnapshot = query.get().get();
-//            List<QueryDocumentSnapshot> fetchedDocuments = querySnapshot.getDocuments();
-//            boolean hasNextPage = fetchedDocuments.size() > safeLimit;
-//            List<Map<String, Object>> documents = fetchedDocuments.stream()
-//                    .limit(safeLimit)
-//                    .map(this::toDocumentData)
-//                    .collect(Collectors.toList());
-//
-//            long elapsedMs = Math.max(1L, (System.nanoTime() - startNanos) / 1_000_000L);
-//            return new QueryResult(documents, elapsedMs, safePage, safeLimit, hasNextPage);
-//        }).subscribeOn(Schedulers.boundedElastic());
-//    }
-
-    public Mono<Map<String, Object>> updateDocument(
-            String projectId,
-            String databaseId,
-            String documentPath,
-            Map<String, Object> data) {
-        return Mono.fromCallable(() -> {
-            Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
-            Map<String, Object> mutable = new HashMap<>(data);
-            ApiFuture<WriteResult> result = firestore
-                    .document(documentPath)
-                    .set(mutable, SetOptions.merge());
-            result.get();
-            String id = documentPath.contains("/") ? documentPath.substring(documentPath.lastIndexOf('/') + 1) : documentPath;
-            mutable.put("id", id);
-            return mutable;
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    public Mono<Map<String, Object>> updateDocument(String documentPath, Map<String, Object> data) {
-        return Mono.fromCallable(() -> {
-            Map<String, Object> mutable = new HashMap<>(data);
-            ApiFuture<WriteResult> result = firestoreManagerService.getFirestore()
-                    .document(documentPath)
-                    .set(mutable, SetOptions.merge());
-            result.get();
-            String id = documentPath.contains("/") ? documentPath.substring(documentPath.lastIndexOf('/') + 1) : documentPath;
-            mutable.put("id", id);
-            return mutable;
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
@@ -1080,34 +771,6 @@ public class GenericFirestoreService {
             String id = documentPath.contains("/") ? documentPath.substring(documentPath.lastIndexOf('/') + 1) : documentPath;
             mutable.put("id", id);
             return mutable;
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    public Mono<Map<String, Object>> replaceDocument(String documentPath, Map<String, Object> data) {
-        return Mono.fromCallable(() -> {
-            Map<String, Object> mutable = new LinkedHashMap<>(data == null ? Map.of() : data);
-            ApiFuture<WriteResult> result = firestoreManagerService.getFirestore()
-                    .document(documentPath)
-                    .set(mutable);
-            result.get();
-            String id = documentPath.contains("/") ? documentPath.substring(documentPath.lastIndexOf('/') + 1) : documentPath;
-            mutable.put("id", id);
-            return mutable;
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    public Mono<String> deleteDocument(String projectId, String databaseId, String documentPath) {
-        return Mono.fromCallable(() -> {
-            Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
-            firestore.document(documentPath).delete().get();
-            return documentPath.contains("/") ? documentPath.substring(documentPath.lastIndexOf('/') + 1) : documentPath;
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    public Mono<String> deleteDocument(String documentPath) {
-        return Mono.fromCallable(() -> {
-            firestoreManagerService.getFirestore().document(documentPath).delete().get();
-            return documentPath.contains("/") ? documentPath.substring(documentPath.lastIndexOf('/') + 1) : documentPath;
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
@@ -1184,14 +847,6 @@ public class GenericFirestoreService {
         if (value == null) {
             return "";
         }
-        String normalized = value.toString().trim();
-        return normalized;
-    }
-
-    private Map<String, Object> toDocumentData(DocumentSnapshot doc) {
-        Map<String, Object> data = new LinkedHashMap<>(doc.getData() == null ? Map.of() : doc.getData());
-        data.put("id", doc.getId());
-        data.put("_path", doc.getReference().getPath());
-        return data;
+        return value.toString().trim();
     }
 }
