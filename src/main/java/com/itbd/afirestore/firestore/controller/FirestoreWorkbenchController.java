@@ -5,8 +5,7 @@ import com.itbd.afirestore.firestore.dto.DocumentDto;
 import com.itbd.afirestore.firestore.dto.FirestoreValue;
 import com.itbd.afirestore.firestore.service.FirestoreManagerService;
 import com.itbd.afirestore.firestore.service.GenericFirestoreService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -18,10 +17,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/workbench")
 public class FirestoreWorkbenchController {
-    private static final Logger LOGGER = LoggerFactory.getLogger(FirestoreWorkbenchController.class);
 
     private final GenericFirestoreService genericFirestoreService;
     private final FirestoreManagerService firestoreManagerService;
@@ -33,6 +32,10 @@ public class FirestoreWorkbenchController {
         this.firestoreManagerService = firestoreManagerService;
     }
 
+    /**
+     * FFP-105: Cursor-paginated query. {@code cursor} is the opaque token returned as
+     * {@code nextCursor} by a previous page; omit it for the first page.
+     */
     @GetMapping("/query")
     public Mono<ResponseEntity<Object>> query(
             @RequestHeader("X-Project-Id") String projectId,
@@ -45,7 +48,7 @@ public class FirestoreWorkbenchController {
             @RequestParam(value = "orderField", required = false) String orderField,
             @RequestParam(value = "orderDirection", defaultValue = "desc") String orderDirection,
             @RequestParam(value = "limit", defaultValue = "50") Integer limit,
-            @RequestParam(value = "page", defaultValue = "0") Integer page) {
+            @RequestParam(value = "cursor", required = false) String cursor) {
         String normalizedPath = normalize(path);
         if (normalizedPath.isBlank()) {
             return Mono.just(ResponseEntity.badRequest().body((Object) Map.of("message", "Path is required.")));
@@ -56,9 +59,9 @@ public class FirestoreWorkbenchController {
 
         String normalizedDatabaseId = normalizeDatabaseId(databaseId);
         int safeLimit = Math.clamp(limit == null ? 50 : limit, 1, 500);
-        int safePage = Math.max(0, page == null ? 0 : page);
         String normalizedOrderField = normalize(orderField);
         String normalizedOrderDirection = "asc".equalsIgnoreCase(orderDirection) ? "asc" : "desc";
+        String normalizedCursor = cursor == null || cursor.isBlank() ? null : cursor.trim();
 
         List<GenericFirestoreService.WhereClause> whereClauses;
         try {
@@ -75,34 +78,56 @@ public class FirestoreWorkbenchController {
                         normalizedOrderField,
                         normalizedOrderDirection,
                         safeLimit,
-                        safePage)
+                        normalizedCursor)
                 .map(result -> {
-                    int pageStart = result.documents().isEmpty()
-                            ? 0
-                            : (result.pageIndex() * result.pageSize()) + 1;
-                    int pageEnd = (result.pageIndex() * result.pageSize()) + result.documents().size();
-
                     QueryResponse response = new QueryResponse(
                             normalizedPath,
                             result.documents(),
                             buildColumns(result.documents()),
                             result.documents().size(),
                             result.elapsedMs(),
-                            result.pageIndex(),
                             result.pageSize(),
-                            result.hasNextPage(),
-                            result.pageIndex() > 0,
-                            pageStart,
-                            pageEnd
+                            result.hasMore(),
+                            result.nextCursor()
                     );
                     return ResponseEntity.ok((Object) response);
                 })
+                .onErrorResume(IllegalArgumentException.class, e ->
+                        Mono.just(ResponseEntity.badRequest().body(Map.of(
+                                "message", e.getMessage() == null ? "Invalid query." : e.getMessage()))))
                 .onErrorResume(e -> {
                     String errorMessage = resolveErrorMessage(e);
-                    LOGGER.error("Workbench query failed for path='{}': {}", normalizedPath, errorMessage, e);
+                    log.error("Workbench query failed for path='{}': {}", normalizedPath, errorMessage, e);
                     return Mono.just(ResponseEntity.internalServerError().body(Map.of(
                             "message", errorMessage)));
                 });
+    }
+
+    /**
+     * FFP-106: Atomic bulk delete of at most
+     * {@value GenericFirestoreService#MAX_BULK_DELETE_PATHS} unique, validated document paths.
+     */
+    @PostMapping("/bulk-delete")
+    public Mono<ResponseEntity<Object>> bulkDelete(
+            @RequestHeader("X-Project-Id") String projectId,
+            @RequestHeader(value = "X-Database-Id", required = false) String databaseId,
+            @RequestBody BulkDeleteRequest request) {
+        List<String> paths = request == null ? List.of() : request.paths();
+        return genericFirestoreService.batchDeleteDocuments(projectId, normalizeDatabaseId(databaseId), paths)
+                .map(result -> {
+                    Map<String, Object> body = new LinkedHashMap<>();
+                    body.put("deletedCount", result.deletedPaths().size());
+                    body.put("failedCount", result.failedPaths().size());
+                    body.put("deletedPaths", result.deletedPaths());
+                    body.put("failedPaths", result.failedPaths());
+                    body.put("complete", result.isCompleteSuccess());
+                    return ResponseEntity.ok((Object) body);
+                })
+                .onErrorResume(IllegalArgumentException.class, e ->
+                        Mono.just(ResponseEntity.badRequest().body(Map.of(
+                                "message", e.getMessage() == null ? "Invalid bulk delete request." : e.getMessage()))))
+                .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().body(Map.of(
+                        "message", e.getMessage() == null ? "Bulk delete failed." : e.getMessage()))));
     }
 
     @GetMapping("/nested")
@@ -159,7 +184,7 @@ public class FirestoreWorkbenchController {
                                 : "Scroll to load more.";
 
                         long elapsedMs = Math.max(1L, (System.nanoTime() - startNanos) / 1_000_000L);
-                        LOGGER.info(
+                        log.info(
                                 "Nested collection page loaded path='{}' limit={} returnedCount={} hasMore={} elapsedMs={}",
                                 normalizedPath,
                                 safeLimit,
@@ -205,7 +230,7 @@ public class FirestoreWorkbenchController {
                             : "Select a child collection to run a query and continue traversal.";
 
                     long elapsedMs = Math.max(1L, (System.nanoTime() - startNanos) / 1_000_000L);
-                    LOGGER.info(
+                    log.info(
                             "Nested document collections loaded path='{}' returnedCount={} elapsedMs={}",
                             normalizedPath,
                             childCollectionNodes.size(),
@@ -309,30 +334,19 @@ public class FirestoreWorkbenchController {
                 continue;
             }
 
-            Object rawValue = value.toFirestoreObject();
-            switch (rawValue) {
-                case null -> {
-                    continue;
-                }
-                case String s -> {
-                    return "string";
-                }
-                case Number number -> {
-                    return "number";
-                }
-                case Boolean b -> {
-                    return "boolean";
-                }
-                case List<?> objects -> {
-                    return "array";
-                }
-                case Map<?, ?> map -> {
-                    return "object";
-                }
-                default -> {
-                }
-            }
-            return rawValue.getClass().getSimpleName().toLowerCase(Locale.ROOT);
+            return switch (value) {
+                case FirestoreValue.StringValue v -> "string";
+                case FirestoreValue.IntegerValue v -> "number";
+                case FirestoreValue.DoubleValue v -> "number";
+                case FirestoreValue.BooleanValue v -> "boolean";
+                case FirestoreValue.TimestampValue v -> "timestamp";
+                case FirestoreValue.GeoPointValue v -> "geopoint";
+                case FirestoreValue.ReferenceValue v -> "reference";
+                case FirestoreValue.BytesValue v -> "bytes";
+                case FirestoreValue.ArrayValue v -> "array";
+                case FirestoreValue.MapValue v -> "object";
+                case FirestoreValue.NullValue v -> "unknown";
+            };
         }
         return "unknown";
     }
@@ -528,12 +542,16 @@ public class FirestoreWorkbenchController {
             List<Map<String, String>> columns,
             int resultCount,
             long elapsedMs,
-            int pageIndex,
             int pageSize,
             boolean hasNextPage,
-            boolean hasPreviousPage,
-            int pageStart,
-            int pageEnd) {
+            String nextCursor) {
+    }
+
+    /** FFP-106: Bulk delete request body. */
+    record BulkDeleteRequest(List<String> paths) {
+        BulkDeleteRequest {
+            if (paths == null) paths = List.of();
+        }
     }
 
     private record NodeItem(String id, String path) {
