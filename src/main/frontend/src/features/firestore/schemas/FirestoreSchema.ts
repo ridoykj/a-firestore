@@ -19,18 +19,43 @@ export type FirestoreDocument = {
   [key: string]: unknown
 }
 
+/**
+ * FFP-105: The server returns cursor-based pages (`nextCursor`, `hasNextPage`); the page
+ * bookkeeping fields (`pageIndex`, `hasPreviousPage`, `pageStart`, `pageEnd`) are derived on
+ * the client from its cursor history.
+ */
 export type QueryResponse = {
   path: string
   documents: FirestoreDocument[]
   columns: QueryColumn[]
   resultCount: number
   elapsedMs: number
-  pageIndex: number
   pageSize: number
   hasNextPage: boolean
+  nextCursor: string | null
+  pageIndex: number
   hasPreviousPage: boolean
   pageStart: number
   pageEnd: number
+}
+
+export type WriteMode = "MERGE" | "REPLACE"
+
+/** FFP-102/FFP-103/FFP-104: Safe write contract mirrored from the backend. */
+export type DocumentWriteRequest = {
+  mode: WriteMode
+  fields: Record<string, unknown>
+  deleteFieldPaths: string[]
+  expectedUpdateTime: string | null
+}
+
+/** FFP-106: Result of an atomic bulk delete. */
+export type BulkDeleteResponse = {
+  deletedCount: number
+  failedCount: number
+  deletedPaths: string[]
+  failedPaths: string[]
+  complete: boolean
 }
 
 export type NestedNode = {
@@ -109,7 +134,8 @@ export type FirestoreWhereFilter = {
 
 export type FirestoreQueryRequest = {
   path: string
-  page: number
+  /** FFP-105: opaque cursor returned by the previous page; null for the first page. */
+  cursor: string | null
   limit: number
   orderDirection: OrderDirection
   orderField?: string
