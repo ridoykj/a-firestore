@@ -1,16 +1,21 @@
 package com.itbd.afirestore.firestore.controller;
 
-import com.itbd.afirestore.firestore.dto.DocumentDto;
+import com.itbd.afirestore.common.exception.NotFoundException;
+import com.itbd.afirestore.firestore.dto.DocumentWriteRequest;
 import com.itbd.afirestore.firestore.service.GenericFirestoreService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/collections")
 public class GenericFirestoreController {
@@ -72,10 +77,11 @@ public class GenericFirestoreController {
             // Even number of segments -> Document Path
             return genericFirestoreService.getDocumentDetails(projectId, normalizedDatabaseId, path)
                     .map(doc -> ResponseEntity.ok((Object) doc))
-                    .defaultIfEmpty(ResponseEntity.notFound().build())
+                    .onErrorResume(NotFoundException.class, e ->
+                            Mono.just(ResponseEntity.status(404).body(errorBodyObject(e.getMessage()))))
                     .onErrorResume(e -> {
-                        e.printStackTrace();
-                        return Mono.just(ResponseEntity.internalServerError().body(errorBody(e.getMessage())));
+                        log.error("Failed to read document at path '{}': {}", path, e.getMessage(), e);
+                        return Mono.just(ResponseEntity.internalServerError().body(errorBodyObject(e.getMessage())));
                     });
         }
     }
@@ -123,38 +129,63 @@ public class GenericFirestoreController {
     }
 
     /**
-     * UPDATE a document dynamically.
+     * FFP-102/FFP-103/FFP-104: Write a document using the safe write contract.
+     *
+     * <p>The body is a {@link DocumentWriteRequest} with an explicit MERGE/REPLACE mode,
+     * typed field values, explicit delete-field paths, and the expected update time of the
+     * document being edited. A stale {@code expectedUpdateTime} returns HTTP 409 along with
+     * the latest document so the client can show a conflict diff.</p>
      */
     @PutMapping("/**")
-    public Mono<ResponseEntity<DocumentDto>> update(
+    public Mono<ResponseEntity<Object>> update(
             ServerHttpRequest request,
             @RequestHeader("X-Project-Id") String projectId,
             @RequestHeader(value = "X-Database-Id", required = false) String databaseId,
-            @RequestBody Map<String, Object> data) {
+            @RequestBody DocumentWriteRequest writeRequest) {
         String path = extractFirestorePath(request);
-        return genericFirestoreService.updateDocument(projectId, normalizeDatabaseId(databaseId), path, data, true)
-                .map(ResponseEntity::ok)
-                .onErrorResume(GenericFirestoreService.OptimisticConcurrencyException.class, e -> 
-                        Mono.just(ResponseEntity.status(409).body(e.getDocumentDto())))
+        return genericFirestoreService.writeDocument(projectId, normalizeDatabaseId(databaseId), path, writeRequest)
+                .map(doc -> ResponseEntity.ok((Object) doc))
+                .onErrorResume(GenericFirestoreService.OptimisticConcurrencyException.class, e ->
+                        Mono.just(ResponseEntity.status(409).body(conflictBody(e))))
                 .onErrorResume(IllegalArgumentException.class, e ->
-                        Mono.just(ResponseEntity.badRequest().body(null)))
-                .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().build()));
+                        Mono.just(ResponseEntity.badRequest().body(errorBodyObject(e.getMessage()))))
+                .onErrorResume(e -> {
+                    log.error("Failed to write document at path '{}': {}", path, e.getMessage(), e);
+                    return Mono.just(ResponseEntity.internalServerError().body(errorBodyObject(
+                            e.getMessage() == null ? "Write failed." : e.getMessage())));
+                });
     }
 
     /**
-     * DELETE a document dynamically.
+     * DELETE a document dynamically. When {@code expectedUpdateTime} is supplied, the delete is
+     * guarded by an atomic update-time precondition (FFP-104).
      */
     @DeleteMapping("/**")
-    public Mono<ResponseEntity<String>> delete(
+    public Mono<ResponseEntity<Object>> delete(
             ServerHttpRequest request,
             @RequestHeader("X-Project-Id") String projectId,
-            @RequestHeader(value = "X-Database-Id", required = false) String databaseId) {
+            @RequestHeader(value = "X-Database-Id", required = false) String databaseId,
+            @RequestParam(value = "expectedUpdateTime", required = false) String expectedUpdateTime) {
         String path = extractFirestorePath(request);
-        return genericFirestoreService.deleteDocument(projectId, normalizeDatabaseId(databaseId), path, null)
-                .map(v -> ResponseEntity.ok("Document deleted successfully."))
-                .onErrorResume(GenericFirestoreService.OptimisticConcurrencyException.class, e -> 
-                        Mono.just(ResponseEntity.status(409).body("Document has been modified since last read: " + e.getMessage())))
-                .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().body("Error deleting document: " + e.getMessage())));
+
+        Instant expected;
+        try {
+            expected = expectedUpdateTime == null || expectedUpdateTime.isBlank()
+                    ? null
+                    : Instant.parse(expectedUpdateTime.trim());
+        } catch (DateTimeParseException e) {
+            return Mono.just(ResponseEntity.badRequest().body(errorBodyObject(
+                    "expectedUpdateTime must be an ISO-8601 instant.")));
+        }
+
+        return genericFirestoreService.deleteDocument(projectId, normalizeDatabaseId(databaseId), path, expected)
+                .thenReturn(ResponseEntity.ok(errorBodyObject("Document deleted successfully.")))
+                .onErrorResume(GenericFirestoreService.OptimisticConcurrencyException.class, e ->
+                        Mono.just(ResponseEntity.status(409).body(conflictBody(e))))
+                .onErrorResume(IllegalArgumentException.class, e ->
+                        Mono.just(ResponseEntity.badRequest().body(errorBodyObject(e.getMessage()))))
+                .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().body(errorBodyObject(
+                        "Error deleting document: " + e.getMessage()))));
     }
 
     private String extractFirestorePath(ServerHttpRequest request) {
@@ -203,6 +234,19 @@ public class GenericFirestoreController {
     private Map<String, Object> errorBody(String message) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("message", message == null || message.isBlank() ? "Request failed." : message);
+        return body;
+    }
+
+    private Object errorBodyObject(String message) {
+        return errorBody(message);
+    }
+
+    /** FFP-104: 409 payload carrying the latest document so clients can diff before overwriting. */
+    private Object conflictBody(GenericFirestoreService.OptimisticConcurrencyException e) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("errorCode", "CONFLICT");
+        body.put("message", e.getMessage());
+        body.put("latestDocument", e.getLatestDocument());
         return body;
     }
 }
