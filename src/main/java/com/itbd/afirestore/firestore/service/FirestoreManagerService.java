@@ -8,12 +8,7 @@ import com.google.cloud.firestore.v1.FirestoreAdminSettings;
 import com.google.firestore.admin.v1.Database;
 import com.google.api.gax.core.FixedCredentialsProvider;
 import jakarta.annotation.PreDestroy;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayInputStream;
@@ -24,10 +19,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+@Slf4j
 @Service
 public class FirestoreManagerService {
-
-    private static final Logger log = LoggerFactory.getLogger(FirestoreManagerService.class);
 
     private final Map<String, Firestore> firestoreConnections = new ConcurrentHashMap<>();
     private volatile String activeConnectionKey;
@@ -71,8 +65,8 @@ public class FirestoreManagerService {
         if (previous != null) {
             try {
                 previous.close();
-            } catch (Exception ignored) {
-                // ignore close failures
+            } catch (Exception e) {
+                log.warn("Error closing replaced Firestore client for key '{}': {}", connectionKey, e.getMessage());
             }
         }
     }
@@ -146,7 +140,7 @@ public class FirestoreManagerService {
             }
             
             // Update active connection key if needed
-            if (this.activeConnectionKey.equals(connectionKey)) {
+            if (connectionKey.equals(this.activeConnectionKey)) {
                 this.activeConnectionKey = this.firestoreConnections.isEmpty() ? null : 
                     this.firestoreConnections.keySet().iterator().next();
             }
