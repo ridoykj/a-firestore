@@ -1,115 +1,389 @@
 package com.itbd.afirestore.firestore.dto;
 
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.JsonSerializer;
+import com.fasterxml.jackson.databind.SerializerProvider;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.google.cloud.firestore.Blob;
+import com.google.cloud.firestore.DocumentReference;
+import com.google.cloud.firestore.Firestore;
+import com.google.cloud.firestore.GeoPoint;
+
+import java.io.IOException;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
  * FFP-101: Canonical Firestore value model.
- * 
- * Represents all Firestore native value types with explicit type discrimination.
- * This ensures round-trip fidelity - values survive API and import/export without type loss.
+ *
+ * <p>Follows the Firestore REST value representation: every node on the wire is a JSON object
+ * with exactly one explicit value kind, e.g. {@code {"stringValue": "x"}},
+ * {@code {"integerValue": "42"}}, {@code {"mapValue": {"fields": {...}}}}. Integers and doubles
+ * are distinct kinds, and timestamps, geo points, references and bytes are never collapsed into
+ * strings, so values survive API and import/export round trips without type loss.</p>
+ *
+ * <p>Integer values are serialized as JSON strings (like the Firestore REST API) so that int64
+ * values are not corrupted by JavaScript number precision.</p>
  */
-public sealed interface FirestoreValue permits FirestoreValue.StringValue, FirestoreValue.NumberValue, 
-    FirestoreValue.BooleanValue, FirestoreValue.NullValue, FirestoreValue.TimestampValue,
-    FirestoreValue.GeoPointValue, FirestoreValue.ReferenceValue, FirestoreValue.BytesValue,
-    FirestoreValue.ArrayValue, FirestoreValue.MapValue {
+@JsonSerialize(using = FirestoreValue.Serializer.class)
+@JsonDeserialize(using = FirestoreValue.Deserializer.class)
+public sealed interface FirestoreValue permits FirestoreValue.NullValue, FirestoreValue.BooleanValue,
+        FirestoreValue.IntegerValue, FirestoreValue.DoubleValue, FirestoreValue.StringValue,
+        FirestoreValue.TimestampValue, FirestoreValue.GeoPointValue, FirestoreValue.ReferenceValue,
+        FirestoreValue.BytesValue, FirestoreValue.ArrayValue, FirestoreValue.MapValue {
 
     /**
-     * Extracts the value as a Firestore-compatible object for serialization.
+     * Converts this value into the object shape the Firestore SDK expects for writes.
+     *
+     * @param firestore required to resolve {@link ReferenceValue} into a {@link DocumentReference};
+     *                  may be {@code null} for value trees that contain no references.
      */
-    Object toFirestoreObject();
+    Object toFirestoreObject(Firestore firestore);
 
     /**
-     * Creates a FirestoreValue from a raw Firestore object.
+     * Maps a raw value returned by the Firestore SDK (or parsed from JSON) into the canonical
+     * model. Unsupported runtime types are rejected instead of being silently stringified.
      */
     static FirestoreValue from(Object value) {
-        if (value == null) return NullValue.INSTANCE;
-        
-        if (value instanceof String s) return StringValue.of(s);
-        if (value instanceof Number n) return NumberValue.of(n.doubleValue());
-        if (value instanceof Boolean b) return BooleanValue.of(b);
-        if (value instanceof Instant t) return TimestampValue.of(t);
-        if (value instanceof com.google.cloud.firestore.GeoPoint gp) {
-            return GeoPointValue.of(gp.getLatitude(), gp.getLongitude());
+        if (value == null) {
+            return NullValue.INSTANCE;
         }
-        if (value instanceof byte[] bytes) return BytesValue.of(bytes);
+        if (value instanceof Boolean b) {
+            return new BooleanValue(b);
+        }
+        if (value instanceof Long || value instanceof Integer || value instanceof Short || value instanceof Byte) {
+            return new IntegerValue(((Number) value).longValue());
+        }
+        if (value instanceof Double || value instanceof Float) {
+            return new DoubleValue(((Number) value).doubleValue());
+        }
+        if (value instanceof String s) {
+            return new StringValue(s);
+        }
+        if (value instanceof com.google.cloud.Timestamp ts) {
+            // Instant.ofEpochSecond keeps the full nanosecond precision; toDate() would truncate to millis.
+            return new TimestampValue(Instant.ofEpochSecond(ts.getSeconds(), ts.getNanos()));
+        }
+        if (value instanceof Instant instant) {
+            return new TimestampValue(instant);
+        }
+        if (value instanceof java.util.Date date) {
+            return new TimestampValue(date.toInstant());
+        }
+        if (value instanceof GeoPoint gp) {
+            return new GeoPointValue(gp.getLatitude(), gp.getLongitude());
+        }
+        if (value instanceof DocumentReference ref) {
+            return new ReferenceValue(ref.getPath());
+        }
+        if (value instanceof Blob blob) {
+            return new BytesValue(Base64.getEncoder().encodeToString(blob.toBytes()));
+        }
+        if (value instanceof byte[] bytes) {
+            return new BytesValue(Base64.getEncoder().encodeToString(bytes));
+        }
         if (value instanceof List<?> list) {
-            @SuppressWarnings("unchecked")
-            List<Object> items = (List<Object>) list;
-            return ArrayValue.of(items.stream().map(FirestoreValue::from).toList());
+            List<FirestoreValue> items = new ArrayList<>(list.size());
+            for (Object item : list) {
+                items.add(from(item));
+            }
+            return new ArrayValue(items);
         }
         if (value instanceof Map<?, ?> map) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> typedMap = (Map<String, Object>) map;
-            Map<String, FirestoreValue> fields = new java.util.LinkedHashMap<>();
-            if (typedMap != null) {
-                typedMap.forEach((k, v) -> fields.put(k, from(v)));
+            Map<String, FirestoreValue> fields = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (!(entry.getKey() instanceof String key)) {
+                    throw new IllegalArgumentException(
+                            "Firestore map keys must be strings, got: " + entry.getKey());
+                }
+                fields.put(key, from(entry.getValue()));
             }
-            return MapValue.of(fields);
+            return new MapValue(fields);
         }
-        
-        // Fallback for unknown types
-        return StringValue.of(value.toString());
-    }
-
-    record StringValue(String value) implements FirestoreValue {
-        public static StringValue of(String value) { return new StringValue(value); }
-        public Object toFirestoreObject() { return value; }
-    }
-
-    record NumberValue(double value) implements FirestoreValue {
-        public static NumberValue of(double value) { return new NumberValue(value); }
-        public Object toFirestoreObject() { return value; }
-    }
-
-    record BooleanValue(boolean value) implements FirestoreValue {
-        public static BooleanValue of(boolean value) { return new BooleanValue(value); }
-        public Object toFirestoreObject() { return value; }
+        throw new IllegalArgumentException(
+                "Unsupported Firestore value type: " + value.getClass().getName());
     }
 
     record NullValue() implements FirestoreValue {
         public static final NullValue INSTANCE = new NullValue();
-        public Object toFirestoreObject() { return null; }
+
+        public Object toFirestoreObject(Firestore firestore) {
+            return null;
+        }
+    }
+
+    record BooleanValue(boolean value) implements FirestoreValue {
+        public Object toFirestoreObject(Firestore firestore) {
+            return value;
+        }
+    }
+
+    record IntegerValue(long value) implements FirestoreValue {
+        public Object toFirestoreObject(Firestore firestore) {
+            return value;
+        }
+    }
+
+    record DoubleValue(double value) implements FirestoreValue {
+        public Object toFirestoreObject(Firestore firestore) {
+            return value;
+        }
+    }
+
+    record StringValue(String value) implements FirestoreValue {
+        public Object toFirestoreObject(Firestore firestore) {
+            return value;
+        }
     }
 
     record TimestampValue(Instant value) implements FirestoreValue {
-        public static TimestampValue of(Instant value) { return new TimestampValue(value); }
-        public Object toFirestoreObject() { return value; }
+        public Object toFirestoreObject(Firestore firestore) {
+            return com.google.cloud.Timestamp.ofTimeSecondsAndNanos(value.getEpochSecond(), value.getNano());
+        }
     }
 
     record GeoPointValue(double latitude, double longitude) implements FirestoreValue {
-        public static GeoPointValue of(double lat, double lon) { return new GeoPointValue(lat, lon); }
-        public Object toFirestoreObject() { 
-            return new com.google.cloud.firestore.GeoPoint(latitude, longitude);
+        public Object toFirestoreObject(Firestore firestore) {
+            return new GeoPoint(latitude, longitude);
         }
     }
 
     record ReferenceValue(String path) implements FirestoreValue {
-        public static ReferenceValue of(String path) { return new ReferenceValue(path); }
-        public Object toFirestoreObject() { return path; }
+        public Object toFirestoreObject(Firestore firestore) {
+            if (firestore == null) {
+                throw new IllegalStateException(
+                        "A Firestore client is required to resolve reference value: " + path);
+            }
+            return firestore.document(path);
+        }
     }
 
-    record BytesValue(byte[] value) implements FirestoreValue {
-        public static BytesValue of(byte[] value) { return new BytesValue(value); }
-        public Object toFirestoreObject() { return value; }
+    /** Bytes are carried as a base64 string so the record keeps value equality semantics. */
+    record BytesValue(String base64) implements FirestoreValue {
+        public Object toFirestoreObject(Firestore firestore) {
+            return Blob.fromBytes(Base64.getDecoder().decode(base64));
+        }
     }
 
     record ArrayValue(List<FirestoreValue> items) implements FirestoreValue {
-        public static ArrayValue of(List<FirestoreValue> items) { return new ArrayValue(items); }
-        public Object toFirestoreObject() { 
-            return items.stream().map(FirestoreValue::toFirestoreObject).toList();
+        public ArrayValue {
+            if (items == null) {
+                items = List.of();
+            }
+        }
+
+        public Object toFirestoreObject(Firestore firestore) {
+            List<Object> raw = new ArrayList<>(items.size());
+            for (FirestoreValue item : items) {
+                raw.add(item == null ? null : item.toFirestoreObject(firestore));
+            }
+            return raw;
         }
     }
 
     record MapValue(Map<String, FirestoreValue> fields) implements FirestoreValue {
-        public static MapValue of(Map<String, FirestoreValue> fields) { return new MapValue(fields); }
-        public Object toFirestoreObject() { 
-            Map<String, Object> result = new java.util.LinkedHashMap<>();
-            if (fields != null) {
-                fields.forEach((k, v) -> result.put(k, v != null ? v.toFirestoreObject() : null));
+        public MapValue {
+            if (fields == null) {
+                fields = Map.of();
             }
-            return result;
+        }
+
+        public Object toFirestoreObject(Firestore firestore) {
+            Map<String, Object> raw = new LinkedHashMap<>();
+            fields.forEach((key, item) -> raw.put(key, item == null ? null : item.toFirestoreObject(firestore)));
+            return raw;
+        }
+    }
+
+    class Serializer extends JsonSerializer<FirestoreValue> {
+        @Override
+        public void serialize(FirestoreValue value, JsonGenerator gen, SerializerProvider serializers)
+                throws IOException {
+            gen.writeStartObject();
+            switch (value) {
+                case NullValue ignored -> gen.writeNullField("nullValue");
+                case BooleanValue v -> gen.writeBooleanField("booleanValue", v.value());
+                case IntegerValue v -> gen.writeStringField("integerValue", Long.toString(v.value()));
+                case DoubleValue v -> gen.writeNumberField("doubleValue", v.value());
+                case StringValue v -> gen.writeStringField("stringValue", v.value());
+                case TimestampValue v -> gen.writeStringField("timestampValue", v.value().toString());
+                case GeoPointValue v -> {
+                    gen.writeObjectFieldStart("geoPointValue");
+                    gen.writeNumberField("latitude", v.latitude());
+                    gen.writeNumberField("longitude", v.longitude());
+                    gen.writeEndObject();
+                }
+                case ReferenceValue v -> gen.writeStringField("referenceValue", v.path());
+                case BytesValue v -> gen.writeStringField("bytesValue", v.base64());
+                case ArrayValue v -> {
+                    gen.writeObjectFieldStart("arrayValue");
+                    gen.writeArrayFieldStart("values");
+                    for (FirestoreValue item : v.items()) {
+                        serialize(item == null ? NullValue.INSTANCE : item, gen, serializers);
+                    }
+                    gen.writeEndArray();
+                    gen.writeEndObject();
+                }
+                case MapValue v -> {
+                    gen.writeObjectFieldStart("mapValue");
+                    gen.writeObjectFieldStart("fields");
+                    for (Map.Entry<String, FirestoreValue> entry : v.fields().entrySet()) {
+                        gen.writeFieldName(entry.getKey());
+                        serialize(entry.getValue() == null ? NullValue.INSTANCE : entry.getValue(),
+                                gen, serializers);
+                    }
+                    gen.writeEndObject();
+                    gen.writeEndObject();
+                }
+            }
+            gen.writeEndObject();
+        }
+    }
+
+    class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<FirestoreValue> {
+        @Override
+        public FirestoreValue deserialize(JsonParser parser, DeserializationContext context)
+                throws IOException {
+            JsonNode node = parser.readValueAsTree();
+            return fromNode(node);
+        }
+
+        public static FirestoreValue fromNode(JsonNode node) {
+            if (node == null || node.isNull()) {
+                return NullValue.INSTANCE;
+            }
+            if (!node.isObject() || node.size() != 1) {
+                throw new IllegalArgumentException(
+                        "A Firestore value must be an object with exactly one value kind, got: " + node);
+            }
+            String kind = node.fieldNames().next();
+            JsonNode body = node.get(kind);
+            return switch (kind) {
+                case "nullValue" -> NullValue.INSTANCE;
+                case "booleanValue" -> new BooleanValue(requireBoolean(body, kind));
+                case "integerValue" -> new IntegerValue(parseInteger(body));
+                case "doubleValue" -> new DoubleValue(requireNumber(body, kind));
+                case "stringValue" -> new StringValue(requireText(body, kind));
+                case "timestampValue" -> new TimestampValue(parseTimestamp(body));
+                case "geoPointValue" -> parseGeoPoint(body);
+                case "referenceValue" -> new ReferenceValue(requireText(body, kind));
+                case "bytesValue" -> parseBytes(body);
+                case "arrayValue" -> parseArray(body);
+                case "mapValue" -> parseMap(body);
+                default -> throw new IllegalArgumentException("Unknown Firestore value kind: " + kind);
+            };
+        }
+
+        private static boolean requireBoolean(JsonNode body, String kind) {
+            if (body == null || !body.isBoolean()) {
+                throw new IllegalArgumentException(kind + " must be a boolean, got: " + body);
+            }
+            return body.booleanValue();
+        }
+
+        private static double requireNumber(JsonNode body, String kind) {
+            if (body == null || !body.isNumber()) {
+                throw new IllegalArgumentException(kind + " must be a number, got: " + body);
+            }
+            return body.doubleValue();
+        }
+
+        private static String requireText(JsonNode body, String kind) {
+            if (body == null || !body.isTextual()) {
+                throw new IllegalArgumentException(kind + " must be a string, got: " + body);
+            }
+            return body.textValue();
+        }
+
+        private static long parseInteger(JsonNode body) {
+            if (body != null && body.isIntegralNumber()) {
+                return body.longValue();
+            }
+            if (body != null && body.isTextual()) {
+                try {
+                    return Long.parseLong(body.textValue().trim());
+                } catch (NumberFormatException e) {
+                    throw new IllegalArgumentException("integerValue is not a valid integer: " + body);
+                }
+            }
+            throw new IllegalArgumentException("integerValue must be an integer or string, got: " + body);
+        }
+
+        private static Instant parseTimestamp(JsonNode body) {
+            String text = requireText(body, "timestampValue");
+            try {
+                return Instant.parse(text);
+            } catch (DateTimeParseException e) {
+                throw new IllegalArgumentException(
+                        "timestampValue must be an ISO-8601 instant, got: " + text);
+            }
+        }
+
+        private static GeoPointValue parseGeoPoint(JsonNode body) {
+            if (body == null || !body.isObject() || !body.path("latitude").isNumber()
+                    || !body.path("longitude").isNumber()) {
+                throw new IllegalArgumentException(
+                        "geoPointValue must be an object with numeric latitude/longitude, got: " + body);
+            }
+            return new GeoPointValue(body.get("latitude").doubleValue(), body.get("longitude").doubleValue());
+        }
+
+        private static BytesValue parseBytes(JsonNode body) {
+            String text = requireText(body, "bytesValue");
+            try {
+                Base64.getDecoder().decode(text);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("bytesValue must be base64 encoded.");
+            }
+            return new BytesValue(text);
+        }
+
+        private static ArrayValue parseArray(JsonNode body) {
+            if (body == null || !body.isObject()) {
+                throw new IllegalArgumentException("arrayValue must be an object with a values array.");
+            }
+            JsonNode values = body.get("values");
+            if (values == null || values.isNull()) {
+                return new ArrayValue(List.of());
+            }
+            if (!values.isArray()) {
+                throw new IllegalArgumentException("arrayValue.values must be an array, got: " + values);
+            }
+            List<FirestoreValue> items = new ArrayList<>(values.size());
+            for (JsonNode item : values) {
+                items.add(fromNode(item));
+            }
+            return new ArrayValue(items);
+        }
+
+        private static MapValue parseMap(JsonNode body) {
+            if (body == null || !body.isObject()) {
+                throw new IllegalArgumentException("mapValue must be an object with a fields map.");
+            }
+            JsonNode fields = body.get("fields");
+            if (fields == null || fields.isNull()) {
+                return new MapValue(Map.of());
+            }
+            if (!fields.isObject()) {
+                throw new IllegalArgumentException("mapValue.fields must be an object, got: " + fields);
+            }
+            Map<String, FirestoreValue> mapped = new LinkedHashMap<>();
+            Iterator<Map.Entry<String, JsonNode>> iterator = fields.fields();
+            while (iterator.hasNext()) {
+                Map.Entry<String, JsonNode> entry = iterator.next();
+                mapped.put(entry.getKey(), fromNode(entry.getValue()));
+            }
+            return new MapValue(mapped);
         }
     }
 }
