@@ -2,7 +2,9 @@ import type {
   PreviewEditorTheme,
   PreviewValidationSummary,
   TransferFormat,
+  WriteMode,
 } from "@/features/firestore/schemas/FirestoreSchema"
+import type { WritePreview } from "@/features/firestore/api/firestore-value-utils"
 import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/alert"
 import {
   AlertDialog,
@@ -93,6 +95,12 @@ type FirestoreDocumentPreviewPanelProps = {
   onExportDocument: (format: TransferFormat) => void
   onImportDocument: (format: TransferFormat) => void
   transferBusy?: boolean
+  /** FFP-102: explicit save mode; merge is the safe default. */
+  saveMode: WriteMode
+  onSaveModeChange: (mode: WriteMode) => void
+  /** FFP-102: fields the pending save would add/change/delete, or null while the draft is invalid. */
+  writePreview: WritePreview | null
+  writePreviewError?: string
 }
 
 export function FirestoreDocumentPreviewPanel({
@@ -115,6 +123,10 @@ export function FirestoreDocumentPreviewPanel({
   onExportDocument,
   onImportDocument,
   transferBusy = false,
+  saveMode,
+  onSaveModeChange,
+  writePreview,
+  writePreviewError = "",
 }: FirestoreDocumentPreviewPanelProps) {
   const [attemptedJsonSubmit, setAttemptedJsonSubmit] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
@@ -432,6 +444,49 @@ export function FirestoreDocumentPreviewPanel({
             )}
           </div>
 
+          {/* FFP-102: explicit, labeled save mode with a preview of the affected fields */}
+          <div className="border-t px-4 py-2 sm:px-6 text-xs text-muted-foreground space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold text-foreground">Save mode:</span>
+              <ToggleGroup
+                type="single"
+                value={saveMode}
+                onValueChange={(value) => {
+                  if (value === "MERGE" || value === "REPLACE") {
+                    onSaveModeChange(value)
+                  }
+                }}
+                spacing={0}
+                size="sm"
+                disabled={isPending}
+                className="rounded-md overflow-hidden border"
+                aria-label="Save mode"
+              >
+                <ToggleGroupItem value="MERGE" title="Merge: only submitted fields change; removed fields are deleted explicitly">
+                  Merge
+                </ToggleGroupItem>
+                <ToggleGroupItem value="REPLACE" title="Replace: the draft becomes the entire document">
+                  Replace
+                </ToggleGroupItem>
+              </ToggleGroup>
+              <span>
+                {saveMode === "MERGE"
+                  ? "Merge updates the submitted fields and deletes removed fields explicitly."
+                  : "Replace makes this draft the entire document; omitted fields are removed."}
+              </span>
+            </div>
+            {writePreviewError ? (
+              <p className="text-destructive">{writePreviewError}</p>
+            ) : writePreview ? (
+              <p data-testid="write-preview-summary">
+                {`This save will add ${writePreview.addedFields.length}, change ${writePreview.changedFields.length}, and delete ${writePreview.deletedFields.length} field(s).`}
+                {writePreview.deletedFields.length > 0
+                  ? ` Deleting: ${writePreview.deletedFields.join(", ")}`
+                  : ""}
+              </p>
+            ) : null}
+          </div>
+
           <SheetFooter className="border-t sm:flex-row sm:flex-wrap items-center sm:justify-between gap-3 px-4 py-2 sm:px-6 shrink-0 ">
             <Button
               type="button"
@@ -450,11 +505,16 @@ export function FirestoreDocumentPreviewPanel({
               <Button
                 type="button"
                 className="flex-1 sm:flex-none"
+                variant={saveMode === "REPLACE" ? "destructive" : "default"}
                 onClick={handleSave}
                 disabled={isPending || jsonHasValidationErrors}
               >
                 {busyAction === "update" ? <Spinner className="mr-1.5" /> : null}
-                {busyAction === "update" ? "Saving..." : "Save Changes"}
+                {busyAction === "update"
+                  ? "Saving..."
+                  : saveMode === "MERGE"
+                    ? "Save (Merge)"
+                    : "Replace Document"}
               </Button>
             </div>
           </SheetFooter>
