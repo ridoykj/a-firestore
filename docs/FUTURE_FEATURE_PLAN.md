@@ -49,10 +49,10 @@ The following capabilities are implemented today.
 | Firestore document deletion is non-recursive | Subcollections can remain after a parent document is deleted | Generic delete uses `DocumentReference.delete()` |
 | Header connection/account controls are hardcoded | The UI can claim an emulator connection and expose a nonfunctional logout action | `FirestoreTabsLayout` |
 | Firestore clients have no explicit disconnect lifecycle | Replaced or abandoned connections can remain until process exit | `FirestoreManagerService` |
-| Tree deletion and merge saving disagree | Removing a key from the draft may not remove it from Firestore | Tree edits update the draft; preview save uses merge semantics |
-| Raw JSON does not guarantee native type fidelity | Timestamps, references, geopoints, bytes, and numeric types can be changed during a read/write round trip | APIs use raw `Map<String, Object>` payloads |
-| Query pagination uses offsets | Later pages become increasingly expensive and can shift when data changes | `GenericFirestoreService.queryCollection()` |
-| Bulk deletion is sequential in the browser | Partial failure is possible and large selections are slow | `FirestorePage.handleDeleteSelectedRows()` |
+| ~~Tree deletion and merge saving disagree~~ | Resolved by FFP-103 (2026-07-07): merge saves compute explicit delete-field paths from the draft | Tree edits update the draft; preview save sends `deleteFieldPaths` |
+| ~~Raw JSON does not guarantee native type fidelity~~ | Resolved by FFP-101 (2026-07-07): APIs use the typed `FirestoreValue` wire model | `FirestoreValue`, `DocumentDto` |
+| ~~Query pagination uses offsets~~ | Resolved by FFP-105 (2026-07-07) for the workbench query; the legacy collection listing endpoint still accepts `page` | `GenericFirestoreService.queryCollection()` now cursor-based |
+| ~~Bulk deletion is sequential in the browser~~ | Resolved by FFP-106 (2026-07-07): one atomic backend batch of at most 500 validated paths | `POST /api/workbench/bulk-delete` |
 | Transfer execution is not resumable or cancellable | Long copies are difficult to recover or safely stop | Deep copy exposes progress only |
 | Workspace/query state is mostly ephemeral | Refreshing the browser loses tabs, paths, filters, and table state | State is component memory except theme preferences |
 | Automated coverage is minimal | Regressions in CRUD, queries, and transfers are hard to detect | Only the Spring context-load test exists |
@@ -79,12 +79,12 @@ Statuses:
 
 | ID | Priority | Status | Feature | Dependencies | Acceptance criteria |
 |---|---|---|---|---|---|
-| FFP-001 | P0 | Proposed | Mobile workspace controls | None | Narrow layouts expose keyboard-accessible buttons that open collections, nested traversal, and filter drawers; each drawer can be closed and focus returns to its trigger. |
-| FFP-002 | P0 | Proposed | Destructive-action confirmation | None | Bulk delete shows project, database, count, and sample paths; cancel performs no requests; confirmation states that subcollections are not recursively deleted. |
-| FFP-003 | P0 | Proposed | Real connection status and disconnect | None | Remove placeholder account/emulator UI; show the active connection mode and context; disconnect clears frontend context and closes the matching backend client. |
-| FFP-004 | P0 | Proposed | Firestore client lifecycle | FFP-003 | Reinitialization closes replaced clients; explicit disconnect is supported; all clients close during application shutdown; lifecycle behavior is tested. |
-| FFP-005 | P0 | Proposed | Structured diagnostics and correct API metadata | None | Remove stack-trace printing and stale branding; errors have stable codes and request correlation IDs; Swagger describes the actual application and endpoints. |
-| FFP-006 | P0 | Proposed | Automated test foundation | None | Add frontend unit tests, backend unit/integration tests, a Firestore-emulator test profile, and browser E2E support with documented commands. |
+| FFP-001 | P0 | Done | Mobile workspace controls | None | Narrow layouts expose keyboard-accessible buttons that open collections, nested traversal, and filter drawers; each drawer can be closed and focus returns to its trigger. |
+| FFP-002 | P0 | Done | Destructive-action confirmation | None | Bulk delete shows project, database, count, and sample paths; cancel performs no requests; confirmation states that subcollections are not recursively deleted. |
+| FFP-003 | P0 | Done | Real connection status and disconnect | None | Remove placeholder account/emulator UI; show the active connection mode and context; disconnect clears frontend context and closes the matching backend client. |
+| FFP-004 | P0 | Done | Firestore client lifecycle | FFP-003 | Reinitialization closes replaced clients; explicit disconnect is supported; all clients close during application shutdown; lifecycle behavior is tested. |
+| FFP-005 | P0 | Done | Structured diagnostics and correct API metadata | None | Remove stack-trace printing and stale branding; errors have stable codes and request correlation IDs; Swagger describes the actual application and endpoints. |
+| FFP-006 | P0 | Done | Automated test foundation | None | Add frontend unit tests, backend unit/integration tests, a Firestore-emulator test profile, and browser E2E support with documented commands. |
 
 Phase 0 completion gate:
 
@@ -94,16 +94,22 @@ Phase 0 completion gate:
 - Connection indicators reflect real application state.
 - CI can run the new automated test suites.
 
+Phase 0 verification notes (2026-07-06):
+
+- Backend unit tests (client lifecycle, structured error handling, batch delete) and frontend unit tests (drawer triggers, filters, utils) pass locally via `./mvnw test` and `npm test`.
+- Browser E2E specs run against the vite dev server and require a one-time `npx playwright install`; they were not executed in the delivery environment because browser binaries were not installed.
+- Drawer focus-return relies on the Radix Sheet default of restoring focus to the previously focused element.
+
 ## Phase 1: Data integrity
 
 | ID | Priority | Status | Feature | Dependencies | Acceptance criteria |
 |---|---|---|---|---|---|
-| FFP-101 | P0 | Proposed | Canonical Firestore value model | FFP-006 | Integers, doubles, timestamps, geopoints, references, bytes, arrays, maps, strings, booleans, and null survive API and import/export round trips without type loss. |
-| FFP-102 | P0 | Proposed | Explicit merge and replace saves | FFP-101 | The editor labels the selected save mode, defaults safely, previews affected fields, and never performs an implicit replacement. |
-| FFP-103 | P0 | Proposed | Real field deletion | FFP-101, FFP-102 | Tree/JSON deletions produce explicit field-delete paths in merge mode; nested field and array behavior is documented and tested. |
-| FFP-104 | P0 | Proposed | Optimistic concurrency and conflict diff | FFP-101, FFP-102 | Reads include `updateTime`; stale writes return HTTP 409; users can reload, compare, or intentionally overwrite after reviewing a diff. |
-| FFP-105 | P1 | Proposed | Cursor pagination | FFP-101 | Query navigation no longer uses Firestore offsets; ordered values and document ID form a stable cursor; tests show no duplicates or skipped documents. |
-| FFP-106 | P0 | Proposed | Atomic bulk delete | FFP-002, FFP-006 | A backend batch deletes at most 500 validated document paths atomically and returns a structured result; frontend sequential deletion is removed. |
+| FFP-101 | P0 | Done | Canonical Firestore value model | FFP-006 | Integers, doubles, timestamps, geopoints, references, bytes, arrays, maps, strings, booleans, and null survive API and import/export round trips without type loss. |
+| FFP-102 | P0 | Done | Explicit merge and replace saves | FFP-101 | The editor labels the selected save mode, defaults safely, previews affected fields, and never performs an implicit replacement. |
+| FFP-103 | P0 | Done | Real field deletion | FFP-101, FFP-102 | Tree/JSON deletions produce explicit field-delete paths in merge mode; nested field and array behavior is documented and tested. |
+| FFP-104 | P0 | Done | Optimistic concurrency and conflict diff | FFP-101, FFP-102 | Reads include `updateTime`; stale writes return HTTP 409; users can reload, compare, or intentionally overwrite after reviewing a diff. |
+| FFP-105 | P1 | Done | Cursor pagination | FFP-101 | Query navigation no longer uses Firestore offsets; ordered values and document ID form a stable cursor; tests show no duplicates or skipped documents. |
+| FFP-106 | P0 | Done | Atomic bulk delete | FFP-002, FFP-006 | A backend batch deletes at most 500 validated document paths atomically and returns a structured result; frontend sequential deletion is removed. |
 
 Phase 1 completion gate:
 
@@ -112,6 +118,14 @@ Phase 1 completion gate:
 - Concurrent changes cannot be silently overwritten.
 - Query pages remain stable under duplicate sort values.
 - Bulk delete is confirmed and atomic.
+
+Phase 1 verification notes (2026-07-07):
+
+- `FirestoreValue` implements the Firestore REST wire format (one explicit value kind per node); `integerValue` is serialized as a string so int64 values survive JavaScript. Timestamp conversion uses `Instant.ofEpochSecond(seconds, nanos)` because `Timestamp.toDate()` truncates to milliseconds and would corrupt both values and `expectedUpdateTime` comparisons.
+- Backend unit tests (`FirestoreValueTest`, `QueryCursorCodecTest`, `GenericFirestoreServiceTest`) and frontend unit tests (`firestore-value-utils.test.ts` and updated suites) pass via `./mvnw test` and `npm test`; `npx tsc --noEmit` and `npm run build` are clean.
+- The frontend editor unwraps typed values to plain JSON for editing and re-wraps on save against the original typed fields, so untouched timestamps/references/geopoints/bytes and the integer/double distinction are preserved; changed values that no longer fit the original type are re-inferred.
+- Emulator-backed browser E2E for the new flows was not executed in the delivery environment (no Firebase emulator or Playwright browsers installed); the documented E2E checklist below remains the follow-up.
+- The generic `GET /api/collections/{collection}?page=` listing endpoint still supports offset paging for backward compatibility; the workbench query flow used by the UI is cursor-only.
 
 ## Phase 2: Query productivity
 
@@ -168,6 +182,12 @@ DocumentDto
 
 `FirestoreValue` should follow the canonical Firestore REST value model, using one explicit value kind per node. It must distinguish integer and double values and support all types named in FFP-101.
 
+Contract decisions (2026-07-07):
+
+- Wire kinds: `nullValue`, `booleanValue`, `integerValue` (JSON string, int64-safe), `doubleValue`, `stringValue`, `timestampValue` (ISO-8601 instant), `geoPointValue` (`{latitude, longitude}`), `referenceValue` (document path), `bytesValue` (base64), `arrayValue` (`{values: []}`), `mapValue` (`{fields: {}}`).
+- Unknown value kinds and unsupported runtime types are rejected; nothing is silently stringified.
+- Implemented by `FirestoreValue` (custom Jackson serializer/deserializer) and mirrored on the frontend by `firestore-value-utils.ts`.
+
 ### Safe write contract
 
 ```text
@@ -185,6 +205,13 @@ Rules:
 - `expectedUpdateTime` is required for editing an existing document.
 - A precondition mismatch returns HTTP 409 with the latest document metadata.
 - Server transforms, if later added, must be explicit operations rather than magic string values.
+
+Contract decisions (2026-07-07):
+
+- Implemented as `PUT /api/collections/{documentPath}` taking `DocumentWriteRequest`; the write runs in a Firestore transaction so the precondition check and the write are atomic. Single-document `DELETE` accepts an optional `expectedUpdateTime` query parameter enforced with a server-side `Precondition.updatedAt`.
+- The 409 body is `{errorCode: "CONFLICT", message, latestDocument}` where `latestDocument` is a full `DocumentDto` (null when the document was deleted).
+- `deleteFieldPaths` entries use dot notation for nested map fields and are rejected in `REPLACE` mode or when they collide with a submitted field. Field names containing `.` or `` ` `` cannot be deleted in merge mode; the UI directs users to Replace mode for those documents.
+- Removing an array element is a value change to the array field, not a field deletion.
 
 ### Cursor query contract
 
@@ -207,9 +234,15 @@ QueryResponse
 
 Always add document ID as the final deterministic ordering key. Treat cursors as opaque outside the backend.
 
+Contract decisions (2026-07-07):
+
+- Implemented on `GET /api/workbench/query` with a `cursor` request parameter and `nextCursor`/`hasNextPage` response fields; the `page` parameter was removed (internal breaking change).
+- The token is base64url JSON containing the last document's ordered field value (as a typed `FirestoreValue`) and document ID, applied with `startAfter` after `orderBy(field).orderBy(documentId)`. Invalid tokens return HTTP 400.
+- Previous-page navigation is client-side: the frontend keeps the cursor used to reach each page and replays it.
+
 ### Bulk and job contracts
 
-- Bulk delete accepts one context and at most 500 unique, validated document paths.
+- Bulk delete accepts one context and at most 500 unique, validated document paths. Implemented (2026-07-07) as `POST /api/workbench/bulk-delete` with body `{paths: []}`; the batch commits atomically and the response reports `deletedCount`, `failedCount`, both path lists, and `complete`.
 - Transfer/backup operations become jobs with create, status/event stream, cancel, and result-report operations.
 - Progress counts committed documents, not merely queued writes.
 - Cancellation is best effort and reports the last committed checkpoint.

@@ -7,7 +7,7 @@ This document describes the test infrastructure set up as part of **FFP-006: Aut
 The test suite includes three layers:
 
 1. **Frontend Unit Tests** - Vitest + Testing Library (React components, utilities)
-2. **Backend Unit/Integration Tests** - JUnit 5 + Mockito + Testcontainers (Firestore emulator)
+2. **Backend Unit/Integration Tests** - Spring Boot test starters (JUnit 5, AssertJ, `@MockitoBean`) + Testcontainers (Firestore emulator)
 3. **Browser E2E Tests** - Playwright (full-stack integration testing)
 
 ## Running Tests
