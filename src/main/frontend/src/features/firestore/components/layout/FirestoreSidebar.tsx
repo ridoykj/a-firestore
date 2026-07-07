@@ -1,4 +1,7 @@
+import { Button } from "@/shadcn/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/shadcn/components/ui/empty"
+import { Input } from "@/shadcn/components/ui/input"
+import { Label } from "@/shadcn/components/ui/label"
 import {
   Sheet,
   SheetContent,
@@ -161,10 +164,10 @@ export function FirestoreSidebar({
   const contextSelectors = (
     <div className="p-3 border-b border-border bg-muted/20 flex flex-col gap-3 shrink-0">
       <div className="flex flex-col">
-        <label className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+        <Label className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1.5 gap-1.5">
           Project ID
           {loadingProjects ? <Spinner className="size-3" /> : null}
-        </label>
+        </Label>
         <Select
           value={selectedProjectId || undefined}
           onValueChange={(value) => void handleProjectChange(value)}
@@ -184,10 +187,10 @@ export function FirestoreSidebar({
       </div>
 
       <div className="flex flex-col">
-        <label className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+        <Label className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1.5 gap-1.5">
           Database
           {loadingDatabases ? <Spinner className="size-3" /> : null}
-        </label>
+        </Label>
         <Select
           value={selectedDatabaseId || "__default__"}
           onValueChange={(value) => void handleDatabaseChange(value)}
@@ -214,12 +217,12 @@ export function FirestoreSidebar({
       <div className="mb-3 px-3 pt-3 shrink-0">
         <div className="relative">
           <Search className="absolute left-2.5 top-2 size-3.5 text-muted-foreground" />
-          <input
+          <Input
             type="text"
             placeholder="Search collections..."
             value={collectionSearch}
             onChange={(e) => setCollectionSearch(e.target.value)}
-            className="w-full bg-muted/50 text-[11px] pl-8 pr-3 py-1.5 rounded-lg border border-border focus:outline-none focus:ring-1 focus:ring-primary transition-all font-medium"
+            className="bg-muted/50 text-[11px] pl-8 font-medium"
           />
         </div>
       </div>
@@ -250,12 +253,13 @@ export function FirestoreSidebar({
                     transform: `translateY(${virtualRow.start}px)`,
                   }}
                 >
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
                     className={cn(
-                      "w-full flex items-center justify-start px-3 py-2.5 rounded-xl text-left text-xs transition-all",
+                      "w-full h-auto justify-start px-3 py-2.5 rounded-xl text-left text-xs font-normal",
                       isActive
-                        ? "bg-secondary text-primary font-bold border-l-4 border-primary shadow-sm"
+                        ? "bg-secondary text-primary font-bold border-l-4 border-primary shadow-sm hover:bg-secondary hover:text-primary"
                         : "text-muted-foreground hover:bg-accent hover:text-foreground",
                     )}
                     onClick={() => {
@@ -267,7 +271,7 @@ export function FirestoreSidebar({
                       <Folder className={cn("size-3.5 shrink-0", isActive ? "text-primary" : "text-amber-500")} />
                       <span className="truncate">{collection}</span>
                     </div>
-                  </button>
+                  </Button>
                 </div>
               )
             })}
@@ -310,31 +314,37 @@ export function FirestoreSidebar({
               <span className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-wider">Collections</span>
             </div>
             <div className="flex items-center gap-1">
-              <button
+              <Button
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => void refreshCollections()}
                 disabled={collectionsLoading}
-                className="p-1 rounded-lg hover:bg-muted text-primary transition-colors"
+                className="text-primary"
                 title="Refresh collections schema"
               >
                 <RefreshCw className={cn("size-4", collectionsLoading && "animate-spin")} />
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => setLeftSidebarExpanded(false)}
-                className="p-1 rounded-lg hover:bg-muted text-muted-foreground transition-colors"
+                className="text-muted-foreground"
                 title="Hide Left Side Panel"
               >
                 <ChevronLeft className="size-4" />
-              </button>
+              </Button>
             </div>
           </>
         ) : (
-          <button
+          <Button
+            variant="secondary"
+            size="icon-lg"
             onClick={() => setLeftSidebarExpanded(true)}
-            className="p-2.5 rounded-xl bg-secondary text-primary hover:bg-secondary/80 transition-all shadow-sm"
+            className="rounded-xl text-primary shadow-sm"
             title="Expand Left side panel"
           >
             <Layers className="size-5" />
-          </button>
+          </Button>
         )}
       </div>
 
