@@ -9,6 +9,7 @@ import type {
 } from "@/features/firestore/schemas/FirestoreSchema"
 import { encodePath, extractApiMessage, mapDocumentDtoToFirestoreDocument } from "@/features/firestore/api/firestore-utils"
 import {
+  normalizeFirestoreFields,
   unwrapFirestoreFields,
   type FirestoreWireValue,
 } from "@/features/firestore/api/firestore-value-utils"
@@ -300,14 +301,7 @@ function toDocumentDetails(value: unknown): FirestoreDocumentDetails {
   const path = typeof payload.path === "string" ? payload.path : ""
 
   const rawFields = payload.fields
-  const typedFields: Record<string, FirestoreWireValue> = {}
-  if (rawFields && typeof rawFields === "object" && !Array.isArray(rawFields)) {
-    for (const [key, val] of Object.entries(rawFields)) {
-      if (val && typeof val === "object") {
-        typedFields[key] = val as FirestoreWireValue
-      }
-    }
-  }
+  const typedFields = normalizeFirestoreFields(rawFields)
 
   const collections = Array.isArray(payload.subcollections)
     ? payload.subcollections.filter((item): item is string => typeof item === "string")
