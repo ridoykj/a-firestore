@@ -1,24 +1,23 @@
 package com.itbd.afirestore.firestore.dto;
 
-import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.databind.DeserializationContext;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.JsonSerializer;
-import com.fasterxml.jackson.databind.SerializerProvider;
-import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import tools.jackson.core.JsonGenerator;
+import tools.jackson.core.JsonParser;
+import tools.jackson.databind.DeserializationContext;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.SerializationContext;
+import tools.jackson.databind.ValueDeserializer;
+import tools.jackson.databind.ValueSerializer;
+import tools.jackson.databind.annotation.JsonDeserialize;
+import tools.jackson.databind.annotation.JsonSerialize;
 import com.google.cloud.firestore.Blob;
 import com.google.cloud.firestore.DocumentReference;
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.GeoPoint;
 
-import java.io.IOException;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -205,42 +204,46 @@ public sealed interface FirestoreValue permits FirestoreValue.NullValue, Firesto
         }
     }
 
-    class Serializer extends JsonSerializer<FirestoreValue> {
+    class Serializer extends ValueSerializer<FirestoreValue> {
         @Override
-        public void serialize(FirestoreValue value, JsonGenerator gen, SerializerProvider serializers)
-                throws IOException {
+        public void serialize(FirestoreValue value, JsonGenerator gen, SerializationContext ctxt) {
             gen.writeStartObject();
             switch (value) {
-                case NullValue ignored -> gen.writeNullField("nullValue");
-                case BooleanValue v -> gen.writeBooleanField("booleanValue", v.value());
-                case IntegerValue v -> gen.writeStringField("integerValue", Long.toString(v.value()));
-                case DoubleValue v -> gen.writeNumberField("doubleValue", v.value());
-                case StringValue v -> gen.writeStringField("stringValue", v.value());
-                case TimestampValue v -> gen.writeStringField("timestampValue", v.value().toString());
+                case NullValue ignored -> gen.writeNullProperty("nullValue");
+                case BooleanValue v -> gen.writeBooleanProperty("booleanValue", v.value());
+                case IntegerValue v -> gen.writeStringProperty("integerValue", Long.toString(v.value()));
+                case DoubleValue v -> gen.writeNumberProperty("doubleValue", v.value());
+                case StringValue v -> gen.writeStringProperty("stringValue", v.value());
+                case TimestampValue v -> gen.writeStringProperty("timestampValue", v.value().toString());
                 case GeoPointValue v -> {
-                    gen.writeObjectFieldStart("geoPointValue");
-                    gen.writeNumberField("latitude", v.latitude());
-                    gen.writeNumberField("longitude", v.longitude());
+                    gen.writeName("geoPointValue");
+                    gen.writeStartObject();
+                    gen.writeNumberProperty("latitude", v.latitude());
+                    gen.writeNumberProperty("longitude", v.longitude());
                     gen.writeEndObject();
                 }
-                case ReferenceValue v -> gen.writeStringField("referenceValue", v.path());
-                case BytesValue v -> gen.writeStringField("bytesValue", v.base64());
+                case ReferenceValue v -> gen.writeStringProperty("referenceValue", v.path());
+                case BytesValue v -> gen.writeStringProperty("bytesValue", v.base64());
                 case ArrayValue v -> {
-                    gen.writeObjectFieldStart("arrayValue");
-                    gen.writeArrayFieldStart("values");
+                    gen.writeName("arrayValue");
+                    gen.writeStartObject();
+                    gen.writeName("values");
+                    gen.writeStartArray();
                     for (FirestoreValue item : v.items()) {
-                        serialize(item == null ? NullValue.INSTANCE : item, gen, serializers);
+                        serialize(item == null ? NullValue.INSTANCE : item, gen, ctxt);
                     }
                     gen.writeEndArray();
                     gen.writeEndObject();
                 }
                 case MapValue v -> {
-                    gen.writeObjectFieldStart("mapValue");
-                    gen.writeObjectFieldStart("fields");
+                    gen.writeName("mapValue");
+                    gen.writeStartObject();
+                    gen.writeName("fields");
+                    gen.writeStartObject();
                     for (Map.Entry<String, FirestoreValue> entry : v.fields().entrySet()) {
-                        gen.writeFieldName(entry.getKey());
+                        gen.writeName(entry.getKey());
                         serialize(entry.getValue() == null ? NullValue.INSTANCE : entry.getValue(),
-                                gen, serializers);
+                                gen, ctxt);
                     }
                     gen.writeEndObject();
                     gen.writeEndObject();
@@ -250,11 +253,10 @@ public sealed interface FirestoreValue permits FirestoreValue.NullValue, Firesto
         }
     }
 
-    class Deserializer extends com.fasterxml.jackson.databind.JsonDeserializer<FirestoreValue> {
+    class Deserializer extends ValueDeserializer<FirestoreValue> {
         @Override
-        public FirestoreValue deserialize(JsonParser parser, DeserializationContext context)
-                throws IOException {
-            JsonNode node = parser.readValueAsTree();
+        public FirestoreValue deserialize(JsonParser parser, DeserializationContext context) {
+            JsonNode node = context.readTree(parser);
             return fromNode(node);
         }
 
@@ -266,7 +268,7 @@ public sealed interface FirestoreValue permits FirestoreValue.NullValue, Firesto
                 throw new IllegalArgumentException(
                         "A Firestore value must be an object with exactly one value kind, got: " + node);
             }
-            String kind = node.fieldNames().next();
+            String kind = node.propertyNames().iterator().next();
             JsonNode body = node.get(kind);
             return switch (kind) {
                 case "nullValue" -> NullValue.INSTANCE;
@@ -378,9 +380,7 @@ public sealed interface FirestoreValue permits FirestoreValue.NullValue, Firesto
                 throw new IllegalArgumentException("mapValue.fields must be an object, got: " + fields);
             }
             Map<String, FirestoreValue> mapped = new LinkedHashMap<>();
-            Iterator<Map.Entry<String, JsonNode>> iterator = fields.fields();
-            while (iterator.hasNext()) {
-                Map.Entry<String, JsonNode> entry = iterator.next();
+            for (Map.Entry<String, JsonNode> entry : fields.properties()) {
                 mapped.put(entry.getKey(), fromNode(entry.getValue()));
             }
             return new MapValue(mapped);
