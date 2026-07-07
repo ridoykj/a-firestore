@@ -13,7 +13,8 @@ import { ScrollArea } from "@/shadcn/components/ui/scroll-area"
 import { AlertCircle, ChevronLeft, Database, Eye, Files, Folder, RefreshCw, Search } from "lucide-react"
 import { type NestedResponse } from "@/features/firestore/schemas/FirestoreSchema"
 import { pathIsCollection } from "@/features/firestore/api/firestore-utils"
-import { Button } from "@/shared/components/ui/shadcn/components/ui/button"
+import { Button } from "@/shadcn/components/ui/button"
+import { Input } from "@/shadcn/components/ui/input"
 
 interface FirestoreNestedTraverseProps {
   nestedLoading: boolean
@@ -124,12 +125,12 @@ export function FirestoreNestedTraverse({
       <div className="px-3 py-3 mb-1 border-b shrink-0">
         <div className="relative">
           <Search className="absolute left-2.5 top-2 size-3.5 text-muted-foreground" />
-          <input
+          <Input
             type="text"
             value={nestedIdFilter}
             onChange={(e) => setNestedIdFilter(e.target.value)}
             placeholder="Filter document or collection id"
-            className="w-full bg-muted/50 text-[11px] pl-8 pr-3 py-1.5 rounded-lg border border-border focus:outline-none focus:ring-1 focus:ring-primary transition-all font-mono"
+            className="bg-muted/50 text-[11px] pl-8 font-mono"
           />
         </div>
       </div>
@@ -165,9 +166,10 @@ export function FirestoreNestedTraverse({
                   }}
                 >
                   {item.type === "up" && (
-                    <button
+                    <Button
                       type="button"
-                      className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-left text-xs text-muted-foreground hover:bg-accent transition-all"
+                      variant="ghost"
+                      className="w-full h-auto justify-start gap-2 px-3 py-2.5 rounded-xl text-left text-xs font-normal text-muted-foreground hover:bg-accent"
                       onClick={() => {
                         const parent = item.path
                         setQueryPath(`/${parent}`)
@@ -181,13 +183,14 @@ export function FirestoreNestedTraverse({
                     >
                       <ChevronLeft className="size-3.5" />
                       <span>Up</span>
-                    </button>
+                    </Button>
                   )}
 
                   {item.type === "document" && (
                     <div className="group w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left text-xs text-muted-foreground hover:bg-accent transition-all">
-                      <button
-                        className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                      <Button
+                        variant="ghost"
+                        className="flex-1 min-w-0 h-auto justify-start gap-2 p-0 text-left font-normal hover:bg-transparent"
                         onClick={() => {
                           void refreshNested(item.path)
                           onDrawerOpenChange?.(false)
@@ -197,7 +200,7 @@ export function FirestoreNestedTraverse({
                         <span className="truncate font-mono text-[11px]" title={item.label}>
                           {item.label}
                         </span>
-                      </button>
+                      </Button>
 
                       <div className="flex items-center gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                         <span className="text-[8px] bg-green-100/70 text-green-700 dark:bg-green-950/40 dark:text-green-300 px-1 py-0.5 rounded font-mono font-bold tracking-tight">
@@ -220,8 +223,9 @@ export function FirestoreNestedTraverse({
                   )}
 
                   {item.type === "collection" && (
-                    <button
-                      className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-left text-xs text-muted-foreground hover:bg-accent transition-all"
+                    <Button
+                      variant="ghost"
+                      className="w-full h-auto justify-start gap-2 px-3 py-2.5 rounded-xl text-left text-xs font-normal text-muted-foreground hover:bg-accent"
                       onClick={() => {
                         setQueryPath(`/${item.path}`)
                         void runQuery(0, item.path)
@@ -230,7 +234,7 @@ export function FirestoreNestedTraverse({
                     >
                       <Folder className="size-3.5 text-amber-500 shrink-0" />
                       <span className="truncate font-medium">{item.label}</span>
-                    </button>
+                    </Button>
                   )}
 
                   {item.type === "loader" && (
@@ -280,17 +284,19 @@ export function FirestoreNestedTraverse({
           <span className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-wider">Nested Traverse</span>
         </div>
 
-        <button
+        <Button
+          variant="ghost"
+          size="icon-sm"
           onClick={() => {
             setNestedIdFilter('')
             void refreshNested(queryPath)
           }}
-          className="p-1 rounded hover:bg-muted text-primary transition-colors"
+          className="text-primary"
           title="Refresh nested browser list"
           disabled={nestedLoading}
         >
           <RefreshCw className={`size-3.5 ${nestedLoading ? 'animate-spin' : ''}`} />
-        </button>
+        </Button>
       </div>
       <div className="flex min-h-0 flex-1 flex-col">{content}</div>
     </aside>
