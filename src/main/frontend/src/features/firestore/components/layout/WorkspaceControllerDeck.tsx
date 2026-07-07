@@ -1,5 +1,7 @@
 import type { TransferFormat } from "@/features/firestore/schemas/FirestoreSchema"
 import type { ProjectTab } from "@/features/gcp/store/gcp-store"
+import { Button } from "@/shadcn/components/ui/button"
+import { Input } from "@/shadcn/components/ui/input"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -90,80 +92,89 @@ export function WorkspaceControllerDeck({
         {/* FFP-001: Drawer triggers for narrow layouts */}
         {drawerMode && (
           <div className="flex items-center gap-1">
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="icon-lg"
               aria-label="Open collections"
               title="Open collections"
               onClick={onOpenCollectionsDrawer}
-              className="px-2 py-1.5 bg-card hover:bg-accent text-foreground rounded-lg border border-border flex items-center justify-center transition-all shadow-sm h-8"
+              className="bg-card shadow-sm"
             >
               <FolderTree className="w-4 h-4 text-muted-foreground" />
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="outline"
+              size="icon-lg"
               aria-label="Open nested browser"
               title="Open nested browser"
               onClick={onOpenNestedDrawer}
-              className="px-2 py-1.5 bg-card hover:bg-accent text-foreground rounded-lg border border-border flex items-center justify-center transition-all shadow-sm h-8"
+              className="bg-card shadow-sm"
             >
               <ListTree className="w-4 h-4 text-muted-foreground" />
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="outline"
+              size="icon-lg"
               aria-label="Open filters"
               title="Open filters"
               onClick={onOpenFiltersDrawer}
-              className="px-2 py-1.5 bg-card hover:bg-accent text-foreground rounded-lg border border-border flex items-center justify-center transition-all shadow-sm h-8"
+              className="bg-card shadow-sm"
             >
               <Filter className="w-4 h-4 text-muted-foreground" />
-            </button>
+            </Button>
           </div>
         )}
 
         {/* Collection Path input */}
         <div className="flex-1 relative">
           <span className="absolute left-3 top-2 text-xs text-muted-foreground font-mono">/</span>
-          <input
+          <Input
             type="text"
             value={queryPath}
             onChange={(e) => setQueryPath(e.target.value)}
             placeholder="users/user_id/posts"
-            className="w-full bg-card text-foreground pl-6 pr-3 py-1.5 rounded-lg text-xs font-mono border border-border focus:outline-none focus:ring-1 focus:ring-primary shadow-sm h-8"
+            className="bg-card pl-6 font-mono shadow-sm h-8"
             onKeyDown={(e) => e.key === 'Enter' && runQuery(0)}
           />
         </div>
 
         {/* Run Query Button */}
-        <button
+        <Button
+          size="lg"
           onClick={() => runQuery(0)}
           disabled={isQuerying}
-          className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs px-4 py-1.5 rounded-lg flex items-center gap-1.5 shadow-md shadow-primary/10 hover:shadow-lg transition-all active:scale-95 disabled:opacity-50 h-8"
+          className="px-4 font-bold shadow-md shadow-primary/10 hover:shadow-lg"
         >
           <Play className="w-3.5 h-3.5 fill-current" />
           <span>{isQuerying ? 'Loading...' : 'Run Query'}</span>
-        </button>
+        </Button>
 
         {/* Quick Search */}
         <div className="relative w-56">
           <Search className="absolute left-2.5 top-2 w-3.5 h-3.5 text-muted-foreground" />
-          <input
+          <Input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Quick search..."
-            className="w-full bg-card text-xs pl-8 pr-3 py-1.5 rounded-lg border border-border focus:outline-none focus:ring-1 focus:ring-primary shadow-sm h-8"
+            className="bg-card pl-8 shadow-sm h-8"
           />
         </div>
 
         {/* Actions Dropdown */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button
-              className="px-2 py-1.5 bg-card hover:bg-accent text-foreground text-xs font-semibold rounded-lg border border-border flex items-center justify-center transition-all shadow-sm h-8"
+            <Button
+              variant="outline"
+              size="icon-lg"
+              className="bg-card shadow-sm"
               title="More actions"
             >
               <MoreVertical className="w-4 h-4 text-muted-foreground" />
-            </button>
+            </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuItem
