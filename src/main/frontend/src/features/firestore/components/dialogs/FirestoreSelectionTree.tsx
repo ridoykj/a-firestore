@@ -6,10 +6,12 @@ import {
     BreadcrumbPage,
     BreadcrumbSeparator,
 } from "@/shadcn/components/ui/breadcrumb"
+import { Button } from "@/shadcn/components/ui/button"
+import { Checkbox } from "@/shadcn/components/ui/checkbox"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/shadcn/components/ui/empty"
 import { ScrollArea } from "@/shadcn/components/ui/scroll-area"
 import { Spinner } from "@/shadcn/components/ui/spinner"
-import { CheckSquare, ChevronRight, FileText, Folder, Home, LayoutGrid, List, Square } from "lucide-react"
+import { ChevronRight, FileText, Folder, Home, LayoutGrid, List } from "lucide-react"
 import React, { useCallback, useEffect, useRef, useState } from "react"
 
 export interface TreeNode {
@@ -138,22 +140,26 @@ export function FirestoreSelectionTree({
                     </BreadcrumbList>
                 </Breadcrumb>
                 <div className="flex items-center gap-1 shrink-0 ml-4">
-                    <button
+                    <Button
                         type="button"
+                        variant="ghost"
+                        size="icon-sm"
                         onClick={() => setViewMode("list")}
-                        className={`p-1 rounded-md transition-colors ${viewMode === "list" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
+                        className={viewMode === "list" ? "bg-background shadow-sm text-foreground hover:bg-background" : "text-muted-foreground"}
                         title="List View"
                     >
                         <List className="h-4 w-4" />
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                         type="button"
+                        variant="ghost"
+                        size="icon-sm"
                         onClick={() => setViewMode("grid")}
-                        className={`p-1 rounded-md transition-colors ${viewMode === "grid" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"}`}
+                        className={viewMode === "grid" ? "bg-background shadow-sm text-foreground hover:bg-background" : "text-muted-foreground"}
                         title="Grid View"
                     >
                         <LayoutGrid className="h-4 w-4" />
-                    </button>
+                    </Button>
                 </div>
             </div>
         )
@@ -190,17 +196,14 @@ export function FirestoreSelectionTree({
                                     className="flex flex-col items-center justify-center gap-2 rounded-lg border p-3 hover:bg-muted/50 group cursor-pointer relative"
                                     onClick={() => onNavigate(node.path, node.isLoaded)}
                                 >
-                                    <button
-                                        type="button"
-                                        className="absolute top-2 left-2 shrink-0 rounded-sm p-0.5 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-                                        onClick={(e) => {
-                                            e.stopPropagation()
-                                            onToggleSelect(node.path)
-                                        }}
+                                    <Checkbox
+                                        checked={isSelected}
+                                        onCheckedChange={() => onToggleSelect(node.path)}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className={`absolute top-2 left-2 shrink-0 ${isSelected ? "" : "opacity-50 group-hover:opacity-100"}`}
                                         title={isSelected ? "Unselect" : "Select"}
-                                    >
-                                        {isSelected ? <CheckSquare className="h-4 w-4 text-primary" /> : <Square className="h-4 w-4 text-muted-foreground opacity-50 group-hover:opacity-100" />}
-                                    </button>
+                                        aria-label={isSelected ? `Unselect ${node.name}` : `Select ${node.name}`}
+                                    />
 
                                     {node.type === "collection" ? (
                                         <Folder className="h-8 w-8 text-blue-500" />
@@ -219,18 +222,14 @@ export function FirestoreSelectionTree({
                                     onClick={() => onNavigate(node.path, node.isLoaded)}
                                 >
                                     <div className="flex items-center min-w-0 flex-1">
-                                        <button
-                                            type="button"
-                                            className="mr-2 shrink-0 rounded-sm p-0.5 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-                                            onClick={(e) => {
-                                                e.stopPropagation()
-                                                onToggleSelect(node.path)
-                                            }}
+                                        <Checkbox
+                                            checked={isSelected}
+                                            onCheckedChange={() => onToggleSelect(node.path)}
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="mr-2 shrink-0"
                                             title={isSelected ? "Unselect" : "Select"}
                                             aria-label={isSelected ? `Unselect ${node.name}` : `Select ${node.name}`}
-                                        >
-                                            {isSelected ? <CheckSquare className="h-4 w-4 text-primary" /> : <Square className="h-4 w-4 text-muted-foreground group-hover:text-foreground" />}
-                                        </button>
+                                        />
 
                                         <div className="flex items-center gap-2 min-w-0 flex-1">
                                             {node.type === "collection" ? (
@@ -258,13 +257,15 @@ export function FirestoreSelectionTree({
                                 {activeNode.isLoadingMore ? (
                                     <Spinner className="h-6 w-6 text-primary" />
                                 ) : (
-                                    <button
+                                    <Button
                                         type="button"
+                                        variant="ghost"
+                                        size="sm"
                                         onClick={() => onLoadMore?.(currentPath)}
-                                        className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                                        className="text-muted-foreground hover:text-primary"
                                     >
                                         Scroll or click to load more
-                                    </button>
+                                    </Button>
                                 )}
                             </div>
                         )}
