@@ -540,13 +540,15 @@ export function FirestoreToFirestoreImportDialog({
                   Import from Firestore
                 </h3>
               </div>
-              <button
+              <Button
+                variant="ghost"
+                size="icon-lg"
                 onClick={() => handleOpenChange(false)}
-                className="sm:hidden p-1.5 -mr-1.5 rounded-full hover:bg-muted text-muted-foreground transition-colors shrink-0"
+                className="sm:hidden -mr-1.5 rounded-full text-muted-foreground shrink-0"
                 disabled={step === "EXECUTE"}
               >
                 <X className="w-5 h-5" />
-              </button>
+              </Button>
             </div>
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <Badge variant="outline">Step {stepIndex + 1} of {STEP_SEQUENCE.length}</Badge>
