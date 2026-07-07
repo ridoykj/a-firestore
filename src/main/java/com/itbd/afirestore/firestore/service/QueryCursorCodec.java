@@ -1,8 +1,8 @@
 package com.itbd.afirestore.firestore.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 import com.itbd.afirestore.firestore.dto.FirestoreValue;
 
 import java.nio.charset.StandardCharsets;
@@ -17,7 +17,7 @@ import java.util.Base64;
  */
 public final class QueryCursorCodec {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
     private QueryCursorCodec() {
     }
