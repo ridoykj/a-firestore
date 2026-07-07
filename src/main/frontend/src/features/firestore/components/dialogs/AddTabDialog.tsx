@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/shadcn/components/ui/dialog"
 import { Input } from "@/shadcn/components/ui/input"
+import { Label } from "@/shadcn/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shadcn/components/ui/select"
 import { useGcpStore, type ProjectTab } from "@/features/gcp/store/gcp-store"
 import { useEffect, useMemo, useState } from "react"
@@ -176,7 +177,7 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
             <div className="grid gap-4 sm:grid-cols-2 min-w-0">
               <div className="grid gap-2 min-w-0">
                 <div className="flex items-center justify-between gap-3 min-w-0">
-                  <label className="text-sm font-medium text-muted-foreground">Project ID</label>
+                  <Label className="text-sm text-muted-foreground">Project ID</Label>
                   <span className="text-xs text-muted-foreground truncate">
                     {loadingProjects ? "Loading projects..." : projects.length > 0 ? `${projects.length} found` : "No projects loaded yet"}
                   </span>
@@ -204,7 +205,7 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
 
               <div className="grid gap-2 min-w-0">
                 <div className="flex items-center justify-between gap-3 min-w-0">
-                  <label className="text-sm font-medium text-muted-foreground">Database ID</label>
+                  <Label className="text-sm text-muted-foreground">Database ID</Label>
                   {initializing ? (
                     <span className="text-xs text-muted-foreground truncate">Initializing...</span>
                   ) : null}
