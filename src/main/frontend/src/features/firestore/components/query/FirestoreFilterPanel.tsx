@@ -1,5 +1,14 @@
 import type { OrderDirection, WhereRow, WhereType } from "@/features/firestore/schemas/FirestoreSchema"
 import { ChevronRight, Play, Plus, SlidersHorizontal, X } from "lucide-react"
+import { Button } from "@/shadcn/components/ui/button"
+import { Input } from "@/shadcn/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shadcn/components/ui/select"
 import {
   Sheet,
   SheetContent,
@@ -8,6 +17,18 @@ import {
   SheetTitle,
 } from "@/shadcn/components/ui/sheet"
 import { cn } from "@/shadcn/lib/utils"
+
+const WHERE_OPERATORS = ["==", "!=", ">", ">=", "<", "<=", "array-contains", "array-contains-any", "in", "not-in"] as const
+
+const WHERE_TYPES: { value: WhereType; label: string }[] = [
+  { value: "string", label: "string" },
+  { value: "number", label: "number" },
+  { value: "boolean", label: "boolean" },
+  { value: "null", label: "null" },
+  { value: "string-array", label: "string[]" },
+  { value: "number-array", label: "number[]" },
+  { value: "timestamp", label: "timestamp" },
+]
 
 type FirestoreFilterPanelProps = {
   rightSidebarExpanded: boolean
@@ -63,71 +84,74 @@ export function FirestoreFilterPanel({
             <div className="space-y-3.5 max-h-[300px] overflow-y-auto pr-1">
               {whereRows.map((row) => (
                 <div key={row.id} className="p-3 bg-muted/30 rounded-xl border border-border relative space-y-2">
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
                     onClick={() => removeWhereFilterRow(row.id)}
-                    className="absolute top-2 right-2 text-muted-foreground hover:text-rose-500 transition-colors"
+                    className="absolute top-2 right-2 text-muted-foreground hover:text-rose-500"
                   >
                     <X className="w-3.5 h-3.5" />
-                  </button>
+                  </Button>
 
                   <div>
                     <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider block mb-1">Field</span>
-                    <input
+                    <Input
                       type="text"
                       value={row.field}
                       onChange={(e) => setWhereRowValue(row.id, "field", e.target.value)}
                       placeholder="e.g. status"
-                      className="w-full bg-card text-xs px-2.5 py-1 rounded-lg border border-border focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                      className="bg-card font-mono"
                     />
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider block mb-1">Operator</span>
-                      <select
+                      <Select
                         value={row.operator}
-                        onChange={(e) => setWhereRowValue(row.id, "operator", e.target.value)}
-                        className="w-full bg-card text-xs px-2 py-1.5 rounded-lg border border-border focus:outline-none"
+                        onValueChange={(value) => setWhereRowValue(row.id, "operator", value)}
                       >
-                        <option value="==">==</option>
-                        <option value="!=">!=</option>
-                        <option value=">">&gt;</option>
-                        <option value=">=">&gt;=</option>
-                        <option value="<">&lt;</option>
-                        <option value="<=">&lt;=</option>
-                        <option value="array-contains">array-contains</option>
-                        <option value="array-contains-any">array-contains-any</option>
-                        <option value="in">in</option>
-                        <option value="not-in">not-in</option>
-                      </select>
+                        <SelectTrigger className="w-full bg-card">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {WHERE_OPERATORS.map((operator) => (
+                            <SelectItem key={operator} value={operator}>
+                              {operator}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
 
                     <div>
                       <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider block mb-1">Type</span>
-                      <select
+                      <Select
                         value={row.type}
-                        onChange={(e) => setWhereRowValue(row.id, "type", e.target.value as WhereType)}
-                        className="w-full bg-card text-xs px-2 py-1.5 rounded-lg border border-border focus:outline-none"
+                        onValueChange={(value) => setWhereRowValue(row.id, "type", value as WhereType)}
                       >
-                        <option value="string">string</option>
-                        <option value="number">number</option>
-                        <option value="boolean">boolean</option>
-                        <option value="null">null</option>
-                        <option value="string-array">string[]</option>
-                        <option value="number-array">number[]</option>
-                        <option value="timestamp">timestamp</option>
-                      </select>
+                        <SelectTrigger className="w-full bg-card">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {WHERE_TYPES.map((type) => (
+                            <SelectItem key={type.value} value={type.value}>
+                              {type.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
 
                   <div>
                     <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider block mb-1">Value</span>
-                    <input
+                    <Input
                       type="text"
                       value={row.value}
                       onChange={(e) => setWhereRowValue(row.id, "value", e.target.value)}
                       placeholder="Match value..."
-                      className="w-full bg-card text-xs px-2.5 py-1.5 rounded-lg border border-border focus:outline-none"
+                      className="bg-card"
                     />
                   </div>
                 </div>
@@ -141,24 +165,25 @@ export function FirestoreFilterPanel({
           <div className="space-y-2">
             <div>
               <span className="text-[9px] text-primary font-bold uppercase tracking-wider block mb-1">Field Key</span>
-              <input
+              <Input
                 type="text"
                 value={orderField}
                 onChange={(e) => setOrderField(e.target.value)}
                 placeholder="id"
-                className="w-full bg-muted/50 text-xs px-3 py-2 rounded-lg border border-border focus:outline-none"
+                className="bg-muted/50"
               />
             </div>
             <div>
               <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider block mb-1">Sort Direction</span>
-              <select
-                value={orderDirection}
-                onChange={(e) => setOrderDirection(e.target.value as OrderDirection)}
-                className="w-full bg-muted/50 text-xs px-3 py-2 rounded-lg border border-border focus:outline-none font-semibold"
-              >
-                <option value="desc">Descending</option>
-                <option value="asc">Ascending</option>
-              </select>
+              <Select value={orderDirection} onValueChange={(value) => setOrderDirection(value as OrderDirection)}>
+                <SelectTrigger className="w-full bg-muted/50 font-semibold">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="desc">Descending</SelectItem>
+                  <SelectItem value="asc">Ascending</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </div>
@@ -166,28 +191,29 @@ export function FirestoreFilterPanel({
         <div className="mt-6 pt-5 border-t border-border space-y-3">
           <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground block">Pagination Limit</span>
           <div>
-            <input
+            <Input
               type="number"
               value={limit}
               onChange={(e) => setLimit(Number(e.target.value))}
               placeholder="e.g. 50"
-              className="w-full bg-muted/50 text-xs px-3 py-2 rounded-lg border border-border focus:outline-none font-bold"
+              className="bg-muted/50 font-bold"
             />
           </div>
         </div>
       </div>
 
       <div className="px-5 pb-5 mt-auto border-t border-border pt-5 shrink-0">
-        <button
+        <Button
+          size="lg"
           onClick={() => {
             onRun()
             onDrawerOpenChange?.(false)
           }}
-          className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs py-3 rounded-xl flex items-center justify-center gap-2 shadow-sm hover:shadow-md transition-all active:scale-95"
+          className="w-full rounded-xl font-bold shadow-sm hover:shadow-md"
         >
-          <Play className="w-4 h-4 fill-current text-primary-foreground" />
+          <Play className="w-4 h-4 fill-current" />
           <span>Run Query</span>
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -224,30 +250,36 @@ export function FirestoreFilterPanel({
               <span className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-wider">Filter and Order</span>
             </div>
             <div className="flex items-center gap-1">
-              <button
+              <Button
+                variant="ghost"
+                size="icon-sm"
                 onClick={addWhereFilterRow}
-                className="p-1.5 rounded-full hover:bg-muted text-primary transition-colors"
+                className="rounded-full text-primary"
                 title="Add new filter clause"
               >
                 <Plus className="w-4 h-4" />
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
                 onClick={onToggle}
-                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors"
+                className="text-muted-foreground"
                 title="Hide Panel"
               >
                 <ChevronRight className="w-4 h-4" />
-              </button>
+              </Button>
             </div>
           </>
         ) : (
-          <button
+          <Button
+            variant="secondary"
+            size="icon-lg"
             onClick={onToggle}
-            className="p-2.5 rounded-xl bg-secondary text-primary hover:bg-secondary/80 transition-all shadow-sm"
+            className="rounded-xl text-primary shadow-sm"
             title="View Filter and Order panel"
           >
             <SlidersHorizontal className="w-5 h-5 animate-pulse" />
-          </button>
+          </Button>
         )}
       </div>
 
