@@ -1,6 +1,6 @@
 package com.itbd.afirestore.firestore.dto;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import com.google.cloud.firestore.Blob;
 import com.google.cloud.firestore.DocumentReference;
 import com.google.cloud.firestore.GeoPoint;
@@ -23,7 +23,8 @@ import static org.mockito.Mockito.when;
  */
 class FirestoreValueTest {
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    // Jackson 3 (tools.jackson) — the same generation Spring Boot 4's HTTP codecs use.
+    private final JsonMapper objectMapper = JsonMapper.builder().build();
 
     @Test
     void integersAndDoublesStayDistinct() {
