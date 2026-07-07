@@ -95,15 +95,14 @@ Backend:
 .\mvnw.cmd test
 ```
 
-Known state (2026-07, branch v3) — treat these as the baseline, not your
+Known state (2026-07-07, branch v3) — treat these as the baseline, not your
 regression:
 
-- `npm test`: 33 pass, **5 pre-existing failures** in
-  `__tests__/transfer-utils.test.ts` and `__tests__/firestore-utils.test.ts`,
-  plus vitest errors on `e2e/firestore-page.spec.ts` (see Gotchas).
-- `mvnw test`: 9 run, **1 pre-existing failure**
-  (`GenericFirestoreServiceTest.pathValidationShouldRejectEmptyPaths`) →
-  `BUILD FAILURE`. `FirestoreIntegrationTests` passes without Docker.
+- `npm test` (via `npx vitest run`): 63 pass across 6 files, 0 failures.
+  Plain `npm test` may still error on `e2e/firestore-page.spec.ts` (see
+  Gotchas).
+- `mvnw test`: 50 pass, 0 failures → `BUILD SUCCESS`.
+  `FirestoreIntegrationTests` passes without Docker.
 
 ## Gotchas
 
@@ -129,8 +128,23 @@ regression:
   driver instead.
 - **Maven rebuilds the frontend on every `spring-boot:run` / `test`** — the
   frontend-maven-plugin runs `npm install` + `npm run build` in
-  `generate-resources`, overwriting `src/main/resources/static/`. Don't run
-  it concurrently with your own `npm install` in `src/main/frontend`.
+  `generate-resources`, overwriting `src/main/resources/static/`. Skip it
+  with `-Dskip.npm=true -Dskip.installnodenpm=true` for backend-only
+  iteration, and don't run it concurrently with your own `npm install` in
+  `src/main/frontend`.
+- **The API serializes with Jackson 3, not the ObjectMapper bean** — Spring
+  Boot 4's WebFlux codecs use `tools.jackson` and silently ignore Jackson 2
+  (`com.fasterxml`) annotations. Custom API JSON (e.g. `FirestoreValue`'s
+  wire format) needs `tools.jackson.databind.annotation` annotations.
+  `DocumentDtoWireFormatTest` pins the contract through the real HTTP stack;
+  never assert the wire format via a hand-built `ObjectMapper`.
+- **Test controllers must map under `/api/**`** — `ReactForwardController`
+  forwards every other non-asset path to the SPA, so a probe endpoint at
+  e.g. `/test/...` 500s with "Could not resolve view 'forward:/'".
+- **The dev backend usually runs from IntelliJ debug on 8080** (classpath
+  `target/classes`) with the frontend on the Vite dev server (5173, CORS
+  allowed). Backend changes need an IntelliJ restart — a Maven rebuild alone
+  does not update the running JVM.
 
 ## Troubleshooting
 
