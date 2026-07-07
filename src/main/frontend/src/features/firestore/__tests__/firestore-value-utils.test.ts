@@ -5,11 +5,77 @@ import {
   computeWritePreview,
   deepEqualJson,
   inferWireValue,
+  normalizeFirestoreFields,
+  normalizeWireValue,
   unwrapFirestoreFields,
   unwrapFirestoreValue,
   wrapValueWithOriginal,
   type FirestoreWireValue,
 } from "../api/firestore-value-utils"
+
+// Captured verbatim from the running backend (see DocumentDtoWireFormatTest): Spring Boot 4
+// encodes FirestoreValue records with Jackson 3, which writes plain record components
+// instead of the canonical Firestore wire format.
+const BACKEND_RECORD_FIELDS = JSON.parse(`{
+  "aString": {"value": "Ada"},
+  "anInteger": {"value": 42},
+  "aDouble": {"value": 4.5},
+  "aBoolean": {"value": true},
+  "aNull": {},
+  "aTimestamp": {"value": "2026-07-07T01:02:03.456Z"},
+  "aGeoPoint": {"latitude": 1.5, "longitude": 2.5},
+  "someBytes": {"base64": "AQID"},
+  "anArray": {"items": [{"value": "a"}, {"value": 1}]},
+  "aMap": {"fields": {"inner": {"value": true}}}
+}`)
+
+describe("Jackson 3 record encoding from the backend", () => {
+  it("unwraps every backend record shape for display", () => {
+    expect(unwrapFirestoreFields(BACKEND_RECORD_FIELDS)).toEqual({
+      aString: "Ada",
+      anInteger: 42,
+      aDouble: 4.5,
+      aBoolean: true,
+      aNull: null,
+      aTimestamp: "2026-07-07T01:02:03.456Z",
+      aGeoPoint: { latitude: 1.5, longitude: 2.5 },
+      someBytes: "AQID",
+      anArray: ["a", 1],
+      aMap: { inner: true },
+    })
+  })
+
+  it("normalizes backend record shapes to canonical wire values", () => {
+    expect(normalizeWireValue({ value: "Ada" })).toEqual({ stringValue: "Ada" })
+    expect(normalizeWireValue({ value: 42 })).toEqual({ integerValue: "42" })
+    expect(normalizeWireValue({ value: 4.5 })).toEqual({ doubleValue: 4.5 })
+    expect(normalizeWireValue({ value: true })).toEqual({ booleanValue: true })
+    expect(normalizeWireValue({})).toEqual({ nullValue: null })
+    expect(normalizeWireValue({ base64: "AQID" })).toEqual({ bytesValue: "AQID" })
+    expect(normalizeWireValue({ path: "users/a" })).toEqual({ referenceValue: "users/a" })
+    expect(normalizeWireValue({ latitude: 1.5, longitude: 2.5 })).toEqual({
+      geoPointValue: { latitude: 1.5, longitude: 2.5 },
+    })
+    expect(normalizeWireValue({ items: [{ value: 1 }] })).toEqual({
+      arrayValue: { values: [{ integerValue: "1" }] },
+    })
+    expect(normalizeWireValue({ fields: { inner: { value: true } } })).toEqual({
+      mapValue: { fields: { inner: { booleanValue: true } } },
+    })
+  })
+
+  it("passes canonical wire values through unchanged", () => {
+    expect(normalizeWireValue({ stringValue: "x" })).toEqual({ stringValue: "x" })
+    expect(normalizeWireValue({ integerValue: "42" })).toEqual({ integerValue: "42" })
+  })
+
+  it("reports an unchanged draft as no-op in the write preview", () => {
+    const typedFields = normalizeFirestoreFields(BACKEND_RECORD_FIELDS)
+    const edited = unwrapFirestoreFields(BACKEND_RECORD_FIELDS) as Record<string, unknown>
+    const preview = computeWritePreview(edited, typedFields, "MERGE")
+    expect(preview).toEqual({ addedFields: [], changedFields: [], deletedFields: [] })
+  })
+})
 
 describe("FFP-101: unwrapFirestoreValue", () => {
   it("unwraps every scalar kind", () => {
