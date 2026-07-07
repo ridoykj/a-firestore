@@ -188,6 +188,13 @@ Contract decisions (2026-07-07):
 - Unknown value kinds and unsupported runtime types are rejected; nothing is silently stringified.
 - Implemented by `FirestoreValue` (custom Jackson serializer/deserializer) and mirrored on the frontend by `firestore-value-utils.ts`.
 
+Serialization stack decision (2026-07-07):
+
+- Spring Boot 4's WebFlux codecs serialize with **Jackson 3 (`tools.jackson`)** and silently ignore Jackson 2 (`com.fasterxml`) annotations. Any DTO that needs custom JSON on the API boundary must use `tools.jackson.databind.annotation` annotations; the app's Jackson 2 `ObjectMapper` bean (`AppConfig`) is internal-only (e.g. parsing uploaded credential JSON) and does not define the wire format.
+- This was learned from an incident: `FirestoreValue` originally carried Jackson 2 annotations, so the API emitted raw record components (`{"value": x}`) instead of wire kinds, the document preview showed every field as null, and `PUT` saves failed because the sealed interface could not be deserialized. `FirestoreValue` and `QueryCursorCodec` now use Jackson 3.
+- `DocumentDtoWireFormatTest` pins the contract through the real WebFlux stack (encode and `DocumentWriteRequest` decode). Do not assert the wire format through a hand-built `ObjectMapper` — it can pass while the HTTP layer disagrees.
+- The frontend `normalizeWireValue` (`firestore-value-utils.ts`) accepts both the canonical wire format and the legacy record-component shape, so mismatched frontend/backend versions degrade to display-only instead of showing nulls.
+
 ### Safe write contract
 
 ```text
