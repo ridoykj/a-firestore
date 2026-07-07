@@ -1,5 +1,5 @@
 import type { FirestoreDocument } from "@/features/firestore/schemas/FirestoreSchema"
-import { unwrapFirestoreFields } from "@/features/firestore/api/firestore-value-utils"
+import { normalizeFirestoreFields, unwrapFirestoreFields } from "@/features/firestore/api/firestore-value-utils"
 
 const FIRESTORE_AUTO_ID_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
@@ -124,7 +124,7 @@ export function mapDocumentDtoToFirestoreDocument(dto: any): FirestoreDocument {
   }
 
   if (dto.fields && typeof dto.fields === "object" && !Array.isArray(dto.fields)) {
-    doc._typedFields = dto.fields
+    doc._typedFields = normalizeFirestoreFields(dto.fields)
     doc._updateTime = typeof dto.updateTime === "string" ? dto.updateTime : null
     for (const [key, value] of Object.entries(unwrapFirestoreFields(dto.fields))) {
       doc[key] = value
