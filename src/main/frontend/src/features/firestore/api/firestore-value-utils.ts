@@ -47,6 +47,98 @@ export function isWireValue(value: unknown): value is FirestoreWireValue {
   ].includes(keys[0])
 }
 
+/**
+ * The backend (Spring Boot 4) encodes its FirestoreValue records with Jackson 3, which
+ * ignores the Jackson 2 wire-format serializer and writes plain record components instead:
+ * `{"value": x}` for scalars/timestamps, `{"items": [...]}` for arrays, `{"fields": {...}}`
+ * for maps, `{"base64": "..."}` for bytes, `{"path": "..."}` for references,
+ * `{"latitude", "longitude"}` for geo points, and `{}` for null. Normalizes either encoding
+ * to the canonical wire value so the rest of the editor logic sees a single format.
+ */
+export function normalizeWireValue(value: unknown): FirestoreWireValue | null {
+  if (!isPlainObject(value)) {
+    return null
+  }
+  if (isWireValue(value)) {
+    return value
+  }
+  // isWireValue's guard type equals Record<string, unknown>, so the false branch narrows
+  // `value` to never; re-widen for the checks below.
+  const record: Record<string, unknown> = value as Record<string, unknown>
+
+  const keys = Object.keys(record)
+  if (keys.length === 0) {
+    return { nullValue: null }
+  }
+
+  if (keys.length === 1) {
+    const key = keys[0]
+    const body = record[key]
+    switch (key) {
+      case "value":
+        if (body === null) {
+          return { nullValue: null }
+        }
+        if (typeof body === "boolean") {
+          return { booleanValue: body }
+        }
+        if (typeof body === "number") {
+          return Number.isInteger(body)
+            ? { integerValue: String(body) }
+            : { doubleValue: body }
+        }
+        if (typeof body === "string") {
+          return { stringValue: body }
+        }
+        return null
+      case "items":
+        if (Array.isArray(body)) {
+          return {
+            arrayValue: {
+              values: body.map((item) => normalizeWireValue(item) ?? { nullValue: null }),
+            },
+          }
+        }
+        return null
+      case "fields":
+        if (isPlainObject(body)) {
+          const fields: Record<string, FirestoreWireValue> = {}
+          for (const [fieldKey, item] of Object.entries(body)) {
+            fields[fieldKey] = normalizeWireValue(item) ?? { nullValue: null }
+          }
+          return { mapValue: { fields } }
+        }
+        return null
+      case "base64":
+        return typeof body === "string" ? { bytesValue: body } : null
+      case "path":
+        return typeof body === "string" ? { referenceValue: body } : null
+      default:
+        return null
+    }
+  }
+
+  if (isGeoPointShape(record)) {
+    return { geoPointValue: { latitude: record.latitude, longitude: record.longitude } }
+  }
+  return null
+}
+
+/** Normalizes a document `fields` map to canonical wire values (see normalizeWireValue). */
+export function normalizeFirestoreFields(fields: unknown): Record<string, FirestoreWireValue> {
+  const result: Record<string, FirestoreWireValue> = {}
+  if (!isPlainObject(fields)) {
+    return result
+  }
+  for (const [key, value] of Object.entries(fields)) {
+    const normalized = normalizeWireValue(value)
+    if (normalized) {
+      result[key] = normalized
+    }
+  }
+  return result
+}
+
 /** Unwraps a wire value into plain JSON for display and editing. */
 export function unwrapFirestoreValue(value: unknown): unknown {
   if (value == null) {
@@ -56,8 +148,14 @@ export function unwrapFirestoreValue(value: unknown): unknown {
     return value
   }
 
-  const kind = Object.keys(value)[0]
-  const body = (value as Record<string, unknown>)[kind]
+  const wire = normalizeWireValue(value)
+  if (!wire) {
+    // Not a recognizable value encoding; show the raw object rather than dropping it.
+    return value
+  }
+
+  const kind = Object.keys(wire)[0]
+  const body = (wire as Record<string, unknown>)[kind]
 
   switch (kind) {
     case "nullValue":
