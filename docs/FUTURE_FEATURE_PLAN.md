@@ -131,12 +131,12 @@ Phase 1 verification notes (2026-07-07):
 
 | ID | Priority | Status | Feature | Dependencies | Acceptance criteria |
 |---|---|---|---|---|---|
-| FFP-201 | P1 | Proposed | Restorable workspaces | FFP-003 | Persist tab metadata, paths, filters, and column preferences without credential contents; restored tabs require credential reattachment before requests. |
-| FFP-202 | P2 | Proposed | Saved queries, favorites, and history | FFP-201 | Queries can be named, rerun, exported, and deleted; history is bounded per project/database and excludes secrets. |
-| FFP-203 | P1 | Proposed | Advanced query builder | FFP-105 | Support OR groups, collection-group queries, multiple order clauses, validation of unsupported combinations, and actionable index-error guidance. |
-| FFP-204 | P2 | Proposed | Configurable result tables | FFP-201 | Users can show, hide, reorder, resize, and pin columns; nested values have an inspector; preferences restore per collection. |
-| FFP-205 | P1 | Proposed | Firestore Emulator profiles | FFP-003, FFP-006 | Users can connect to an explicit emulator host/project/database without credentials; status clearly distinguishes emulator and Google Cloud. |
-| FFP-206 | P2 | Proposed | Keyboard shortcuts and command palette | FFP-001 | Searchable commands cover query execution, create, preview, save, tab switching, and panel toggles without overriding editor shortcuts. |
+| FFP-201 | P1 | Done | Restorable workspaces | FFP-003 | Persist tab metadata, paths, filters, and column preferences without credential contents; restored tabs require credential reattachment before requests. |
+| FFP-202 | P2 | Done | Saved queries, favorites, and history | FFP-201 | Queries can be named, rerun, exported, and deleted; history is bounded per project/database and excludes secrets. |
+| FFP-203 | P1 | Done | Advanced query builder | FFP-105 | Support OR groups, collection-group queries, multiple order clauses, validation of unsupported combinations, and actionable index-error guidance. |
+| FFP-204 | P2 | Done | Configurable result tables | FFP-201 | Users can show, hide, reorder, resize, and pin columns; nested values have an inspector; preferences restore per collection. |
+| FFP-205 | P1 | Done | Firestore Emulator profiles | FFP-003, FFP-006 | Users can connect to an explicit emulator host/project/database without credentials; status clearly distinguishes emulator and Google Cloud. |
+| FFP-206 | P2 | Done | Keyboard shortcuts and command palette | FFP-001 | Searchable commands cover query execution, create, preview, save, tab switching, and panel toggles without overriding editor shortcuts. |
 
 Phase 2 completion gate:
 
@@ -145,22 +145,40 @@ Phase 2 completion gate:
 - Emulator use is explicit and testable.
 - Advanced filters fail early with useful guidance.
 
+Phase 2 verification notes (2026-07-09):
+
+- Frontend workspace state is persisted through a single `localStorage` helper (`shared/lib/persistent-storage.ts`) namespaced under `a-firestore.*` with a `.v1` suffix and per-value type guards; corrupt/unknown payloads fall back to defaults instead of throwing. Persisted units: the tab list (`a-firestore.workspace.v1`), per-tab query form (`a-firestore.tab.<id>.query.v1`), per-collection column prefs (`a-firestore.tab.<id>.columns.<path>.v1`), and per-context saved queries/history. No credential file or secret is ever written (asserted by tests).
+- FFP-201 reattachment is enforced at runtime: attachment lives in the store's memory only, so every tab restored from storage starts detached, shows a reconnect prompt, and blocks all requests (`collectionsQuery`/`nestedQuery` are disabled and `runQuery` short-circuits) until `initFirestore`/`init-emulator` succeeds in the session.
+- FFP-205 replaced the fragile project-id heuristic with an explicit per-connection mode map in `FirestoreManagerService`; emulator clients are built with `setEmulatorHost` + `NoCredentials`. The excluded spring-cloud-gcp Firestore auto-config is unchanged; the manual client path now serves both cloud and emulator.
+- FFP-203 extended the existing `GET /api/workbench/query` (no new POST). The cursor codec now stores an ordered list of typed order values and still decodes legacy single-value tokens. Index errors return a structured `INDEX_REQUIRED` body with the create-index URL, surfaced as a clickable link in the results error state.
+- Tests: backend `./mvnw test -Dskip.installnodenpm -Dskip.npm` (59 pass, incl. new emulator, composite-filter/collection-group, and multi-value cursor cases) and frontend `npm test` (90 pass, incl. persistence, saved queries, column prefs, keyboard helpers); `npx tsc --noEmit` and `npm run build` are clean. Emulator-backed browser E2E for the new flows remains the documented follow-up (no emulator/Playwright browsers in the delivery environment).
+
 ## Phase 3: Advanced data operations
 
 | ID | Priority | Status | Feature | Dependencies | Acceptance criteria |
 |---|---|---|---|---|---|
-| FFP-301 | P2 | Proposed | Document and collection comparison | FFP-101, FFP-104 | Compare two documents or collection samples with type-aware added/removed/changed output and exportable results. |
-| FFP-302 | P2 | Proposed | Schema profiler and validation | FFP-101 | Report field frequency, observed types, nullability, and conflicts; optional local rules validate before writes without changing Firestore rules. |
-| FFP-303 | P1 | Proposed | Previewable bulk edit | FFP-101, FFP-104, FFP-106 | Users select documents, define a typed patch, review a dry run, and execute bounded batches with conflict reporting. |
-| FFP-304 | P1 | Proposed | Streaming backup and restore | FFP-101 | Backups preserve paths and native types, process data in bounded chunks, include a manifest/version, and support restore preview and conflict policy. |
-| FFP-305 | P1 | Proposed | Durable transfer jobs | FFP-101, FFP-304 | Deep copy supports previewed mappings, deduplicated selections, cancellation, resumability, committed-progress counts, and downloadable failure reports. |
-| FFP-306 | P3 | Proposed | Real-time watch mode | FFP-104, FFP-105 | Users can start/stop document or collection listeners; updates stream over SSE, show connection state, and never overwrite an unsaved draft. |
+| FFP-301 | P2 | Done | Document and collection comparison | FFP-101, FFP-104 | Compare two documents or collection samples with type-aware added/removed/changed output and exportable results. |
+| FFP-302 | P2 | Done | Schema profiler and validation | FFP-101 | Report field frequency, observed types, nullability, and conflicts; optional local rules validate before writes without changing Firestore rules. |
+| FFP-303 | P1 | Done | Previewable bulk edit | FFP-101, FFP-104, FFP-106 | Users select documents, define a typed patch, review a dry run, and execute bounded batches with conflict reporting. |
+| FFP-304 | P1 | Done | Streaming backup and restore | FFP-101 | Backups preserve paths and native types, process data in bounded chunks, include a manifest/version, and support restore preview and conflict policy. |
+| FFP-305 | P1 | Done | Durable transfer jobs | FFP-101, FFP-304 | Deep copy supports previewed mappings, deduplicated selections, cancellation, resumability, committed-progress counts, and downloadable failure reports. |
+| FFP-306 | P3 | Done | Real-time watch mode | FFP-104, FFP-105 | Users can start/stop document or collection listeners; updates stream over SSE, show connection state, and never overwrite an unsaved draft. |
 
 Phase 3 completion gate:
 
 - Large operations are bounded, previewable, cancellable where possible, and report partial outcomes.
 - Backup and migration artifacts preserve Firestore types.
 - Real-time updates coexist safely with local edits.
+
+Phase 3 verification notes (2026-07-09):
+
+- FFP-301 comparison is a type-aware diff (`firestore-diff.ts`): typed field maps are flattened to leaf paths carrying the unwrapped value and Firestore type, so an integer→double change with an equal numeric value is still reported as a type change. Documents diff leaf-by-leaf; collections diff aggregated field schemas. Results are exportable as JSON.
+- FFP-302 profiler reads a bounded sample via `GET /api/workbench/sample` and aggregates field frequency, observed types (multiple non-null types = a conflict), and nullability client-side (`schema-profiler.ts`). Derived local rules (required fields + unambiguous types) are stored per collection in `localStorage` and validated advisorily before create (never blocking, never touching Firestore security rules).
+- FFP-303 bulk edit adds `POST /api/workbench/bulk-edit`: a dry run reports the plan; execution applies a typed merge patch (+ delete field paths, reusing the FFP-103 sentinel logic) in a bounded batch and, if the atomic batch fails, retries per document to report per-path conflicts.
+- FFP-304 backup streams a typed artifact (`GET /api/workbench/backup`) with `formatVersion`, a manifest, and a flat document list (subcollections captured via absolute paths); the walk is bounded (≤50k docs). Restore runs as a cancellable job with MERGE/OVERWRITE/SKIP conflict policy and a dry-run preview.
+- FFP-305 introduces an in-memory `JobRegistry` and a `JobController` (`/api/jobs/*`): create, SSE progress (`/events`), status, cancel, and a downloadable failure report. Deep copy runs as a job — source paths deduplicated, walked sequentially so cancellation is prompt, committed progress counted on batch commit (not when queued), and failures recorded. Resumability is best-effort: re-running in MERGE mode is idempotent and a cancelled job reports its committed checkpoint (true skip-resume is a documented follow-up).
+- FFP-306 watch mode bridges a Firestore snapshot listener to SSE (`GET /api/workbench/watch`); the listener is removed on client disconnect. The frontend watch panel shows connection state and a live change log and is read-only, so it never overwrites an unsaved editor draft.
+- Tests: backend `./mvnw test -Dskip.installnodenpm -Dskip.npm` (69 pass, incl. `JobRegistryTest` and bulk-edit cases) and frontend `npm test` (97 pass, incl. `firestore-diff` and `schema-profiler`); `npx tsc --noEmit` and `npm run build` are clean. Emulator-backed browser E2E for the new job/watch flows remains the documented follow-up (no emulator/Playwright browsers in the delivery environment).
 
 ## API and type direction
 
@@ -247,12 +265,32 @@ Contract decisions (2026-07-07):
 - The token is base64url JSON containing the last document's ordered field value (as a typed `FirestoreValue`) and document ID, applied with `startAfter` after `orderBy(field).orderBy(documentId)`. Invalid tokens return HTTP 400.
 - Previous-page navigation is client-side: the frontend keeps the cursor used to reach each page and replays it.
 
+Contract decisions (2026-07-09, FFP-203 — advanced query, GET extension):
+
+- The query stays a `GET` (no POST body). Filter grouping is expressed with a `whereGroup` parallel parameter (integer, aligned by index with `whereField`/`whereOperator`/`whereValue`/`whereType`) plus a top-level `filterCombinator=and|or`. Clauses sharing a `whereGroup` are AND-combined; the resulting groups combine with `filterCombinator`. A Firestore `Filter` tree (`Filter.and`/`Filter.or`) is built server-side; no clauses means no filter.
+- Multiple order clauses: `orderField` and `orderDirection` may repeat (parallel lists), applied left to right, with document ID as the final deterministic tiebreaker. Single-value requests remain valid.
+- Collection-group queries: `collectionGroup=true` treats `path` as a single collection id queried via `firestore.collectionGroup(id)`; a `/`-containing path is rejected.
+- The cursor token now carries an ordered list of typed `FirestoreValue`s (`orderValues`) — one per order clause — via `QueryCursorCodec.encodeAll`; the legacy single-`orderValue` shape still decodes.
+- Missing-index failures (`FAILED_PRECONDITION`) return HTTP 400 `{errorCode: "INDEX_REQUIRED", message, indexUrl}` (the create-index console URL is extracted from the Firestore message) instead of a bare 500. Unsupported combinations (>30 clauses, >10 groups, duplicate `array-contains`/`array-contains-any`) fail early with HTTP 400 and an actionable message.
+
+Connection init contract (2026-07-09, FFP-205 — emulator profiles):
+
+- `POST /api/firestore/init-emulator` takes JSON `{projectId, databaseId?, emulatorHost}` and builds a credential-free client (`FirestoreOptions.setEmulatorHost(...)` + `NoCredentials`). `FirestoreManagerService` records an explicit per-connection mode (`service-account` | `emulator`); `GET /api/firestore/connection/status` now includes a `mode` field. No credentials are read or stored for emulator connections.
+
 ### Bulk and job contracts
 
 - Bulk delete accepts one context and at most 500 unique, validated document paths. Implemented (2026-07-07) as `POST /api/workbench/bulk-delete` with body `{paths: []}`; the batch commits atomically and the response reports `deletedCount`, `failedCount`, both path lists, and `complete`.
 - Transfer/backup operations become jobs with create, status/event stream, cancel, and result-report operations.
 - Progress counts committed documents, not merely queued writes.
 - Cancellation is best effort and reports the last committed checkpoint.
+
+Contract decisions (2026-07-09, FFP-303/304/305/306 — Phase 3):
+
+- **Bulk edit** — `POST /api/workbench/bulk-edit` body `{paths: [], setFields: map<string,FirestoreValue>, deleteFieldPaths: [], dryRun}`. At most 500 unique document paths. `dryRun` returns per-path `preview` items and writes nothing. Execution applies a typed merge patch in a bounded batch, falling back to per-document writes on batch failure so the response reports per-path `ok`/`failed` with messages plus `succeeded`/`failed`/`complete`.
+- **Schema sample** — `GET /api/workbench/sample?path=&limit=` returns `{path, sampled, documents}` (a bounded, typed collection sample, ≤1000 docs) used by the client-side profiler. Local validation rules are stored only in the browser and never affect Firestore rules.
+- **Backup** — `GET /api/workbench/backup?path=&limit=` returns `{formatVersion: 1, manifest: {path, kind, exportedAt, documentCount}, documents: [DocumentDto...]}`. Documents carry absolute paths and typed `FirestoreValue` fields; the subtree walk is bounded (≤50000 docs, else HTTP 400).
+- **Jobs** — `POST /api/jobs/deep-copy` (body `DeepCopyRequest`) and `POST /api/jobs/restore` (headers `X-Project-Id`/`X-Database-Id`, body `{documents: [{path, fields}], conflictPolicy, dryRun}`) each return `{jobId}`. `GET /api/jobs/{id}` returns a snapshot `{status, committed, failed, total, message, ...}`; `GET /api/jobs/{id}/events` streams SSE progress (polled server-side every 500ms) until a terminal `complete`/`cancelled`/`failed` event; `POST /api/jobs/{id}/cancel` requests cooperative cancellation; `GET /api/jobs/{id}/report` returns retained per-item `failures` (capped at 1000). Restore conflict policies: `MERGE` (set-merge), `OVERWRITE` (replace), `SKIP` (only write non-existent documents).
+- **Watch** — `GET /api/workbench/watch?path=&limit=` (headers `X-Project-Id`/`X-Database-Id`) streams SSE `connected` / `change` / `error` events from a Firestore snapshot listener that is removed on client disconnect. Change events carry typed document data; the client displays them and never applies them to an unsaved draft.
 
 ### Transfer format compatibility
 
