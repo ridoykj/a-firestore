@@ -2,6 +2,12 @@ export type ViewMode = "table" | "tree" | "json"
 
 export type OrderDirection = "asc" | "desc"
 
+/** FFP-203: how OR groups of filters combine at the top level. */
+export type FilterCombinator = "and" | "or"
+
+/** FFP-203: one order-by clause; a query may carry several, applied left to right. */
+export type OrderClause = { field: string; direction: OrderDirection }
+
 export type WhereType = "string" | "number" | "boolean" | "null" | "string-array" | "number-array" | "timestamp"
 
 export type StatusTone = "success" | "warning" | "error"
@@ -58,6 +64,29 @@ export type BulkDeleteResponse = {
   complete: boolean
 }
 
+/** FFP-303: Previewable bulk edit. `setFields` values are canonical Firestore wire values. */
+export type BulkEditRequest = {
+  paths: string[]
+  setFields: Record<string, unknown>
+  deleteFieldPaths: string[]
+  dryRun: boolean
+}
+
+export type BulkEditResultItem = {
+  path: string
+  status: "ok" | "failed" | "skipped" | "preview"
+  message?: string
+}
+
+export type BulkEditResponse = {
+  dryRun: boolean
+  requested: number
+  succeeded: number
+  failed: number
+  results: BulkEditResultItem[]
+  complete: boolean
+}
+
 export type NestedNode = {
   id: string
   path: string
@@ -87,6 +116,8 @@ export type WhereRow = {
   operator: string
   value: string
   type: WhereType
+  /** FFP-203: OR-group index. Rows sharing a groupId are AND-combined; groups combine per the combinator. */
+  groupId: number
 }
 
 export type CrudBusy = "create" | "update" | "replace" | "delete" | null
@@ -130,6 +161,8 @@ export type FirestoreWhereFilter = {
   operator: string
   value: string
   type: WhereType
+  /** FFP-203: OR-group index of this filter. */
+  groupId: number
 }
 
 export type FirestoreQueryRequest = {
@@ -137,8 +170,12 @@ export type FirestoreQueryRequest = {
   /** FFP-105: opaque cursor returned by the previous page; null for the first page. */
   cursor: string | null
   limit: number
-  orderDirection: OrderDirection
-  orderField?: string
+  /** FFP-203: how OR groups combine at the top level. */
+  filterCombinator: FilterCombinator
+  /** FFP-203: run a collection-group query where `path` is the collection id. */
+  collectionGroup: boolean
+  /** FFP-203: ordered list of order-by clauses. */
+  orderBy: OrderClause[]
   filters: FirestoreWhereFilter[]
 }
 
@@ -153,6 +190,7 @@ export const DEFAULT_WHERE_ROW: WhereRow = {
   operator: "==",
   value: "",
   type: "string",
+  groupId: 0,
 }
 
 export const EMPTY_NESTED_RESPONSE: NestedResponse = {
