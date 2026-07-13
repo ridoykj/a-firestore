@@ -4,6 +4,7 @@ import {
   useFirestoreProjectsQuery
 } from "@/features/firestore/api/firestore-query"
 import { firestoreService } from "@/features/firestore/api/firestore-service"
+import { streamJobEvents } from "@/features/firestore/api/job-client"
 import type { NestedNode } from "@/features/firestore/schemas/FirestoreSchema"
 import { useGcpStore, type ProjectTab } from "@/features/gcp/store/gcp-store"
 import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/alert"
@@ -16,7 +17,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader } from "@/shadcn/components/ui/sheet"
 import { Spinner } from "@/shadcn/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shadcn/components/ui/table"
-import { fetchEventSource } from "@microsoft/fetch-event-source"
 import {
   AlertCircle,
   CloudDownload,
@@ -83,6 +83,10 @@ export function FirestoreToFirestoreImportDialog({
   const [conflictResolution, setConflictResolution] = useState<ConflictResolution>("MERGE")
   const [authAttempted, setAuthAttempted] = useState(false)
   const [copiedDocuments, setCopiedDocuments] = useState(0)
+  // FFP-305: durable job state (cancel + committed progress + failure report).
+  const [failedDocuments, setFailedDocuments] = useState(0)
+  const [activeJobId, setActiveJobId] = useState<string | null>(null)
+  const [cancelling, setCancelling] = useState(false)
 
   const activeCredentialsFile = useCustomCredentials ? customCredentialsFile : globalCredentialsFile
   const sourceCredentialsReady = Boolean(activeCredentialsFile)
@@ -126,6 +130,9 @@ export function FirestoreToFirestoreImportDialog({
     setConflictResolution("MERGE")
     setAuthAttempted(false)
     setCopiedDocuments(0)
+    setFailedDocuments(0)
+    setActiveJobId(null)
+    setCancelling(false)
   }
 
   function handleOpenChange(nextOpen: boolean) {
@@ -458,12 +465,29 @@ export function FirestoreToFirestoreImportDialog({
     [context.activePath, selectedPaths],
   )
 
+  async function cancelCopy() {
+    if (!activeJobId) {
+      return
+    }
+    setCancelling(true)
+    try {
+      await firestoreService.cancelJob(activeJobId)
+      toast.message("Cancellation requested; finishing the current checkpoint...")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to request cancellation.")
+    }
+  }
+
   async function executeCopy() {
     setStep("EXECUTE")
     setCopiedDocuments(0)
+    setFailedDocuments(0)
+    setCancelling(false)
 
     try {
-      const payload = {
+      // FFP-305: run as a durable job so it can report committed progress, be cancelled, and
+      // produce a failure report. Selected paths are deduplicated here and again on the server.
+      const { jobId } = await firestoreService.createDeepCopyJob({
         sourceProjectId,
         sourceDatabaseId,
         sourcePaths: Array.from(selectedPaths),
@@ -471,35 +495,23 @@ export function FirestoreToFirestoreImportDialog({
         targetDatabaseId: context.databaseId,
         targetBasePath: context.activePath,
         conflictResolution,
-      }
-
-      const baseUrl = import.meta.env.VITE_BASE_URL || ""
-      
-      await new Promise<void>((resolve, reject) => {
-        fetchEventSource(`${baseUrl}/api/transfer/deep-copy`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload),
-          onmessage(event) {
-            const data = JSON.parse(event.data)
-            if (event.event === 'progress') {
-              setCopiedDocuments(data.copied)
-            } else if (event.event === 'complete') {
-              setCopiedDocuments(data.copied)
-              toast.success(`Copied ${data.copied} documents successfully!`)
-              resolve()
-            } else if (event.event === 'error') {
-              reject(new Error(data.error || 'Unknown error occurred'))
-            }
-          },
-          onerror(err) {
-            reject(err)
-            throw err // to prevent reconnecting
-          }
-        })
       })
+      setActiveJobId(jobId)
+
+      const finalSnapshot = await streamJobEvents(jobId, {
+        onProgress: (snapshot) => {
+          setCopiedDocuments(snapshot.committed)
+          setFailedDocuments(snapshot.failed)
+        },
+      })
+
+      if (finalSnapshot.status === "cancelled") {
+        toast.warning(`Copy cancelled after ${finalSnapshot.committed} committed document(s).`)
+      } else if (finalSnapshot.failed > 0) {
+        toast.warning(`Copied ${finalSnapshot.committed} document(s); ${finalSnapshot.failed} failed.`)
+      } else {
+        toast.success(`Copied ${finalSnapshot.committed} document(s) successfully!`)
+      }
 
       onImportSuccess()
       handleOpenChange(false)
@@ -507,6 +519,9 @@ export function FirestoreToFirestoreImportDialog({
       const message = error instanceof Error ? error.message : "Deep copy failed"
       toast.error(message)
       setStep("CONFLICT")
+    } finally {
+      setActiveJobId(null)
+      setCancelling(false)
     }
   }
 
@@ -831,14 +846,24 @@ export function FirestoreToFirestoreImportDialog({
               <div className="flex h-full min-h-80 flex-col items-center justify-center space-y-4 rounded-lg border bg-card p-6 text-center">
                 <Spinner className="h-12 w-12 text-primary" />
                 <div>
-                  <h3 className="text-lg font-semibold">Copying Data...</h3>
+                  <h3 className="text-lg font-semibold">{cancelling ? "Cancelling..." : "Copying Data..."}</h3>
                   <p className="text-sm text-muted-foreground mt-2">
-                    Documents copied: <span className="font-mono font-bold text-foreground">{copiedDocuments.toLocaleString()}</span>
+                    Committed: <span className="font-mono font-bold text-foreground">{copiedDocuments.toLocaleString()}</span>
+                    {failedDocuments > 0 ? (
+                      <span className="ml-2 text-rose-500">· {failedDocuments.toLocaleString()} failed</span>
+                    ) : null}
                   </p>
                   <p className="text-sm text-muted-foreground mt-1">
-                    This may take a few moments depending on the size of the selection.
+                    Progress counts documents actually written. You can cancel; committed documents remain.
                   </p>
                 </div>
+                <Button
+                  variant="outline"
+                  onClick={() => void cancelCopy()}
+                  disabled={!activeJobId || cancelling}
+                >
+                  {cancelling ? "Cancelling..." : "Cancel copy"}
+                </Button>
               </div>
             ) : null}
           </div>
