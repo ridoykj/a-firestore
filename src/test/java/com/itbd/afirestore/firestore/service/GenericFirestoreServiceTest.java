@@ -1,11 +1,16 @@
 package com.itbd.afirestore.firestore.service;
 
 import com.google.api.core.ApiFutures;
+import com.google.cloud.firestore.CollectionGroup;
 import com.google.cloud.firestore.CollectionReference;
 import com.google.cloud.firestore.DocumentReference;
 import com.google.cloud.firestore.DocumentSnapshot;
+import com.google.cloud.firestore.FieldPath;
 import com.google.cloud.firestore.FieldValue;
+import com.google.cloud.firestore.Filter;
 import com.google.cloud.firestore.Firestore;
+import com.google.cloud.firestore.Query;
+import com.google.cloud.firestore.QuerySnapshot;
 import com.google.cloud.firestore.SetOptions;
 import com.google.cloud.firestore.Transaction;
 import com.google.cloud.firestore.WriteBatch;
@@ -30,9 +35,11 @@ import java.util.stream.IntStream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -313,6 +320,132 @@ class GenericFirestoreServiceTest {
             }
         });
         return transaction;
+    }
+
+    // ------------------------------------------------------------- FFP-203
+
+    /** Stubs a Query whose builder methods return itself and whose get() yields no documents. */
+    private Query stubEmptyQueryChain() {
+        Query query = mock(Query.class);
+        QuerySnapshot snapshot = mock(QuerySnapshot.class);
+        when(snapshot.getDocuments()).thenReturn(List.of());
+        when(query.where(any(Filter.class))).thenReturn(query);
+        when(query.orderBy(anyString(), any())).thenReturn(query);
+        when(query.orderBy(any(FieldPath.class), any())).thenReturn(query);
+        when(query.limit(anyInt())).thenReturn(query);
+        when(query.get()).thenReturn(ApiFutures.immediateFuture(snapshot));
+        return query;
+    }
+
+    @Test
+    void queryCollectionGroupUsesCollectionGroupAndCompositeFilter() {
+        Query query = stubEmptyQueryChain();
+        CollectionGroup groupRef = mock(CollectionGroup.class);
+        when(firestoreManagerService.getFirestore("p", "d")).thenReturn(firestore);
+        when(firestore.collectionGroup("posts")).thenReturn(groupRef);
+        when(groupRef.where(any(Filter.class))).thenReturn(query);
+
+        GenericFirestoreService.CursorQueryResult result = service.queryCollection(
+                "p", "d", "posts",
+                List.of(
+                        new GenericFirestoreService.WhereClause("status", "==", "active", 0),
+                        new GenericFirestoreService.WhereClause("views", ">", 10L, 1)),
+                "or",
+                List.of(new GenericFirestoreService.OrderClause("views", "desc")),
+                true,
+                50,
+                null).block();
+
+        assertThat(result).isNotNull();
+        assertThat(result.documents()).isEmpty();
+        assertThat(result.nextCursor()).isNull();
+        verify(firestore).collectionGroup("posts");
+        // Two OR groups combine into a single composite Filter applied once.
+        verify(groupRef).where(any(Filter.class));
+        verify(query).orderBy(eq("views"), any());
+        verify(query).orderBy(any(FieldPath.class), any());
+    }
+
+    @Test
+    void queryCollectionAppliesMultipleOrderClauses() {
+        Query query = stubEmptyQueryChain();
+        CollectionReference collectionRef = mock(CollectionReference.class);
+        when(firestoreManagerService.getFirestore("p", "d")).thenReturn(firestore);
+        when(firestore.collection("users")).thenReturn(collectionRef);
+        when(collectionRef.orderBy(anyString(), any())).thenReturn(query);
+        when(collectionRef.orderBy(any(FieldPath.class), any())).thenReturn(query);
+
+        GenericFirestoreService.CursorQueryResult result = service.queryCollection(
+                "p", "d", "users",
+                List.of(),
+                "and",
+                List.of(
+                        new GenericFirestoreService.OrderClause("lastName", "asc"),
+                        new GenericFirestoreService.OrderClause("age", "desc")),
+                false,
+                50,
+                null).block();
+
+        assertThat(result).isNotNull();
+        verify(firestore).collection("users");
+        // First order clause is applied to the collection reference, the rest to the query.
+        verify(collectionRef).orderBy(eq("lastName"), any());
+        verify(query).orderBy(eq("age"), any());
+        // Plus the document-ID tiebreaker.
+        verify(query).orderBy(any(FieldPath.class), any());
+    }
+
+    // ------------------------------------------------------------- FFP-303
+
+    @Test
+    void bulkEditValidatesPaths() {
+        assertThatThrownBy(() -> GenericFirestoreService.validateBulkEditPaths(List.of()))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> GenericFirestoreService.validateBulkEditPaths(List.of("users")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Not a document path");
+    }
+
+    @Test
+    void bulkEditRejectsEmptyPatch() {
+        assertThatThrownBy(() -> service.bulkEditDocuments(
+                "p", "d", List.of("users/a"), Map.of(), List.of(), false).block())
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void bulkEditDryRunPreviewsWithoutWriting() {
+        when(firestoreManagerService.getFirestore("p", "d")).thenReturn(firestore);
+
+        GenericFirestoreService.BulkEditResult result = service.bulkEditDocuments(
+                "p", "d", List.of("users/a", "users/b"),
+                Map.of("status", new FirestoreValue.StringValue("active")),
+                List.of(), true).block();
+
+        assertThat(result).isNotNull();
+        assertThat(result.dryRun()).isTrue();
+        assertThat(result.requested()).isEqualTo(2);
+        assertThat(result.results()).allSatisfy(item -> assertThat(item.status()).isEqualTo("preview"));
+        verify(firestore, never()).batch();
+    }
+
+    @Test
+    void bulkEditExecutesMergeAcrossAllPaths() {
+        stubBatchDelete();
+        when(writeBatch.commit())
+                .thenReturn(ApiFutures.immediateFuture(Collections.<WriteResult>emptyList()));
+
+        GenericFirestoreService.BulkEditResult result = service.bulkEditDocuments(
+                "p", "d", List.of("users/a", "users/b"),
+                Map.of("status", new FirestoreValue.StringValue("active")),
+                List.of("stale"), false).block();
+
+        assertThat(result).isNotNull();
+        assertThat(result.dryRun()).isFalse();
+        assertThat(result.succeeded()).isEqualTo(2);
+        assertThat(result.failed()).isEqualTo(0);
+        assertThat(result.complete()).isTrue();
+        verify(writeBatch, times(2)).set(eq(documentReference), any(), any(SetOptions.class));
     }
 
     // ----------------------------------------------------------------- misc
