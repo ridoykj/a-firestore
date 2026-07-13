@@ -3,6 +3,14 @@ import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/aler
 import { Badge } from "@/shadcn/components/ui/badge"
 import { Button } from "@/shadcn/components/ui/button"
 import { Checkbox } from "@/shadcn/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/shadcn/components/ui/dropdown-menu"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/shadcn/components/ui/empty"
 import {
   Pagination,
@@ -11,6 +19,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/shadcn/components/ui/pagination"
+import { Popover, PopoverContent, PopoverTrigger } from "@/shadcn/components/ui/popover"
 import { Skeleton } from "@/shadcn/components/ui/skeleton"
 import { Spinner } from "@/shadcn/components/ui/spinner"
 import {
@@ -24,12 +33,26 @@ import {
 import { cn } from "@/shadcn/lib/utils"
 import { getPayloadOnly, normalizePath, safePreviewValue } from "@/features/firestore/api/firestore-utils"
 import {
+  DEFAULT_COLUMN_WIDTH,
+  EMPTY_COLUMN_PREFS,
+  loadColumnPrefs,
+  resolveColumns,
+  saveColumnPrefs,
+  type ColumnPrefs,
+} from "@/features/firestore/api/column-prefs-storage"
+import {
   AlertCircle,
+  ArrowLeft,
+  ArrowRight,
   CheckCircle2,
   Eye,
+  EyeOff,
+  Pin,
+  PinOff,
+  Settings2,
   XCircle,
 } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { ScrollArea, ScrollBar } from "@/shadcn/components/ui/scroll-area"
 
 type FirestoreQueryResultsProps = {
@@ -49,6 +72,10 @@ type FirestoreQueryResultsProps = {
   queryStats: string
   quickSearchText: string
   onFilterMatchCountChange: (count: number) => void
+  /** FFP-203: create-index URL when the query failed for a missing composite index. */
+  indexUrl?: string | null
+  /** FFP-204: tab id used to persist per-collection column preferences. */
+  tabId: string
 }
 
 type StatusFilter = "all" | "previewable" | "selected"
@@ -65,6 +92,43 @@ type RowModel = {
   searchText: string
 }
 
+const DOCUMENT_ID_COLUMN_WIDTH = 224
+
+/** FFP-204: renders a cell value; nested map/array values open an inspector popover. */
+function CellValue({ value }: { value: unknown }) {
+  const isNested = value !== null && typeof value === "object"
+  if (!isNested) {
+    return (
+      <span className="line-clamp-3 text-foreground/85" title={safePreviewValue(value)}>
+        {safePreviewValue(value)}
+      </span>
+    )
+  }
+
+  const isArray = Array.isArray(value)
+  const size = isArray
+    ? (value as unknown[]).length
+    : Object.keys(value as Record<string, unknown>).length
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 rounded-md border border-dashed border-border px-1.5 py-0.5 text-[11px] font-medium text-primary hover:bg-accent"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {isArray ? `Array(${size})` : `Object(${size})`}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="max-h-80 w-80 overflow-auto p-0">
+        <pre className="whitespace-pre-wrap wrap-break-word p-3 text-xs">
+          {JSON.stringify(value, null, 2)}
+        </pre>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 export function FirestoreQueryResults({
   queryLoading,
   queryError,
@@ -78,20 +142,87 @@ export function FirestoreQueryResults({
   queryStats,
   quickSearchText,
   onFilterMatchCountChange,
+  indexUrl,
+  tabId,
 }: FirestoreQueryResultsProps) {
-  const statusFilter = useMemo<StatusFilter>(() => "all", [])
+  const statusFilter = "all" as StatusFilter
 
-  const dataColumns = (queryResponse?.columns ?? []).filter((column) => column.name !== "id")
-  const emptyStateColumnSpan = dataColumns.length + 2
+  const collectionPath = queryResponse?.path ? normalizePath(queryResponse.path) : ""
+
+  const serverColumnNames = useMemo(
+    () =>
+      (queryResponse?.columns ?? [])
+        .map((column) => column.name)
+        .filter((name) => name !== "id"),
+    [queryResponse?.columns],
+  )
+
+  const columnTypeByName = new Map<string, string>()
+  for (const column of queryResponse?.columns ?? []) {
+    columnTypeByName.set(column.name, column.type)
+  }
+
+  // FFP-204: per-collection column preferences (visibility, order, width, pin). Reset during
+  // render when the collection changes (the supported "adjust state during render" pattern).
+  const [prevCollectionPath, setPrevCollectionPath] = useState(collectionPath)
+  const [columnPrefs, setColumnPrefs] = useState<ColumnPrefs>(() =>
+    collectionPath ? loadColumnPrefs(tabId, collectionPath) : EMPTY_COLUMN_PREFS,
+  )
+  if (collectionPath !== prevCollectionPath) {
+    setPrevCollectionPath(collectionPath)
+    setColumnPrefs(collectionPath ? loadColumnPrefs(tabId, collectionPath) : EMPTY_COLUMN_PREFS)
+  }
+
+  // Mirror prefs into a ref so drag-to-resize can persist the final value without a stale closure.
+  const columnPrefsRef = useRef(columnPrefs)
+  useEffect(() => {
+    columnPrefsRef.current = columnPrefs
+  }, [columnPrefs])
+
+  function persistColumnPrefs(next: ColumnPrefs) {
+    setColumnPrefs(next)
+    if (collectionPath) {
+      saveColumnPrefs(tabId, collectionPath, next)
+    }
+  }
+
+  const resolvedColumns = useMemo(
+    () => resolveColumns(serverColumnNames, columnPrefs),
+    [serverColumnNames, columnPrefs],
+  )
+  const visibleColumns = useMemo(
+    () => resolvedColumns.filter((column) => !column.hidden),
+    [resolvedColumns],
+  )
+
+  // Cumulative left offsets so pinned columns stick past the sticky Document ID column.
+  const columnLayout = visibleColumns.reduce<{
+    items: Array<{ name: string; pinned: boolean; width: number; left: number | null }>
+    offset: number
+  }>(
+    (acc, column) => {
+      const width = column.width ?? DEFAULT_COLUMN_WIDTH
+      const left = column.pinned ? acc.offset : null
+      return {
+        items: [...acc.items, { name: column.name, pinned: column.pinned, width, left }],
+        offset: column.pinned ? acc.offset + width : acc.offset,
+      }
+    },
+    { items: [], offset: DOCUMENT_ID_COLUMN_WIDTH },
+  ).items
+
+  const emptyStateColumnSpan = visibleColumns.length + 2
   const queryDocuments = useMemo(() => queryResponse?.documents ?? [], [queryResponse?.documents])
   const normalizedQuickFilter = quickSearchText.trim().toLowerCase()
   const hasActiveClientFilter = statusFilter !== "all" || normalizedQuickFilter.length > 0
-  const tableMinWidth = useMemo(
-    () => Math.max(860, 340 + (dataColumns.length * 210)),
-    [dataColumns.length],
+  const tableMinWidth = columnLayout.reduce((sum, column) => sum + column.width, DOCUMENT_ID_COLUMN_WIDTH)
+
+  const visibleColumnNames = useMemo(
+    () => visibleColumns.map((column) => column.name),
+    [visibleColumns],
   )
 
-  const rows = useMemo<RowModel[]>(() => {
+  const rows: RowModel[] = useMemo(() => {
     return queryDocuments.map((rawDoc, index) => {
       const doc = rawDoc as Record<string, unknown>
       const documentPath = typeof doc._path === "string" ? doc._path : ""
@@ -101,8 +232,8 @@ export function FirestoreQueryResults({
       const rowPreviewDisabled = !documentPath
       const rowIsSelected =
         !!selectedPreviewPath && normalizePath(selectedPreviewPath) === normalizedDocumentPath
-      const valueSearch = dataColumns
-        .map((column) => safePreviewValue(doc[column.name]))
+      const valueSearch = visibleColumnNames
+        .map((name) => safePreviewValue(doc[name]))
         .join(" ")
         .toLowerCase()
 
@@ -118,7 +249,7 @@ export function FirestoreQueryResults({
         searchText: `${documentId} ${documentPath} ${valueSearch}`.toLowerCase(),
       }
     })
-  }, [dataColumns, queryDocuments, selectedPreviewPath])
+  }, [queryDocuments, selectedPreviewPath, visibleColumnNames])
 
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set())
   const selectedRows = useMemo(
@@ -126,25 +257,24 @@ export function FirestoreQueryResults({
     [rows, selectedRowKeys],
   )
 
-  const filteredRows = useMemo(() => {
-    return rows.filter((row) => {
-      if (statusFilter === "previewable" && row.rowPreviewDisabled) {
-        return false
-      }
-      if (statusFilter === "selected" && !row.rowIsSelected) {
-        return false
-      }
-      if (normalizedQuickFilter && !row.searchText.includes(normalizedQuickFilter)) {
-        return false
-      }
-      return true
-    })
-  }, [normalizedQuickFilter, rows, statusFilter])
-
-  const visibleRowKeys = useMemo(
-    () => filteredRows.map((row) => row.key),
-    [filteredRows],
+  const filteredRows = useMemo(
+    () =>
+      rows.filter((row) => {
+        if (statusFilter === "previewable" && row.rowPreviewDisabled) {
+          return false
+        }
+        if (statusFilter === "selected" && !row.rowIsSelected) {
+          return false
+        }
+        if (normalizedQuickFilter && !row.searchText.includes(normalizedQuickFilter)) {
+          return false
+        }
+        return true
+      }),
+    [rows, statusFilter, normalizedQuickFilter],
   )
+
+  const visibleRowKeys = useMemo(() => filteredRows.map((row) => row.key), [filteredRows])
   const anyVisibleSelected = visibleRowKeys.some((key) => selectedRowKeys.has(key))
   const allVisibleSelected =
     visibleRowKeys.length > 0 && visibleRowKeys.every((key) => selectedRowKeys.has(key))
@@ -173,6 +303,66 @@ export function FirestoreQueryResults({
       }
       return next
     })
+  }
+
+  // FFP-204: column preference mutations.
+  const toggleColumnHidden = (name: string) => {
+    const hidden = columnPrefs.hidden.includes(name)
+      ? columnPrefs.hidden.filter((item) => item !== name)
+      : [...columnPrefs.hidden, name]
+    persistColumnPrefs({ ...columnPrefs, hidden })
+  }
+
+  const toggleColumnPinned = (name: string) => {
+    const pinned = columnPrefs.pinned.includes(name)
+      ? columnPrefs.pinned.filter((item) => item !== name)
+      : [...columnPrefs.pinned, name]
+    persistColumnPrefs({ ...columnPrefs, pinned })
+  }
+
+  const moveColumn = (name: string, direction: -1 | 1) => {
+    const order = resolvedColumns.map((column) => column.name)
+    const index = order.indexOf(name)
+    const target = index + direction
+    if (index < 0 || target < 0 || target >= order.length) {
+      return
+    }
+    ;[order[index], order[target]] = [order[target], order[index]]
+    persistColumnPrefs({ ...columnPrefs, order })
+  }
+
+  // Column resize via a drag handle; persisted once on release.
+  const resizeStateRef = useRef<{ name: string; startX: number; startWidth: number } | null>(null)
+
+  const beginResize = (name: string, currentWidth: number) => (event: React.MouseEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    resizeStateRef.current = { name, startX: event.clientX, startWidth: currentWidth }
+
+    const handleMove = (moveEvent: MouseEvent) => {
+      const state = resizeStateRef.current
+      if (!state) {
+        return
+      }
+      const nextWidth = Math.max(96, state.startWidth + (moveEvent.clientX - state.startX))
+      setColumnPrefs((prev) => ({ ...prev, widths: { ...prev.widths, [state.name]: nextWidth } }))
+    }
+
+    const handleUp = () => {
+      window.removeEventListener("mousemove", handleMove)
+      window.removeEventListener("mouseup", handleUp)
+      resizeStateRef.current = null
+      // Persist the final widths.
+      setColumnPrefs((prev) => {
+        if (collectionPath) {
+          saveColumnPrefs(tabId, collectionPath, prev)
+        }
+        return prev
+      })
+    }
+
+    window.addEventListener("mousemove", handleMove)
+    window.addEventListener("mouseup", handleUp)
   }
 
   const canPrev = Boolean(queryResponse?.hasPreviousPage) && !queryLoading
@@ -219,13 +409,66 @@ export function FirestoreQueryResults({
         {queryError ? (
           <Alert className="mb-3" variant="destructive">
             <AlertCircle />
-            <AlertTitle>Query Failed</AlertTitle>
-            <AlertDescription>{queryError}</AlertDescription>
+            <AlertTitle>{indexUrl !== undefined && indexUrl !== null ? "Index Required" : "Query Failed"}</AlertTitle>
+            <AlertDescription>
+              <span>{queryError}</span>
+              {indexUrl ? (
+                <a
+                  href={indexUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-2 inline-flex w-fit items-center gap-1 rounded-md border border-current px-2 py-1 text-xs font-semibold underline"
+                >
+                  Create index in Firebase console
+                </a>
+              ) : null}
+            </AlertDescription>
           </Alert>
         ) : null}
 
         {!queryLoading && !queryError ? (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col rounded-lg border bg-card/30 shadow-sm">
+            {/* FFP-204: column configuration menu */}
+            {serverColumnNames.length > 0 ? (
+              <div className="flex items-center justify-end gap-2 border-b px-3 py-1.5">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
+                      <Settings2 className="size-3.5" />
+                      Columns
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64">
+                    <DropdownMenuLabel>Configure columns</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {resolvedColumns.map((column, index) => (
+                      <DropdownMenuItem
+                        key={column.name}
+                        className="flex items-center justify-between gap-2"
+                        onSelect={(event) => event.preventDefault()}
+                      >
+                        <span className="truncate text-xs font-medium">{column.name}</span>
+                        <span className="flex items-center gap-0.5">
+                          <Button variant="ghost" size="icon-xs" onClick={() => moveColumn(column.name, -1)} disabled={index === 0} title="Move left">
+                            <ArrowLeft className="size-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon-xs" onClick={() => moveColumn(column.name, 1)} disabled={index === resolvedColumns.length - 1} title="Move right">
+                            <ArrowRight className="size-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon-xs" onClick={() => toggleColumnPinned(column.name)} title={column.pinned ? "Unpin" : "Pin"}>
+                            {column.pinned ? <PinOff className="size-3.5 text-primary" /> : <Pin className="size-3.5" />}
+                          </Button>
+                          <Button variant="ghost" size="icon-xs" onClick={() => toggleColumnHidden(column.name)} title={column.hidden ? "Show" : "Hide"}>
+                            {column.hidden ? <EyeOff className="size-3.5 text-muted-foreground" /> : <Eye className="size-3.5" />}
+                          </Button>
+                        </span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            ) : null}
+
             <div className="min-h-0 flex-1 overflow-auto p-3 md:hidden">
               {filteredRows.length === 0 ? (
                 <Empty className="border-none">
@@ -280,7 +523,7 @@ export function FirestoreQueryResults({
                       </div>
 
                       <div className="mt-3 grid gap-2">
-                        {dataColumns.slice(0, 4).map((column) => (
+                        {visibleColumns.slice(0, 4).map((column) => (
                           <div key={`${row.key}-${column.name}`} className="grid gap-0.5">
                             <span className="text-xs font-medium text-muted-foreground">
                               {column.name}
@@ -317,7 +560,10 @@ export function FirestoreQueryResults({
                   <Table className="text-left text-sm" style={{ minWidth: tableMinWidth }}>
                     <TableHeader>
                       <TableRow className="sticky top-0 z-30 bg-background/95 shadow-[inset_0_-1px_0_hsl(var(--border)),inset_-1px_0_0_hsl(var(--border))] backdrop-blur">
-                        <TableHead className="sticky top-0 left-0 z-30 w-56 min-w-56 border-r border-border/70 bg-background/95 py-3 font-semibold shadow-[inset_0_-1px_0_hsl(var(--border)),inset_-1px_0_0_hsl(var(--border))] backdrop-blur">
+                        <TableHead
+                          className="sticky top-0 left-0 z-30 border-r border-border/70 bg-background/95 py-3 font-semibold shadow-[inset_0_-1px_0_hsl(var(--border)),inset_-1px_0_0_hsl(var(--border))] backdrop-blur"
+                          style={{ width: DOCUMENT_ID_COLUMN_WIDTH, minWidth: DOCUMENT_ID_COLUMN_WIDTH }}
+                        >
                           <div className="grid gap-0.5">
                             <div className="flex items-center justify-between gap-2">
                               <span>Document ID</span>
@@ -332,16 +578,33 @@ export function FirestoreQueryResults({
                             </span>
                           </div>
                         </TableHead>
-                        {dataColumns.map((column) => (
+                        {columnLayout.map((column) => (
                           <TableHead
                             key={column.name}
-                            className="sticky top-0 z-20 w-52 min-w-44 border-r border-border/70 bg-background/95 py-3 font-semibold shadow-[inset_0_-1px_0_hsl(var(--border))] backdrop-blur"
+                            className={cn(
+                              "top-0 z-20 border-r border-border/70 bg-background/95 py-3 font-semibold shadow-[inset_0_-1px_0_hsl(var(--border))] backdrop-blur",
+                              column.left !== null ? "sticky" : "",
+                            )}
+                            style={{
+                              width: column.width,
+                              minWidth: column.width,
+                              ...(column.left !== null ? { left: column.left } : {}),
+                            }}
                           >
-                            <div className="grid gap-0.5">
-                              <span>{column.name}</span>
-                              <span className="text-xs font-normal text-foreground/65">
-                                {column.type}
+                            <div className="relative grid gap-0.5 pr-2">
+                              <span className="flex items-center gap-1 truncate">
+                                {column.pinned ? <Pin className="size-3 text-primary" /> : null}
+                                {column.name}
                               </span>
+                              <span className="text-xs font-normal text-foreground/65">
+                                {columnTypeByName.get(column.name) ?? "unknown"}
+                              </span>
+                              <span
+                                role="separator"
+                                aria-orientation="vertical"
+                                onMouseDown={beginResize(column.name, column.width)}
+                                className="absolute -right-2 top-0 h-full w-2 cursor-col-resize select-none"
+                              />
                             </div>
                           </TableHead>
                         ))}
@@ -388,9 +651,10 @@ export function FirestoreQueryResults({
                         >
                           <TableCell
                             className={cn(
-                              "sticky left-0 z-10 max-w-sm py-3 text-xs align-top shadow-[inset_-1px_0_0_hsl(var(--border))]",
+                              "sticky left-0 z-10 py-3 text-xs align-top shadow-[inset_-1px_0_0_hsl(var(--border))]",
                               row.rowIsSelected ? "bg-primary/10" : "bg-card/95",
                             )}
+                            style={{ width: DOCUMENT_ID_COLUMN_WIDTH, minWidth: DOCUMENT_ID_COLUMN_WIDTH }}
                           >
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex min-w-0 items-center gap-2">
@@ -402,7 +666,7 @@ export function FirestoreQueryResults({
                                   className="h-5 w-5 shrink-0"
                                 />
                                 <div className="min-w-0">
-                                  <span className="truncate font-medium">{row.documentId}</span>                                  
+                                  <span className="truncate font-medium">{row.documentId}</span>
                                 </div>
                               </div>
                               {row.rowPreviewDisabled ? (
@@ -414,17 +678,20 @@ export function FirestoreQueryResults({
                               )}
                             </div>
                           </TableCell>
-                          {dataColumns.map((column) => (
+                          {columnLayout.map((column) => (
                             <TableCell
                               key={`${row.normalizedDocumentPath}-${column.name}`}
-                              className="max-w-xs whitespace-normal text-xs wrap-break-word py-3 align-top"
+                              className={cn(
+                                "whitespace-normal text-xs wrap-break-word py-3 align-top",
+                                column.left !== null ? "sticky z-10 bg-card/95" : "",
+                              )}
+                              style={{
+                                width: column.width,
+                                minWidth: column.width,
+                                ...(column.left !== null ? { left: column.left } : {}),
+                              }}
                             >
-                              <span
-                                className="line-clamp-3 text-foreground/85"
-                                title={safePreviewValue(row.doc[column.name])}
-                              >
-                                {safePreviewValue(row.doc[column.name])}
-                              </span>
+                              <CellValue value={row.doc[column.name]} />
                             </TableCell>
                           ))}
                         </TableRow>
