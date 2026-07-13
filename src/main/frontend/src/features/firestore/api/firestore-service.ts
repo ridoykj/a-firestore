@@ -1,6 +1,8 @@
 import createAxiosInstance from "@/shared/api/axiosClient"
 import type {
   BulkDeleteResponse,
+  BulkEditRequest,
+  BulkEditResponse,
   DocumentWriteRequest,
   FirestoreDocument,
   FirestoreQueryRequest,
@@ -44,6 +46,20 @@ export class FirestoreConflictError extends Error {
     super(message)
     this.name = "FirestoreConflictError"
     this.latestDocument = latestDocument
+  }
+}
+
+/**
+ * FFP-203: Raised when a query needs a Firestore composite index. Carries the create-index URL
+ * (when Firestore provided one) so the UI can offer an actionable link.
+ */
+export class FirestoreIndexError extends Error {
+  readonly indexUrl: string | null
+
+  constructor(message: string, indexUrl: string | null) {
+    super(message)
+    this.name = "FirestoreIndexError"
+    this.indexUrl = indexUrl
   }
 }
 
@@ -171,6 +187,24 @@ type FirestoreImpl = {
   }) => Promise<{ success: boolean; copiedDocuments: number }>
 }
 
+/** FFP-304: a typed backup artifact. */
+export type BackupArtifact = {
+  formatVersion: number
+  manifest: { path: string; kind: string; exportedAt: string; documentCount: number }
+  documents: Array<{ id: string; path: string; fields: Record<string, unknown> }>
+}
+
+/** FFP-304/FFP-305: a job progress snapshot. */
+export type JobSnapshot = {
+  jobId: string
+  type: string
+  status: string
+  committed: number
+  failed: number
+  total: number
+  message: string
+}
+
 type FirestoreServiceApi = {
   getCollections: (context: FirestoreContext) => Promise<string[]>
   getCollectionDocuments: (
@@ -189,6 +223,12 @@ type FirestoreServiceApi = {
     idFilter?: string,
   ) => Promise<NestedResponse>
   runQuery: (context: FirestoreContext, request: FirestoreQueryRequest) => Promise<QueryResponse>
+  // FFP-302: bounded collection sample (typed) for the schema profiler.
+  sampleCollection: (
+    context: FirestoreContext,
+    collectionPath: string,
+    limit?: number,
+  ) => Promise<FirestoreDocument[]>
   createDocument: (
     context: FirestoreContext,
     collectionPath: string,
@@ -211,9 +251,16 @@ type FirestoreServiceApi = {
     expectedUpdateTime?: string | null,
   ) => Promise<string>
   bulkDeleteDocuments: (context: FirestoreContext, paths: string[]) => Promise<BulkDeleteResponse>
+  // FFP-303: previewable bulk edit (dry-run + execute).
+  bulkEditDocuments: (
+    context: FirestoreContext,
+    request: BulkEditRequest,
+  ) => Promise<BulkEditResponse>
   loadProjects: (credentialsFile: File) => Promise<string[]>
   loadDatabases: (projectId: string, credentialsFile: File) => Promise<string[]>
   initFirestore: (projectId: string, credentialsFile: File, databaseId?: string) => Promise<string>
+  // FFP-205: credential-free emulator connection.
+  initEmulator: (projectId: string, databaseId: string, emulatorHost: string) => Promise<string>
 
   // FFP-003: Connection lifecycle methods
   getConnectionStatus: () => Promise<{ status: string; projectId?: string; databaseId?: string }>
@@ -231,6 +278,25 @@ type FirestoreServiceApi = {
     targetBasePath: string
     conflictResolution: "MERGE" | "OVERWRITE"
   }) => Promise<{ success: boolean; copiedDocuments: number }>
+
+  // FFP-304: streaming backup (typed artifact download).
+  backup: (context: FirestoreContext, path: string, limit?: number) => Promise<BackupArtifact>
+  // FFP-304/FFP-305: durable jobs.
+  createDeepCopyJob: (payload: {
+    sourceProjectId: string
+    sourceDatabaseId: string
+    sourcePaths: string[]
+    targetProjectId: string
+    targetDatabaseId: string
+    targetBasePath: string
+    conflictResolution: "MERGE" | "OVERWRITE"
+  }) => Promise<{ jobId: string }>
+  createRestoreJob: (
+    context: FirestoreContext,
+    body: { documents: Array<{ path: string; fields: Record<string, unknown> }>; conflictPolicy: string; dryRun: boolean },
+  ) => Promise<{ jobId: string }>
+  cancelJob: (jobId: string) => Promise<JobSnapshot>
+  getJobReport: (jobId: string) => Promise<{ jobId: string; committed: number; failed: number; failures: Array<{ path: string; reason: string }> }>
 }
 
 const baseUrl: string = import.meta.env.VITE_BASE_URL || ""
@@ -358,6 +424,22 @@ function toConflictError(error: unknown): FirestoreConflictError | null {
   return new FirestoreConflictError(message, latestDocument)
 }
 
+function toIndexError(error: unknown): FirestoreIndexError | null {
+  if (!(error instanceof AxiosError) || error.response?.status !== 400) {
+    return null
+  }
+  const body = error.response.data as Record<string, unknown> | undefined
+  if (!body || body.errorCode !== "INDEX_REQUIRED") {
+    return null
+  }
+  const message =
+    typeof body.message === "string" && body.message.trim()
+      ? body.message
+      : "This query needs a Firestore composite index."
+  const indexUrl = typeof body.indexUrl === "string" && body.indexUrl.trim() ? body.indexUrl : null
+  return new FirestoreIndexError(message, indexUrl)
+}
+
 function buildQueryParams(requestData: FirestoreQueryRequest): URLSearchParams {
   const params = new URLSearchParams()
   params.set("path", requestData.path)
@@ -365,12 +447,22 @@ function buildQueryParams(requestData: FirestoreQueryRequest): URLSearchParams {
     params.set("cursor", requestData.cursor.trim())
   }
   params.set("limit", String(requestData.limit))
-  params.set("orderDirection", requestData.orderDirection)
-
-  if (requestData.orderField?.trim()) {
-    params.set("orderField", requestData.orderField.trim())
+  // FFP-203: top-level OR-group combinator and collection-group flag.
+  params.set("filterCombinator", requestData.filterCombinator)
+  if (requestData.collectionGroup) {
+    params.set("collectionGroup", "true")
   }
 
+  // FFP-203: repeated order clauses, applied left to right.
+  for (const order of requestData.orderBy) {
+    if (!order.field.trim()) {
+      continue
+    }
+    params.append("orderField", order.field.trim())
+    params.append("orderDirection", order.direction)
+  }
+
+  // FFP-203: each filter carries its OR-group index (aligned by position with the other arrays).
   for (const filter of requestData.filters) {
     if (!filter.field.trim()) {
       continue
@@ -379,6 +471,7 @@ function buildQueryParams(requestData: FirestoreQueryRequest): URLSearchParams {
     params.append("whereOperator", filter.operator)
     params.append("whereValue", filter.value)
     params.append("whereType", filter.type)
+    params.append("whereGroup", String(filter.groupId))
   }
 
   return params
@@ -443,22 +536,31 @@ const firestoreApi: FirestoreServiceApi = {
     )
   },
 
-  runQuery: (context, requestData) => {
+  runQuery: async (context, requestData) => {
     const params = buildQueryParams(requestData)
-    return request<QueryResponse>(() =>
-      axiosInstance.get(`/api/workbench/query?${params.toString()}`, {
-        headers: firestoreHeaders(context),
-      }),
-    ).then((response) => ({
-      ...response,
-      documents: response.documents?.map(mapDocumentDtoToFirestoreDocument) ?? [],
-      nextCursor: response.nextCursor ?? null,
-      // FFP-105: page bookkeeping is derived by the caller from its cursor history.
-      pageIndex: 0,
-      hasPreviousPage: false,
-      pageStart: response.documents?.length ? 1 : 0,
-      pageEnd: response.documents?.length ?? 0,
-    }))
+    try {
+      const { data: response } = await axiosInstance.get<QueryResponse>(
+        `/api/workbench/query?${params.toString()}`,
+        { headers: firestoreHeaders(context) },
+      )
+      return {
+        ...response,
+        documents: response.documents?.map(mapDocumentDtoToFirestoreDocument) ?? [],
+        nextCursor: response.nextCursor ?? null,
+        // FFP-105: page bookkeeping is derived by the caller from its cursor history.
+        pageIndex: 0,
+        hasPreviousPage: false,
+        pageStart: response.documents?.length ? 1 : 0,
+        pageEnd: response.documents?.length ?? 0,
+      }
+    } catch (error) {
+      // FFP-203: surface a missing-index error with its create-index link.
+      const indexError = toIndexError(error)
+      if (indexError) {
+        throw indexError
+      }
+      throw toRequestError(error)
+    }
   },
 
   createDocument: (context, collectionPath, payload, docId) =>
@@ -527,6 +629,27 @@ const firestoreApi: FirestoreServiceApi = {
     return toBulkDeleteResponse(response)
   },
 
+  // FFP-302: bounded typed sample of a collection.
+  sampleCollection: async (context, collectionPath, limit = 200) => {
+    const params = new URLSearchParams({ path: collectionPath, limit: String(limit) })
+    const response = await request<{ documents?: unknown }>(() =>
+      axiosInstance.get(`/api/workbench/sample?${params.toString()}`, {
+        headers: firestoreHeaders(context),
+      }),
+    )
+    return toDocumentArray(response?.documents)
+  },
+
+  // FFP-303: previewable bulk edit (dry-run or execute).
+  bulkEditDocuments: async (context, editRequest) => {
+    const response = await request<BulkEditResponse>(() =>
+      axiosInstance.post("/api/workbench/bulk-edit", editRequest, {
+        headers: firestoreHeaders(context),
+      }),
+    )
+    return response
+  },
+
   loadProjects: async (credentialsFile) => {
     const form = new FormData()
     form.append("file", credentialsFile)
@@ -551,6 +674,16 @@ const firestoreApi: FirestoreServiceApi = {
     form.append("file", credentialsFile)
     return request(() => axiosInstance.post("/api/firestore/init", form))
   },
+
+  // FFP-205: initialize a credential-free emulator connection.
+  initEmulator: (projectId, databaseId, emulatorHost) =>
+    request(() =>
+      axiosInstance.post("/api/firestore/init-emulator", {
+        projectId: projectId.trim(),
+        databaseId: databaseId.trim() ? databaseId.trim() : null,
+        emulatorHost: emulatorHost.trim(),
+      }),
+    ),
 
   // FFP-003: Connection lifecycle methods
   getConnectionStatus: () =>
@@ -583,6 +716,34 @@ const firestoreApi: FirestoreServiceApi = {
     ),
 
   deepCopy: (payload) => request(() => axiosInstance.post("/api/transfer/deep-copy", payload)),
+
+  // FFP-304: download a typed backup artifact for a subtree.
+  backup: (context, path, limit = 5000) => {
+    const params = new URLSearchParams({ path, limit: String(limit) })
+    return request<BackupArtifact>(() =>
+      axiosInstance.get(`/api/workbench/backup?${params.toString()}`, {
+        headers: firestoreHeaders(context),
+      }),
+    )
+  },
+
+  // FFP-305: create a durable deep-copy job.
+  createDeepCopyJob: (payload) =>
+    request<{ jobId: string }>(() => axiosInstance.post("/api/jobs/deep-copy", payload)),
+
+  // FFP-304: create a restore job into the active context.
+  createRestoreJob: (context, body) =>
+    request<{ jobId: string }>(() =>
+      axiosInstance.post("/api/jobs/restore", body, { headers: firestoreHeaders(context) }),
+    ),
+
+  cancelJob: (jobId) =>
+    request<JobSnapshot>(() => axiosInstance.post(`/api/jobs/${jobId}/cancel`)),
+
+  getJobReport: (jobId) =>
+    request<{ jobId: string; committed: number; failed: number; failures: Array<{ path: string; reason: string }> }>(
+      () => axiosInstance.get(`/api/jobs/${jobId}/report`),
+    ),
 }
 
 export function useFirestoreService(): FirestoreImpl {
