@@ -19,9 +19,8 @@ import {
 import { Spinner } from "@/shadcn/components/ui/spinner"
 import { cn } from "@/shadcn/lib/utils"
 import { ChevronLeft, Database, Folder, Layers, RefreshCw, Search } from "lucide-react"
-import { useState, useMemo, useEffect, useCallback } from "react"
+import { useState, useMemo, useEffect, useCallback, type ReactNode } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { ScrollArea } from "@/shadcn/components/ui/scroll-area"
 import { toast } from "sonner"
 import { useGcpStore, type ProjectTab } from "@/features/gcp/store/gcp-store"
 import {
@@ -42,6 +41,8 @@ interface FirestoreSidebarProps {
   drawerMode?: boolean
   drawerOpen?: boolean
   onDrawerOpenChange?: (open: boolean) => void
+  /** FFP-202: optional saved-queries/history section rendered below the collection list. */
+  belowCollections?: ReactNode
 }
 
 export function FirestoreSidebar({
@@ -56,6 +57,7 @@ export function FirestoreSidebar({
   drawerMode = false,
   drawerOpen = false,
   onDrawerOpenChange,
+  belowCollections,
 }: FirestoreSidebarProps) {
   const {
     credentialsFile,
@@ -146,14 +148,17 @@ export function FirestoreSidebar({
 
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 
+  // Virtualize inside a plain scrollable div, not a Radix ScrollArea: Radix composes refs into a
+  // new function each render, so a setState-based ref attached to it thrashes (detach→attach)
+  // under React 19 and loops. A stable callback ref on a plain div fires once on mount.
   const scrollRef = useCallback((node: HTMLDivElement | null) => {
-    if (node) {
-      setScrollElement(node.querySelector('[data-slot="scroll-area-viewport"]') as HTMLDivElement | null)
-    } else {
-      setScrollElement(null)
+    if (!node) {
+      return
     }
+    setScrollElement((prev) => (prev === node ? prev : node))
   }, [])
 
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: filteredCollections.length,
     getScrollElement: () => scrollElement,
@@ -227,7 +232,7 @@ export function FirestoreSidebar({
         </div>
       </div>
 
-      <ScrollArea ref={scrollRef} className="flex-1 min-h-0 px-2">
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-2">
         {!collectionsLoading && collections.length === 0 ? (
           <Empty className="border-none p-2">
             <EmptyHeader>
@@ -277,7 +282,7 @@ export function FirestoreSidebar({
             })}
           </div>
         )}
-      </ScrollArea>
+      </div>
     </div>
   )
 
@@ -294,6 +299,7 @@ export function FirestoreSidebar({
           </SheetHeader>
           {contextSelectors}
           {collectionList}
+          {belowCollections}
         </SheetContent>
       </Sheet>
     )
@@ -352,6 +358,7 @@ export function FirestoreSidebar({
         <>
           {contextSelectors}
           {collectionList}
+          {belowCollections}
         </>
       ) : null}
     </aside>
