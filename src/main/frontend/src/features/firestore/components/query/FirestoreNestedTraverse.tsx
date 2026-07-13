@@ -96,6 +96,7 @@ export function FirestoreNestedTraverse({
     return result
   }, [nestedResponse, hasNextPage])
 
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => scrollElement,
