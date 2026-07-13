@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import {
@@ -8,9 +8,11 @@ import {
   EMPTY_NESTED_RESPONSE,
   type CrudBusy,
   type DocumentWriteRequest,
+  type FilterCombinator,
   type FirestoreDocument,
   type FirestoreQueryRequest,
   type NestedResponse,
+  type OrderClause,
   type OrderDirection,
   type PreviewCloseIntent,
   type PreviewEditorTheme,
@@ -22,6 +24,7 @@ import {
 } from "@/features/firestore/schemas/FirestoreSchema"
 import {
   FirestoreConflictError,
+  FirestoreIndexError,
   firestoreService,
   type FirestoreDocumentDetails,
 } from "@/features/firestore/api/firestore-service"
@@ -44,7 +47,35 @@ import {
 } from "@/shadcn/components/ui/alert-dialog"
 import { useMediaQuery } from "@/shadcn/hooks/use-media-query"
 import { useIsMobile } from "@/shadcn/hooks/use-mobile"
-import type { ProjectTab } from "@/features/gcp/store/gcp-store"
+import { useGcpStore, type ProjectTab } from "@/features/gcp/store/gcp-store"
+import {
+  loadQueryState,
+  saveQueryState,
+  type PersistedQueryState,
+} from "@/features/firestore/api/query-state-storage"
+import {
+  addSavedQuery,
+  clearHistory as clearHistoryStorage,
+  loadHistory,
+  loadSavedQueries,
+  recordHistory,
+  removeSavedQuery,
+  renameSavedQuery as renameSavedQueryStorage,
+  toggleSavedQueryFavorite,
+  type HistoryEntry,
+  type SavedQuery,
+} from "@/features/firestore/api/saved-queries-storage"
+import { FirestoreReconnectNotice } from "@/features/firestore/components/layout/FirestoreReconnectNotice"
+import { FirestoreSavedQueries } from "@/features/firestore/components/query/FirestoreSavedQueries"
+import { FirestoreCompareDialog } from "@/features/firestore/components/dialogs/FirestoreCompareDialog"
+import { FirestoreProfilerDialog } from "@/features/firestore/components/dialogs/FirestoreProfilerDialog"
+import { FirestoreBulkEditDialog } from "@/features/firestore/components/dialogs/FirestoreBulkEditDialog"
+import { FirestoreBackupDialog } from "@/features/firestore/components/dialogs/FirestoreBackupDialog"
+import { FirestoreWatchDialog } from "@/features/firestore/components/dialogs/FirestoreWatchDialog"
+import { validateFields } from "@/features/firestore/api/schema-profiler"
+import { loadRules } from "@/features/firestore/api/validation-rules-storage"
+import { inferWireValue } from "@/features/firestore/api/firestore-value-utils"
+import { useOpenCommandPalette, useRegisterCommands } from "@/shared/components/command/command-registry"
 import { FirestoreCreateDrawer } from "@/features/firestore/components/dialogs/FirestoreCreateDrawer"
 import { FirestoreDocumentPreviewPanel, type PreviewBusy, type PreviewTab } from "@/features/firestore/components/viewers/FirestoreDocumentPreviewPanel"
 import { FirestoreFilterPanel } from "@/features/firestore/components/query/FirestoreFilterPanel"
@@ -108,6 +139,9 @@ const EMPTY_PREVIEW_VALIDATION: PreviewValidationSummary = {
 }
 const NESTED_PAGE_SIZE = 25
 
+// Stable no-op so the results component's effect deps don't change every render.
+const noopFilterMatchCountChange = () => { }
+
 function loadInitialPreviewTheme(): PreviewEditorTheme {
   if (typeof window === "undefined") {
     return "dark"
@@ -125,6 +159,11 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
   const isMobile = useIsMobile()
   const isNarrowDesktop = useMediaQuery("(max-width: 1280px)")
   const drawerMode = isMobile || isNarrowDesktop
+  // FFP-201: a tab restored from storage has no live backend client until it is reattached.
+  const { isTabAttached, markTabAttached, activeTabId } = useGcpStore()
+  const attached = isTabAttached(tab.id)
+  const isActiveTab = tab.id === activeTabId
+  const openCommandPalette = useOpenCommandPalette()
   const context = useMemo(
     () => ({
       projectId: tab.projectId,
@@ -133,6 +172,9 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     [tab.projectId, tab.databaseId],
   )
 
+  // FFP-201: restore the persisted query form (never auto-run; requires attachment first).
+  const persistedQuery = useMemo(() => loadQueryState(tab.id), [tab.id])
+
   const [leftSidebarExpanded, setLeftSidebarExpanded] = useState(true)
   const [rightSidebarExpanded, setRightSidebarExpanded] = useState(false)
   const [drawerCollectionsOpen, setDrawerCollectionsOpen] = useState(false)
@@ -140,20 +182,58 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
   const [drawerFiltersOpen, setDrawerFiltersOpen] = useState(false)
 
   const [activeCollection, setActiveCollection] = useState("")
-  const [queryPath, setQueryPath] = useState("")
+  const [queryPath, setQueryPath] = useState(persistedQuery?.queryPath ?? "")
   const [nestedIdFilter, setNestedIdFilter] = useState("")
-  const [orderField, setOrderField] = useState("")
-  const [orderDirection, setOrderDirection] = useState<OrderDirection>("desc")
-  const [limit, setLimit] = useState(50)
+  // FFP-203: multiple order clauses, an OR-group combinator, and a collection-group flag.
+  const [orderClauses, setOrderClauses] = useState<OrderClause[]>(persistedQuery?.orderBy ?? [])
+  const [filterCombinator, setFilterCombinator] = useState<FilterCombinator>(
+    persistedQuery?.filterCombinator ?? "and",
+  )
+  const [collectionGroup, setCollectionGroup] = useState<boolean>(
+    persistedQuery?.collectionGroup ?? false,
+  )
+  const [limit, setLimit] = useState(persistedQuery?.limit ?? 50)
   const [page, setPage] = useState(0)
   // FFP-105: cursors used to reach each page; index 0 is the first page (no cursor).
   const pageCursorsRef = useRef<(string | null)[]>([null])
-  const [whereRows, setWhereRows] = useState<WhereRow[]>([{ ...DEFAULT_WHERE_ROW }])
+  const [whereRows, setWhereRows] = useState<WhereRow[]>(
+    persistedQuery?.whereRows && persistedQuery.whereRows.length > 0
+      ? persistedQuery.whereRows
+      : [{ ...DEFAULT_WHERE_ROW }],
+  )
   const [searchQuery, setSearchQuery] = useState('')
+
+  // FFP-202: saved queries and bounded history, per project/database.
+  const [savedQueries, setSavedQueries] = useState<SavedQuery[]>(() =>
+    loadSavedQueries(tab.projectId, tab.databaseId),
+  )
+  const [queryHistory, setQueryHistory] = useState<HistoryEntry[]>(() =>
+    loadHistory(tab.projectId, tab.databaseId),
+  )
+
+  // FFP-201: current serializable query form (no secrets/results).
+  const currentQuerySnapshot = useCallback(
+    (): PersistedQueryState => ({
+      queryPath,
+      whereRows,
+      filterCombinator,
+      collectionGroup,
+      orderBy: orderClauses,
+      limit,
+    }),
+    [queryPath, whereRows, filterCombinator, collectionGroup, orderClauses, limit],
+  )
+
+  // FFP-201: persist the (non-secret) query form on change so a refresh restores it.
+  useEffect(() => {
+    saveQueryState(tab.id, currentQuerySnapshot())
+  }, [tab.id, currentQuerySnapshot])
 
   const [queryResponse, setQueryResponse] = useState<QueryResponse | null>(null)
   const [queryLoading, setQueryLoading] = useState(false)
   const [queryError, setQueryError] = useState("")
+  // FFP-203: create-index URL when a query fails for a missing composite index.
+  const [queryIndexUrl, setQueryIndexUrl] = useState<string | null>(null)
   const [querySelectedRows, setQuerySelectedRows] = useState<
     Array<{
       key: string
@@ -173,6 +253,16 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
   const [createPayload, setCreatePayload] = useState(EMPTY_JSON_TEMPLATE)
   const [createDrawerOpen, setCreateDrawerOpen] = useState(false)
   const [firestoreImportDialogOpen, setFirestoreImportDialogOpen] = useState(false)
+  // FFP-301: comparison dialog
+  const [compareOpen, setCompareOpen] = useState(false)
+  // FFP-302: schema profiler dialog
+  const [profilerOpen, setProfilerOpen] = useState(false)
+  // FFP-303: bulk edit dialog
+  const [bulkEditOpen, setBulkEditOpen] = useState(false)
+  // FFP-304: backup & restore dialog
+  const [backupOpen, setBackupOpen] = useState(false)
+  // FFP-306: real-time watch dialog
+  const [watchOpen, setWatchOpen] = useState(false)
 
   const [crudBusy, setCrudBusy] = useState<CrudBusy>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
@@ -207,6 +297,8 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
   const collectionsQuery = useQuery({
     queryKey: ["firestore", "collections", tab.id],
     queryFn: () => firestoreService.getCollections(context),
+    // FFP-201: never issue requests for a detached (unreattached) tab.
+    enabled: attached,
   })
 
   const collections = collectionsQuery.data ?? []
@@ -215,7 +307,7 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
   const normalizedNestedIdFilter = useMemo(() => nestedIdFilter.trim(), [nestedIdFilter])
   const nestedQuery = useInfiniteQuery({
     queryKey: ["firestore", tab.id, "nested", nestedPath, NESTED_PAGE_SIZE, normalizedNestedIdFilter],
-    enabled: Boolean(nestedPath),
+    enabled: Boolean(nestedPath) && attached,
     initialPageParam: null as string | null,
     queryFn: ({ pageParam }) =>
       firestoreService.getNested(
@@ -788,8 +880,19 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
    * page was first reached. Page 0 resets the cursor history; the next page's cursor is stored
    * from each response.
    */
-  async function runQuery(nextPage: number, pathOverride?: string): Promise<QueryResponse | null> {
-    const normalizedPath = normalizePath(pathOverride ?? queryPath)
+  async function runQuery(
+    nextPage: number,
+    pathOverride?: string,
+    snapshot?: PersistedQueryState,
+  ): Promise<QueryResponse | null> {
+    if (!attached) {
+      toast.warning("Reconnect this tab before running queries.")
+      return null
+    }
+    // FFP-202: when re-running a saved/history entry, build from its snapshot instead of state.
+    const source: PersistedQueryState = snapshot ?? currentQuerySnapshot()
+    const effectiveLimit = source.limit
+    const normalizedPath = normalizePath(pathOverride ?? source.queryPath)
     if (!normalizedPath) {
       setQueryError("Collection path is required.")
       setQueryResponse(null)
@@ -810,19 +913,22 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     const request: FirestoreQueryRequest = {
       path: normalizedPath,
       cursor,
-      limit,
-      orderDirection,
-      orderField,
-      filters: whereRows.map((row) => ({
+      limit: effectiveLimit,
+      filterCombinator: source.filterCombinator,
+      collectionGroup: source.collectionGroup,
+      orderBy: source.orderBy.filter((clause) => clause.field.trim()),
+      filters: source.whereRows.map((row) => ({
         field: row.field,
         operator: row.operator,
         value: row.value,
         type: row.type,
+        groupId: row.groupId,
       })),
     }
 
     setQueryLoading(true)
     setQueryError("")
+    setQueryIndexUrl(null)
 
     try {
       const response = await queryClient.fetchQuery({
@@ -843,8 +949,8 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
         ...response,
         pageIndex: boundedPage,
         hasPreviousPage: boundedPage > 0,
-        pageStart: response.documents.length > 0 ? boundedPage * limit + 1 : 0,
-        pageEnd: boundedPage * limit + response.documents.length,
+        pageStart: response.documents.length > 0 ? boundedPage * effectiveLimit + 1 : 0,
+        pageEnd: boundedPage * effectiveLimit + response.documents.length,
       }
 
       setQueryResponse(augmented)
@@ -852,8 +958,21 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
       setQueryPath(`/${augmented.path}`)
       const root = augmented.path.split("/")[0]
       setActiveCollection(root)
+
+      // FFP-202: record the executed query in history (first page only).
+      if (boundedPage === 0) {
+        const executed: PersistedQueryState = { ...source, queryPath: `/${augmented.path}` }
+        setQueryHistory(recordHistory(tab.projectId, tab.databaseId, executed))
+      }
       return augmented
     } catch (error) {
+      // FFP-203: a missing composite index yields an actionable create-index link.
+      if (error instanceof FirestoreIndexError) {
+        setQueryError(error.message)
+        setQueryIndexUrl(error.indexUrl)
+        setQueryResponse(null)
+        return null
+      }
       const message = error instanceof Error ? error.message : "Query failed."
       setQueryError(message)
       setQueryResponse(null)
@@ -888,6 +1007,19 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
       return
     }
 
+    // FFP-302: advisory local-rules validation before writing (never blocks).
+    const rules = loadRules(tab.projectId, tab.databaseId, normalizedPath)
+    if (rules.requiredPaths.length > 0 || Object.keys(rules.expectedTypes).length > 0) {
+      const typedFields: Record<string, ReturnType<typeof inferWireValue>> = {}
+      for (const [key, value] of Object.entries(payload)) {
+        typedFields[key] = inferWireValue(value)
+      }
+      const issues = validateFields(typedFields, rules)
+      if (issues.length > 0) {
+        toast.warning(`Local schema rules: ${issues.map((issue) => issue.message).join(" ")}`)
+      }
+    }
+
     setCrudBusy("create")
     try {
       await firestoreService.createDocument(
@@ -913,9 +1045,21 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
 
   function addWhereFilterRow() {
     const nextId = whereRows.reduce((acc, row) => Math.max(acc, row.id), 0) + 1
+    // FFP-203: a plain "Add filter" appends to the last group (AND within a group).
+    const lastGroup = whereRows.length > 0 ? whereRows[whereRows.length - 1].groupId : 0
     setWhereRows((prev) => [
       ...prev,
-      { id: nextId, field: "", operator: "==", value: "", type: "string" },
+      { id: nextId, field: "", operator: "==", value: "", type: "string", groupId: lastGroup },
+    ])
+  }
+
+  function addWhereOrGroup() {
+    const nextId = whereRows.reduce((acc, row) => Math.max(acc, row.id), 0) + 1
+    // FFP-203: a new OR group so the next clause is OR-combined with the previous groups.
+    const nextGroup = whereRows.reduce((acc, row) => Math.max(acc, row.groupId), 0) + 1
+    setWhereRows((prev) => [
+      ...prev,
+      { id: nextId, field: "", operator: "==", value: "", type: "string", groupId: nextGroup },
     ])
   }
 
@@ -923,7 +1067,9 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     setWhereRows((prev) => {
       if (prev.length <= 1) {
         return prev.map((row) =>
-          row.id === id ? { ...row, field: "", operator: "==", value: "", type: "string" } : row,
+          row.id === id
+            ? { ...row, field: "", operator: "==", value: "", type: "string", groupId: 0 }
+            : row,
         )
       }
       return prev.filter((row) => row.id !== id)
@@ -937,6 +1083,163 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
   ) {
     setWhereRows((prev) => prev.map((row) => (row.id === id ? { ...row, [key]: value } : row)))
   }
+
+  // FFP-203: order-clause management.
+  function addOrderClause() {
+    setOrderClauses((prev) => [...prev, { field: "", direction: "desc" }])
+  }
+
+  function removeOrderClause(index: number) {
+    setOrderClauses((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  function setOrderClauseValue(index: number, key: "field" | "direction", value: string) {
+    setOrderClauses((prev) =>
+      prev.map((clause, i) =>
+        i === index
+          ? { ...clause, [key]: key === "direction" ? (value as OrderDirection) : value }
+          : clause,
+      ),
+    )
+  }
+
+  // FFP-202: load a saved/history query snapshot into the form and run it.
+  function applyQuerySnapshot(snapshot: PersistedQueryState) {
+    setQueryPath(snapshot.queryPath)
+    setWhereRows(
+      snapshot.whereRows.length > 0 ? snapshot.whereRows : [{ ...DEFAULT_WHERE_ROW }],
+    )
+    setFilterCombinator(snapshot.filterCombinator)
+    setCollectionGroup(snapshot.collectionGroup)
+    setOrderClauses(snapshot.orderBy)
+    setLimit(snapshot.limit)
+    setPage(0)
+    void runQuery(0, snapshot.queryPath, snapshot)
+  }
+
+  function handleSaveCurrentQuery(name: string) {
+    setSavedQueries(addSavedQuery(tab.projectId, tab.databaseId, name, currentQuerySnapshot()))
+    toast.success("Query saved.")
+  }
+
+  function handleDeleteSavedQuery(id: string) {
+    setSavedQueries(removeSavedQuery(tab.projectId, tab.databaseId, id))
+  }
+
+  function handleRenameSavedQuery(id: string, name: string) {
+    setSavedQueries(renameSavedQueryStorage(tab.projectId, tab.databaseId, id, name))
+  }
+
+  function handleToggleSavedQueryFavorite(id: string) {
+    setSavedQueries(toggleSavedQueryFavorite(tab.projectId, tab.databaseId, id))
+  }
+
+  function handleClearHistory() {
+    clearHistoryStorage(tab.projectId, tab.databaseId)
+    setQueryHistory([])
+  }
+
+  // FFP-206: query commands, registered only while this tab is the active, attached one.
+  function toggleFilterPanel() {
+    if (drawerMode) {
+      setDrawerFiltersOpen((open) => !open)
+    } else {
+      setRightSidebarExpanded((open) => !open)
+    }
+  }
+
+  function toggleCollectionsPanel() {
+    if (drawerMode) {
+      setDrawerCollectionsOpen((open) => !open)
+    } else {
+      setLeftSidebarExpanded((open) => !open)
+    }
+  }
+
+  const isMod = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform)
+  const modLabel = isMod ? "⌘" : "Ctrl"
+  useRegisterCommands(
+    "firestore-query",
+    isActiveTab && attached
+      ? [
+          {
+            id: "query.run",
+            label: "Run query",
+            group: "Query",
+            shortcut: "mod+enter",
+            shortcutLabel: `${modLabel}↵`,
+            run: () => void runQuery(0),
+          },
+          {
+            id: "query.save",
+            label: "Save current query",
+            group: "Query",
+            run: () => handleSaveCurrentQuery(normalizePath(queryPath) || ""),
+          },
+          {
+            id: "doc.create",
+            label: "New document",
+            group: "Query",
+            run: () => openCreateFromHeader(),
+          },
+          {
+            id: "tools.compare",
+            label: "Compare documents/collections",
+            group: "Tools",
+            run: () => setCompareOpen(true),
+          },
+          {
+            id: "tools.profile",
+            label: "Profile collection schema",
+            group: "Tools",
+            run: () => setProfilerOpen(true),
+          },
+          {
+            id: "tools.bulkEdit",
+            label: "Bulk edit selected documents",
+            group: "Tools",
+            run: () => {
+              if (querySelectedRows.length === 0) {
+                toast.warning("Select documents to bulk edit first.")
+                return
+              }
+              setBulkEditOpen(true)
+            },
+          },
+          {
+            id: "tools.backup",
+            label: "Backup / restore",
+            group: "Tools",
+            run: () => setBackupOpen(true),
+          },
+          {
+            id: "tools.watch",
+            label: "Watch (real-time)",
+            group: "Tools",
+            run: () => setWatchOpen(true),
+          },
+          {
+            id: "panel.filters",
+            label: "Toggle filter panel",
+            group: "Panels",
+            run: () => toggleFilterPanel(),
+          },
+          {
+            id: "panel.collections",
+            label: "Toggle collections panel",
+            group: "Panels",
+            run: () => toggleCollectionsPanel(),
+          },
+          {
+            id: "palette.open",
+            label: "Open command palette",
+            group: "General",
+            shortcutLabel: `${modLabel}K`,
+            run: () => openCommandPalette(),
+          },
+        ]
+      : [],
+  )
 
   function runCollectionQuery(collection: string) {
     const normalized = normalizePath(collection)
@@ -1425,6 +1728,16 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     requestBulkDelete()
   }
 
+  // FFP-201: block the whole workspace for a detached tab until it is reattached; its query
+  // form and column prefs stay in local storage in the meantime.
+  if (!attached) {
+    return (
+      <div className="relative flex min-h-0 h-full w-full flex-1 overflow-hidden bg-muted/40">
+        <FirestoreReconnectNotice tab={tab} onReattached={() => markTabAttached(tab.id)} />
+      </div>
+    )
+  }
+
   return (
     <div className="relative flex min-h-0 h-full w-full flex-1 overflow-hidden bg-muted/40">
       <div className="flex min-h-0 h-full w-full">
@@ -1440,6 +1753,18 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
           drawerMode={drawerMode}
           drawerOpen={drawerCollectionsOpen}
           onDrawerOpenChange={setDrawerCollectionsOpen}
+          belowCollections={
+            <FirestoreSavedQueries
+              savedQueries={savedQueries}
+              history={queryHistory}
+              onRun={(snapshot) => applyQuerySnapshot(snapshot)}
+              onSaveCurrent={handleSaveCurrentQuery}
+              onDelete={handleDeleteSavedQuery}
+              onRename={handleRenameSavedQuery}
+              onToggleFavorite={handleToggleSavedQueryFavorite}
+              onClearHistory={handleClearHistory}
+            />
+          }
         />
 
         <FirestoreNestedTraverse
@@ -1510,7 +1835,9 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
                     onRunNextPage={() => void runQuery(page + 1)}
                     queryStats={queryStats}
                     quickSearchText={searchQuery}
-                    onFilterMatchCountChange={() => { }}
+                    onFilterMatchCountChange={noopFilterMatchCountChange}
+                    indexUrl={queryIndexUrl}
+                    tabId={tab.id}
                   />
 
                   <input
@@ -1621,12 +1948,17 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
           onToggle={() => setRightSidebarExpanded((value) => !value)}
           whereRows={whereRows}
           addWhereFilterRow={addWhereFilterRow}
+          addWhereOrGroup={addWhereOrGroup}
           removeWhereFilterRow={removeWhereFilterRow}
           setWhereRowValue={setWhereRowValue}
-          orderField={orderField}
-          setOrderField={setOrderField}
-          orderDirection={orderDirection}
-          setOrderDirection={setOrderDirection}
+          filterCombinator={filterCombinator}
+          setFilterCombinator={setFilterCombinator}
+          collectionGroup={collectionGroup}
+          setCollectionGroup={setCollectionGroup}
+          orderClauses={orderClauses}
+          addOrderClause={addOrderClause}
+          removeOrderClause={removeOrderClause}
+          setOrderClauseValue={setOrderClauseValue}
           limit={limit}
           setLimit={setLimit}
           onRun={() => void runQuery(0)}
@@ -1760,6 +2092,52 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
           open={firestoreImportDialogOpen}
           onOpenChange={setFirestoreImportDialogOpen}
           onImportSuccess={() => void runQuery(page)}
+        />
+
+        {/* FFP-301: document/collection comparison */}
+        <FirestoreCompareDialog
+          context={context}
+          open={compareOpen}
+          onOpenChange={setCompareOpen}
+          initialLeftPath={normalizePath(queryPath)}
+        />
+
+        {/* FFP-302: schema profiler + local validation rules */}
+        <FirestoreProfilerDialog
+          context={context}
+          open={profilerOpen}
+          onOpenChange={setProfilerOpen}
+          initialPath={normalizePath(activeCollection) || normalizePath(queryPath)}
+        />
+
+        {/* FFP-303: previewable bulk edit of selected documents */}
+        <FirestoreBulkEditDialog
+          context={context}
+          open={bulkEditOpen}
+          onOpenChange={setBulkEditOpen}
+          paths={querySelectedRows
+            .map((row) => row.normalizedDocumentPath)
+            .filter((path) => path && !pathIsCollection(path))}
+          onExecuted={() => {
+            void runQuery(page)
+            setBulkEditOpen(false)
+          }}
+        />
+
+        {/* FFP-304: streaming backup and restore */}
+        <FirestoreBackupDialog
+          context={context}
+          open={backupOpen}
+          onOpenChange={setBackupOpen}
+          initialPath={normalizePath(activeCollection) || normalizePath(queryPath)}
+        />
+
+        {/* FFP-306: real-time watch mode */}
+        <FirestoreWatchDialog
+          context={context}
+          open={watchOpen}
+          onOpenChange={setWatchOpen}
+          initialPath={normalizePath(queryPath)}
         />
       </div>
     </div>
