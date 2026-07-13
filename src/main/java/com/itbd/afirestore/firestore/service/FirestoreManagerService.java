@@ -1,6 +1,7 @@
 package com.itbd.afirestore.firestore.service;
 
 import com.google.auth.oauth2.GoogleCredentials;
+import com.google.cloud.NoCredentials;
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.FirestoreOptions;
 import com.google.cloud.firestore.v1.FirestoreAdminClient;
@@ -24,7 +25,13 @@ import java.util.concurrent.ConcurrentHashMap;
 public class FirestoreManagerService {
 
     private final Map<String, Firestore> firestoreConnections = new ConcurrentHashMap<>();
+    // FFP-205: explicit per-connection mode ("service-account" | "emulator"), replacing the old
+    // project-id heuristic. Keyed by the same connection key as firestoreConnections.
+    private final Map<String, String> connectionModes = new ConcurrentHashMap<>();
     private volatile String activeConnectionKey;
+
+    static final String MODE_SERVICE_ACCOUNT = "service-account";
+    static final String MODE_EMULATOR = "emulator";
 
     /**
      * FFP-004: Application shutdown hook to close all Firestore clients.
@@ -61,6 +68,43 @@ public class FirestoreManagerService {
 
         Firestore replacement = optionsBuilder.build().getService();
         Firestore previous = firestoreConnections.put(connectionKey, replacement);
+        connectionModes.put(connectionKey, MODE_SERVICE_ACCOUNT);
+        this.activeConnectionKey = connectionKey;
+        if (previous != null) {
+            try {
+                previous.close();
+            } catch (Exception e) {
+                log.warn("Error closing replaced Firestore client for key '{}': {}", connectionKey, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * FFP-205: Initializes a credential-free Firestore client pointed at a local emulator.
+     * Uses {@link NoCredentials} and an explicit emulator host; the connection is tagged
+     * {@value #MODE_EMULATOR} so status reporting can distinguish it from Google Cloud.
+     */
+    public synchronized void initializeEmulator(String projectId, String databaseId, String emulatorHost) {
+        String normalizedProjectId = normalizeProjectId(projectId);
+        String normalizedDatabaseId = normalizeDatabaseId(databaseId);
+        String connectionKey = connectionKey(normalizedProjectId, normalizedDatabaseId);
+
+        if (emulatorHost == null || emulatorHost.trim().isEmpty()) {
+            throw new IllegalArgumentException("emulatorHost is required.");
+        }
+
+        FirestoreOptions.Builder optionsBuilder = FirestoreOptions.newBuilder()
+                .setProjectId(normalizedProjectId)
+                .setEmulatorHost(emulatorHost.trim())
+                .setCredentials(NoCredentials.getInstance());
+
+        if (!isDefaultDatabaseId(normalizedDatabaseId)) {
+            optionsBuilder.setDatabaseId(normalizedDatabaseId);
+        }
+
+        Firestore replacement = optionsBuilder.build().getService();
+        Firestore previous = firestoreConnections.put(connectionKey, replacement);
+        connectionModes.put(connectionKey, MODE_EMULATOR);
         this.activeConnectionKey = connectionKey;
         if (previous != null) {
             try {
@@ -132,16 +176,17 @@ public class FirestoreManagerService {
         String connectionKey = connectionKey(normalizedProjectId, normalizedDatabaseId);
 
         Firestore firestore = this.firestoreConnections.remove(connectionKey);
+        this.connectionModes.remove(connectionKey);
         if (firestore != null) {
             try {
                 firestore.close();
             } catch (Exception e) {
                 log.warn("Error closing Firestore client for key '{}': {}", connectionKey, e.getMessage());
             }
-            
+
             // Update active connection key if needed
             if (connectionKey.equals(this.activeConnectionKey)) {
-                this.activeConnectionKey = this.firestoreConnections.isEmpty() ? null : 
+                this.activeConnectionKey = this.firestoreConnections.isEmpty() ? null :
                     this.firestoreConnections.keySet().iterator().next();
             }
         }
@@ -161,6 +206,7 @@ public class FirestoreManagerService {
                 }
             }
         }
+        this.connectionModes.clear();
         this.activeConnectionKey = null;
     }
 
@@ -173,51 +219,37 @@ public class FirestoreManagerService {
     }
 
     /**
-     * FFP-003: Get the active connection mode (emulator vs service-account).
+     * FFP-205: Get the active connection mode from the explicit per-connection mode map
+     * (emulator vs service-account), rather than guessing from the project id.
      */
     public String getActiveConnectionMode() {
         if (this.activeConnectionKey == null) {
             return "disconnected";
         }
-        
-        // Check if any credentials were provided during initialization
-        // This is a simplified check; in production, you'd track this more explicitly
-        for (Firestore firestore : this.firestoreConnections.values()) {
-            try {
-                // If we can get the project ID from the Firestore options, it's likely service-account
-                String projectId = firestore.getOptions().getProjectId();
-                if (projectId != null && !projectId.isEmpty() && 
-                    !projectId.equals("test-project") && 
-                    !projectId.contains("localhost")) {
-                    return "service-account";
-                }
-            } catch (Exception e) {
-                // Ignore and continue checking
-            }
-        }
-        
-        return "emulator";
+        return this.connectionModes.getOrDefault(this.activeConnectionKey, MODE_SERVICE_ACCOUNT);
     }
 
     /**
-     * FFP-003: Get the active connection context for UI display.
+     * FFP-003/FFP-205: Get the active connection context for UI display, including the explicit
+     * connection mode.
      */
     public Map<String, String> getActiveConnectionContext() {
         if (this.activeConnectionKey == null) {
             return Map.of("status", "disconnected");
         }
-        
+
         Firestore firestore = this.firestoreConnections.get(this.activeConnectionKey);
         if (firestore == null) {
             return Map.of("status", "unknown");
         }
-        
+
         try {
             String projectId = firestore.getOptions().getProjectId();
             String databaseId = firestore.getOptions().getDatabaseId();
-            
+
             return Map.of(
                 "status", "connected",
+                "mode", this.connectionModes.getOrDefault(this.activeConnectionKey, MODE_SERVICE_ACCOUNT),
                 "projectId", projectId != null ? projectId : "",
                 "databaseId", databaseId != null ? databaseId : "(default)",
                 "connectionKey", this.activeConnectionKey
