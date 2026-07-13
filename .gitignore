@@ -36,3 +36,4 @@ build/
 src/main/frontend/test-results/
 src/main/frontend/playwright-report/
 src/main/frontend/coverage/
+src/main/resources/static/index.html
