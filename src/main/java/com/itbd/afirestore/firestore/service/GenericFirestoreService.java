@@ -7,6 +7,7 @@ import com.google.cloud.firestore.DocumentReference;
 import com.google.cloud.firestore.DocumentSnapshot;
 import com.google.cloud.firestore.FieldPath;
 import com.google.cloud.firestore.FieldValue;
+import com.google.cloud.firestore.Filter;
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.FirestoreOptions;
 import com.google.cloud.firestore.Precondition;
@@ -48,6 +49,21 @@ public class GenericFirestoreService {
     /** FFP-106: A bulk delete request is a single atomic batch of at most this many paths. */
     public static final int MAX_BULK_DELETE_PATHS = 500;
 
+    /** FFP-303: A bulk edit applies at most this many document patches per request. */
+    public static final int MAX_BULK_EDIT_PATHS = 500;
+
+    /** FFP-303: Per-document outcome of a bulk edit. */
+    public record BulkEditItem(String path, String status, String message) {}
+
+    /** FFP-303: Result of a previewable bulk edit. */
+    public record BulkEditResult(
+            boolean dryRun,
+            int requested,
+            int succeeded,
+            int failed,
+            List<BulkEditItem> results,
+            boolean complete) {}
+
     public record PaginatedDocuments(
             List<DocumentDto> documents,
             int pageIndex,
@@ -55,7 +71,15 @@ public class GenericFirestoreService {
             boolean hasNextPage) {
     }
 
-    public record WhereClause(String field, String operator, Object value) {}
+    public record WhereClause(String field, String operator, Object value, int groupId) {
+        /** FFP-105 compatibility: a clause with no explicit OR group belongs to group 0. */
+        public WhereClause(String field, String operator, Object value) {
+            this(field, operator, value, 0);
+        }
+    }
+
+    /** FFP-203: one order-by clause; queries may carry several, applied left to right. */
+    public record OrderClause(String field, String direction) {}
 
     /**
      * FFP-105: Result of a cursor-paginated query. {@code nextCursor} is opaque; pass it back
@@ -133,8 +157,9 @@ public class GenericFirestoreService {
             String databaseId,
             String path,
             List<WhereClause> whereClauses,
-            String orderField,
-            String orderDirection,
+            String filterCombinator,
+            List<OrderClause> orderClauses,
+            boolean collectionGroup,
             int limit,
             String cursorToken) {
         return Mono.fromCallable(() -> {
@@ -142,28 +167,40 @@ public class GenericFirestoreService {
             int safeLimit = Math.clamp(limit, 1, 500);
 
             Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
-            Query query = firestore.collection(path);
+            // FFP-203: a collection-group query scans every collection with the given id across
+            // the database; otherwise the path is a concrete collection.
+            Query query = collectionGroup ? firestore.collectionGroup(path) : firestore.collection(path);
 
-            if (whereClauses != null) {
-                for (WhereClause clause : whereClauses) {
+            // FFP-203: build a composite AND/OR filter tree from the (grouped) where clauses.
+            Filter composite = buildCompositeFilter(whereClauses, filterCombinator);
+            if (composite != null) {
+                query = query.where(composite);
+            }
+
+            // FFP-203: apply each order clause in turn, then a document-ID tiebreaker.
+            List<OrderClause> effectiveOrders = new ArrayList<>();
+            if (orderClauses != null) {
+                for (OrderClause clause : orderClauses) {
                     if (clause == null || clause.field() == null || clause.field().isBlank()
-                            || clause.operator() == null || clause.operator().isBlank()) {
+                            || "id".equalsIgnoreCase(clause.field().trim())) {
                         continue;
                     }
-                    query = applyWhere(query, clause.field(), clause.operator(), clause.value());
+                    effectiveOrders.add(new OrderClause(clause.field().trim(), clause.direction()));
                 }
             }
 
-            Query.Direction direction = "asc".equalsIgnoreCase(orderDirection)
-                    ? Query.Direction.ASCENDING
-                    : Query.Direction.DESCENDING;
-            String normalizedOrderField = orderField == null ? "" : orderField.trim();
-            boolean orderByField = !normalizedOrderField.isBlank()
-                    && !"id".equalsIgnoreCase(normalizedOrderField);
+            Query.Direction tiebreakDirection = Query.Direction.ASCENDING;
+            for (OrderClause clause : effectiveOrders) {
+                Query.Direction direction = "asc".equalsIgnoreCase(clause.direction())
+                        ? Query.Direction.ASCENDING
+                        : Query.Direction.DESCENDING;
+                query = query.orderBy(clause.field(), direction);
+                tiebreakDirection = direction;
+            }
 
-            if (orderByField) {
-                query = query.orderBy(normalizedOrderField, direction)
-                        .orderBy(FieldPath.documentId(), direction);
+            boolean hasOrderFields = !effectiveOrders.isEmpty();
+            if (hasOrderFields) {
+                query = query.orderBy(FieldPath.documentId(), tiebreakDirection);
             } else {
                 // Firestore's built-in index on __name__ is ascending-only; a descending
                 // document-ID sort requires a manually created index. Always order ascending
@@ -173,11 +210,13 @@ public class GenericFirestoreService {
 
             if (cursorToken != null && !cursorToken.isBlank()) {
                 QueryCursorCodec.DecodedCursor cursor = QueryCursorCodec.decode(cursorToken);
-                if (orderByField) {
-                    Object orderValue = cursor.orderValue() == null
-                            ? null
-                            : cursor.orderValue().toFirestoreObject(firestore);
-                    query = query.startAfter(orderValue, cursor.documentId());
+                if (hasOrderFields) {
+                    List<Object> startValues = new ArrayList<>();
+                    for (FirestoreValue value : cursor.orderValues()) {
+                        startValues.add(value == null ? null : value.toFirestoreObject(firestore));
+                    }
+                    startValues.add(cursor.documentId());
+                    query = query.startAfter(startValues.toArray());
                 } else {
                     query = query.startAfter(cursor.documentId());
                 }
@@ -196,15 +235,88 @@ public class GenericFirestoreService {
             String nextCursor = null;
             if (hasMore && !pageDocs.isEmpty()) {
                 QueryDocumentSnapshot lastDoc = pageDocs.get(pageDocs.size() - 1);
-                FirestoreValue orderValue = orderByField
-                        ? FirestoreValue.from(lastDoc.get(normalizedOrderField))
-                        : null;
-                nextCursor = QueryCursorCodec.encode(orderValue, lastDoc.getId());
+                List<FirestoreValue> orderValues = new ArrayList<>();
+                for (OrderClause clause : effectiveOrders) {
+                    orderValues.add(FirestoreValue.from(lastDoc.get(clause.field())));
+                }
+                nextCursor = QueryCursorCodec.encodeAll(orderValues, lastDoc.getId());
             }
 
             long elapsedMs = Math.max(1L, (System.nanoTime() - startNanos) / 1_000_000L);
             return new CursorQueryResult(documents, elapsedMs, safeLimit, hasMore, nextCursor);
         }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * FFP-203: builds a composite Firestore {@link Filter} from grouped where clauses. Clauses
+     * sharing a {@code groupId} are AND-combined; the resulting groups are combined with the
+     * top-level {@code filterCombinator} ("or" for OR-groups, otherwise AND). Returns {@code null}
+     * when there are no usable clauses.
+     */
+    private Filter buildCompositeFilter(List<WhereClause> whereClauses, String filterCombinator) {
+        if (whereClauses == null || whereClauses.isEmpty()) {
+            return null;
+        }
+        LinkedHashMap<Integer, List<Filter>> groups = new LinkedHashMap<>();
+        for (WhereClause clause : whereClauses) {
+            if (clause == null || clause.field() == null || clause.field().isBlank()
+                    || clause.operator() == null || clause.operator().isBlank()) {
+                continue;
+            }
+            Filter filter = buildFilter(clause.field(), clause.operator(), clause.value());
+            groups.computeIfAbsent(clause.groupId(), key -> new ArrayList<>()).add(filter);
+        }
+        if (groups.isEmpty()) {
+            return null;
+        }
+
+        List<Filter> groupFilters = new ArrayList<>();
+        for (List<Filter> clausesInGroup : groups.values()) {
+            groupFilters.add(clausesInGroup.size() == 1
+                    ? clausesInGroup.get(0)
+                    : Filter.and(clausesInGroup.toArray(new Filter[0])));
+        }
+        if (groupFilters.size() == 1) {
+            return groupFilters.get(0);
+        }
+        return "or".equalsIgnoreCase(filterCombinator)
+                ? Filter.or(groupFilters.toArray(new Filter[0]))
+                : Filter.and(groupFilters.toArray(new Filter[0]));
+    }
+
+    /** FFP-203: maps one where clause to a Firestore {@link Filter} (documentId-aware). */
+    private Filter buildFilter(String field, String operator, Object value) {
+        String normalizedField = field == null ? "" : field.trim();
+        String normalizedOperator = operator == null ? "" : operator.trim();
+
+        if ("id".equalsIgnoreCase(normalizedField)) {
+            FieldPath idPath = FieldPath.documentId();
+            return switch (normalizedOperator) {
+                case "==" -> Filter.equalTo(idPath, value);
+                case "!=" -> Filter.notEqualTo(idPath, value);
+                case ">" -> Filter.greaterThan(idPath, value);
+                case ">=" -> Filter.greaterThanOrEqualTo(idPath, value);
+                case "<" -> Filter.lessThan(idPath, value);
+                case "<=" -> Filter.lessThanOrEqualTo(idPath, value);
+                case "in" -> Filter.inArray(idPath, (List<?>) value);
+                case "not-in" -> Filter.notInArray(idPath, (List<?>) value);
+                default -> throw new IllegalArgumentException("Unsupported where operator for documentId: " + operator);
+            };
+        }
+
+        return switch (normalizedOperator) {
+            case "==" -> Filter.equalTo(normalizedField, value);
+            case "!=" -> Filter.notEqualTo(normalizedField, value);
+            case ">" -> Filter.greaterThan(normalizedField, value);
+            case ">=" -> Filter.greaterThanOrEqualTo(normalizedField, value);
+            case "<" -> Filter.lessThan(normalizedField, value);
+            case "<=" -> Filter.lessThanOrEqualTo(normalizedField, value);
+            case "array-contains" -> Filter.arrayContains(normalizedField, value);
+            case "array-contains-any" -> Filter.arrayContainsAny(normalizedField, (List<?>) value);
+            case "in" -> Filter.inArray(normalizedField, (List<?>) value);
+            case "not-in" -> Filter.notInArray(normalizedField, (List<?>) value);
+            default -> throw new IllegalArgumentException("Unsupported where operator: " + operator);
+        };
     }
 
     /**
@@ -404,6 +516,100 @@ public class GenericFirestoreService {
             current.put(leaf, FieldValue.delete());
         }
         return merged;
+    }
+
+    /**
+     * FFP-303: Applies a typed merge patch (set fields + delete field paths) to many documents.
+     * A dry run reports the plan without writing. Execution commits a bounded batch and, if the
+     * batch fails, retries per document so conflicts are reported per path.
+     */
+    public Mono<BulkEditResult> bulkEditDocuments(
+            String projectId,
+            String databaseId,
+            List<String> paths,
+            Map<String, FirestoreValue> setFields,
+            List<String> deleteFieldPaths,
+            boolean dryRun) {
+        return Mono.fromCallable(() -> {
+            List<String> validated = validateBulkEditPaths(paths);
+            List<String> deletes = deleteFieldPaths == null
+                    ? List.of()
+                    : deleteFieldPaths.stream().filter(p -> p != null && !p.isBlank()).map(String::trim).toList();
+            if ((setFields == null || setFields.isEmpty()) && deletes.isEmpty()) {
+                throw new IllegalArgumentException("A bulk edit must set at least one field or delete at least one path.");
+            }
+
+            Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
+            Map<String, Object> rawFields = new LinkedHashMap<>();
+            if (setFields != null) {
+                setFields.forEach((key, value) ->
+                        rawFields.put(key, value == null ? null : value.toFirestoreObject(firestore)));
+            }
+            // Reuse the merge-delete sentinel logic; it also rejects set/delete collisions.
+            Map<String, Object> mergePayload = withDeleteSentinels(rawFields, deletes);
+
+            if (dryRun) {
+                List<BulkEditItem> preview = validated.stream()
+                        .map(path -> new BulkEditItem(path, "preview", ""))
+                        .toList();
+                return new BulkEditResult(true, validated.size(), 0, 0, preview, true);
+            }
+
+            List<BulkEditItem> results = new ArrayList<>();
+            int succeeded = 0;
+            int failed = 0;
+
+            WriteBatch batch = firestore.batch();
+            for (String path : validated) {
+                batch.set(firestore.document(path), mergePayload, SetOptions.merge());
+            }
+            try {
+                batch.commit().get();
+                for (String path : validated) {
+                    results.add(new BulkEditItem(path, "ok", ""));
+                }
+                succeeded = validated.size();
+            } catch (Exception batchFailure) {
+                // The atomic batch failed; retry each document to pinpoint conflicts.
+                log.warn("Bulk edit batch failed ({}); retrying per document.", batchFailure.getMessage());
+                for (String path : validated) {
+                    try {
+                        firestore.document(path).set(mergePayload, SetOptions.merge()).get();
+                        results.add(new BulkEditItem(path, "ok", ""));
+                        succeeded += 1;
+                    } catch (Exception docFailure) {
+                        results.add(new BulkEditItem(path, "failed",
+                                docFailure.getMessage() == null ? "Write failed." : docFailure.getMessage()));
+                        failed += 1;
+                    }
+                }
+            }
+            return new BulkEditResult(false, validated.size(), succeeded, failed, results, failed == 0);
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /** Visible for testing: dedupes, validates, and bounds a bulk edit path list. */
+    static List<String> validateBulkEditPaths(List<String> documentPaths) {
+        if (documentPaths == null || documentPaths.isEmpty()) {
+            throw new IllegalArgumentException("At least one document path is required.");
+        }
+        LinkedHashSet<String> unique = new LinkedHashSet<>();
+        for (String rawPath : documentPaths) {
+            String normalized = rawPath == null ? "" : rawPath.trim().replaceAll("^/+|/+$", "");
+            if (normalized.isBlank()) {
+                throw new IllegalArgumentException("Bulk edit paths cannot be blank.");
+            }
+            if (normalized.split("/").length % 2 != 0) {
+                throw new IllegalArgumentException("Not a document path: '" + normalized + "'.");
+            }
+            unique.add(normalized);
+        }
+        if (unique.size() > MAX_BULK_EDIT_PATHS) {
+            throw new IllegalArgumentException(
+                    "Bulk edit accepts at most " + MAX_BULK_EDIT_PATHS
+                            + " unique document paths per request, got " + unique.size() + ".");
+        }
+        return List.copyOf(unique);
     }
 
     private void enforceUpdateTimePrecondition(
@@ -628,6 +834,74 @@ public class GenericFirestoreService {
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
+    /**
+     * FFP-302: Bounded collection sample for the schema profiler. Reads at most {@code limit}
+     * documents (never the whole collection) as typed DTOs so field types can be profiled.
+     */
+    public Mono<List<DocumentDto>> sampleCollection(
+            String projectId, String databaseId, String collectionPath, int limit) {
+        return Mono.fromCallable(() -> {
+            Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
+            int safeLimit = Math.clamp(limit, 1, 1000);
+            List<QueryDocumentSnapshot> documents = firestore
+                    .collection(collectionPath)
+                    .limit(safeLimit)
+                    .get()
+                    .get()
+                    .getDocuments();
+            return documents.stream()
+                    .map(this::toDocumentDto)
+                    .collect(Collectors.toList());
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * FFP-304: Collects a document or collection subtree into a flat list of typed documents with
+     * absolute paths (subcollections are captured because each nested document carries its full
+     * path). Bounded: exceeding {@code maxDocuments} throws so a backup never runs unbounded.
+     */
+    public Mono<List<DocumentDto>> backupSubtree(
+            String projectId, String databaseId, String path, int maxDocuments) {
+        return Mono.fromCallable(() -> {
+            String normalized = path == null ? "" : path.trim().replaceAll("^/+|/+$", "");
+            if (normalized.isBlank()) {
+                throw new IllegalArgumentException("A path is required for backup.");
+            }
+            int cap = Math.clamp(maxDocuments, 1, 50000);
+            Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
+            List<DocumentDto> collected = new ArrayList<>();
+            boolean isDocument = normalized.split("/").length % 2 == 0;
+            if (isDocument) {
+                collectDocumentSubtree(firestore.document(normalized), collected, cap);
+            } else {
+                collectCollectionSubtree(firestore.collection(normalized), collected, cap);
+            }
+            return collected;
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private void collectCollectionSubtree(CollectionReference collection, List<DocumentDto> out, int cap)
+            throws Exception {
+        for (DocumentReference docRef : collection.listDocuments()) {
+            collectDocumentSubtree(docRef, out, cap);
+        }
+    }
+
+    private void collectDocumentSubtree(DocumentReference docRef, List<DocumentDto> out, int cap)
+            throws Exception {
+        DocumentSnapshot snapshot = docRef.get().get();
+        if (snapshot.exists()) {
+            if (out.size() >= cap) {
+                throw new IllegalArgumentException(
+                        "Backup exceeds the " + cap + "-document limit; narrow the path or raise the limit.");
+            }
+            out.add(toDocumentDto(snapshot, docRef.getPath()));
+        }
+        for (CollectionReference subCollection : docRef.listCollections()) {
+            collectCollectionSubtree(subCollection, out, cap);
+        }
+    }
+
     public Mono<NodePage> listDocumentNodesPage(
             String projectId,
             String databaseId,
@@ -772,40 +1046,6 @@ public class GenericFirestoreService {
             mutable.put("id", id);
             return mutable;
         }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    private Query applyWhere(Query query, String field, String operator, Object value) {
-        String normalizedField = field == null ? "" : field.trim();
-        String normalizedOperator = operator == null ? "" : operator.trim();
-        boolean isDocumentIdField = "id".equalsIgnoreCase(normalizedField);
-
-        if (isDocumentIdField) {
-            return switch (normalizedOperator) {
-                case "==" -> query.whereEqualTo(FieldPath.documentId(), value);
-                case "!=" -> query.whereNotEqualTo(FieldPath.documentId(), value);
-                case ">" -> query.whereGreaterThan(FieldPath.documentId(), value);
-                case ">=" -> query.whereGreaterThanOrEqualTo(FieldPath.documentId(), value);
-                case "<" -> query.whereLessThan(FieldPath.documentId(), value);
-                case "<=" -> query.whereLessThanOrEqualTo(FieldPath.documentId(), value);
-                case "in" -> query.whereIn(FieldPath.documentId(), (List<?>) value);
-                case "not-in" -> query.whereNotIn(FieldPath.documentId(), (List<?>) value);
-                default -> throw new IllegalArgumentException("Unsupported where operator for documentId: " + operator);
-            };
-        }
-
-        return switch (normalizedOperator) {
-            case "==" -> query.whereEqualTo(normalizedField, value);
-            case "!=" -> query.whereNotEqualTo(normalizedField, value);
-            case ">" -> query.whereGreaterThan(normalizedField, value);
-            case ">=" -> query.whereGreaterThanOrEqualTo(normalizedField, value);
-            case "<" -> query.whereLessThan(normalizedField, value);
-            case "<=" -> query.whereLessThanOrEqualTo(normalizedField, value);
-            case "array-contains" -> query.whereArrayContains(normalizedField, value);
-            case "array-contains-any" -> query.whereArrayContainsAny(normalizedField, (List<?>) value);
-            case "in" -> query.whereIn(normalizedField, (List<?>) value);
-            case "not-in" -> query.whereNotIn(normalizedField, (List<?>) value);
-            default -> throw new IllegalArgumentException("Unsupported where operator: " + operator);
-        };
     }
 
     private Map<String, Object> createDocumentInternal(
