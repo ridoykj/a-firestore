@@ -14,13 +14,15 @@ describe('Firestore Query Serialization', () => {
         path: 'users',
         cursor: null,
         limit: 50,
-        orderDirection: 'desc',
-        orderField: 'name',
+        filterCombinator: 'and',
+        collectionGroup: false,
+        orderBy: [{ field: 'name', direction: 'desc' }],
         filters: whereRows.map(row => ({
           field: row.field,
           operator: row.operator,
           value: row.value,
-          type: row.type
+          type: row.type,
+          groupId: row.groupId
         }))
       }
 
@@ -28,6 +30,7 @@ describe('Firestore Query Serialization', () => {
       expect(request.filters).toHaveLength(2)
       expect(request.filters[0].field).toBe('name')
       expect(request.filters[1].operator).toBe('>=')
+      expect(request.orderBy[0]).toEqual({ field: 'name', direction: 'desc' })
     })
 
     it('should handle empty filters', () => {
@@ -35,46 +38,56 @@ describe('Firestore Query Serialization', () => {
         path: 'users',
         cursor: null,
         limit: 50,
-        orderDirection: 'asc',
-        orderField: '',
+        filterCombinator: 'and',
+        collectionGroup: false,
+        orderBy: [],
         filters: []
       }
 
       expect(request.filters).toHaveLength(0)
-    })
-
-    it('should validate required fields', () => {
-      const request: FirestoreQueryRequest = {
-        path: '', // Invalid - empty path
-        cursor: null,
-        limit: 50,
-        orderDirection: 'asc',
-        orderField: '',
-        filters: []
-      }
-
-      expect(request.path).toBe('')
+      expect(request.orderBy).toHaveLength(0)
     })
   })
 
-  describe('filter validation', () => {
-    it('should validate filter operators', () => {
-      const validOperators = ['==', '!=', '<', '<=', '>', '>=', 'array-contains', 'in']
-      
-      for (const operator of validOperators) {
-        const request: FirestoreQueryRequest = {
-          path: 'users',
-          cursor: null,
-          limit: 50,
-          orderDirection: 'asc',
-          orderField: '',
-          filters: [{ field: 'name', operator, value: 'test', type: 'string' }]
-        }
-        
-        expect(request.filters[0].operator).toBe(operator)
+  describe('OR groups and multiple order clauses (FFP-203)', () => {
+    it('should carry per-filter group ids and an OR combinator', () => {
+      const request: FirestoreQueryRequest = {
+        path: 'orders',
+        cursor: null,
+        limit: 50,
+        filterCombinator: 'or',
+        collectionGroup: false,
+        orderBy: [
+          { field: 'total', direction: 'desc' },
+          { field: 'createdAt', direction: 'asc' }
+        ],
+        filters: [
+          { field: 'status', operator: '==', value: 'open', type: 'string', groupId: 0 },
+          { field: 'status', operator: '==', value: 'pending', type: 'string', groupId: 1 }
+        ]
       }
+
+      expect(request.filterCombinator).toBe('or')
+      expect(request.filters.map(f => f.groupId)).toEqual([0, 1])
+      expect(request.orderBy).toHaveLength(2)
     })
 
+    it('should support a collection-group query', () => {
+      const request: FirestoreQueryRequest = {
+        path: 'reviews',
+        cursor: null,
+        limit: 25,
+        filterCombinator: 'and',
+        collectionGroup: true,
+        orderBy: [],
+        filters: []
+      }
+
+      expect(request.collectionGroup).toBe(true)
+    })
+  })
+
+  describe('filter value types', () => {
     it('should handle different value types', () => {
       const testCases: Array<{ type: WhereType; value: string }> = [
         { type: 'string', value: 'hello' },
@@ -87,9 +100,10 @@ describe('Firestore Query Serialization', () => {
           path: 'users',
           cursor: null,
           limit: 50,
-          orderDirection: 'asc',
-          orderField: '',
-          filters: [{ field: 'field', operator: '==', value: testCase.value, type: testCase.type }]
+          filterCombinator: 'and',
+          collectionGroup: false,
+          orderBy: [],
+          filters: [{ field: 'field', operator: '==', value: testCase.value, type: testCase.type, groupId: 0 }]
         }
 
         expect(request.filters[0].value).toBe(testCase.value)
