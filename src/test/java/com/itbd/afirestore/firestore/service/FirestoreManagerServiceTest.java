@@ -168,4 +168,55 @@ class FirestoreManagerServiceTest {
         assertThatThrownBy(() -> service.initializeFirestore("  ", "db-a", serviceAccountJson))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    // FFP-205: emulator connection tests (no credentials).
+
+    @Test
+    void serviceAccountInitReportsServiceAccountMode() throws IOException {
+        service.initializeFirestore("unit-test-project", "db-a", serviceAccountJson);
+
+        assertThat(service.getActiveConnectionMode()).isEqualTo("service-account");
+        assertThat(service.getActiveConnectionContext()).containsEntry("mode", "service-account");
+    }
+
+    @Test
+    void emulatorInitRegistersConnectionWithoutCredentials() {
+        service.initializeEmulator("demo-project", "db-a", "localhost:8080");
+
+        assertThat(service.isConnected("demo-project", "db-a")).isTrue();
+        assertThat(service.getFirestore("demo-project", "db-a")).isNotNull();
+        assertThat(service.getActiveConnectionMode()).isEqualTo("emulator");
+        assertThat(service.getActiveConnectionContext())
+                .containsEntry("status", "connected")
+                .containsEntry("mode", "emulator")
+                .containsEntry("projectId", "demo-project");
+    }
+
+    @Test
+    void emulatorInitRejectsBlankHost() {
+        assertThatThrownBy(() -> service.initializeEmulator("demo-project", "db-a", "  "))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.initializeEmulator("demo-project", "db-a", null))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void replacingEmulatorWithServiceAccountUpdatesMode() throws IOException {
+        service.initializeEmulator("unit-test-project", "db-a", "localhost:8080");
+        assertThat(service.getActiveConnectionMode()).isEqualTo("emulator");
+
+        service.initializeFirestore("unit-test-project", "db-a", serviceAccountJson);
+
+        assertThat(service.getActiveConnectionMode()).isEqualTo("service-account");
+    }
+
+    @Test
+    void disconnectClearsEmulatorMode() {
+        service.initializeEmulator("demo-project", "db-a", "localhost:8080");
+
+        service.disconnect("demo-project", "db-a");
+
+        assertThat(service.isConnected("demo-project", "db-a")).isFalse();
+        assertThat(service.getActiveConnectionMode()).isEqualTo("disconnected");
+    }
 }
