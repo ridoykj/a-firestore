@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shadcn/components/ui
 import { useIsMobile } from "@/shadcn/hooks/use-mobile"
 import { cn } from "@/shadcn/lib/utils"
 import { useTheme } from "@/shared/components/ui/shadcn/components/theme-provider"
+import { useRegisterCommands } from "@/shared/components/command/command-registry"
 import { Database, Folder, Moon, Plus, Sun, X, LogOut, WifiOff } from "lucide-react"
 import { useMemo, useState } from "react"
 
@@ -28,7 +29,7 @@ function getConnectionBadge(mode: ConnectionMode) {
 }
 
 export function FirestoreTabsLayout() {
-  const { openTabs, activeTabId, addTab, removeTab, setActiveTabId, disconnectActiveTab } = useGcpStore()
+  const { openTabs, activeTabId, addTab, removeTab, setActiveTabId, disconnectActiveTab, isTabAttached } = useGcpStore()
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const isMobile = useIsMobile()
   const { theme, setTheme } = useTheme()
@@ -36,7 +37,7 @@ export function FirestoreTabsLayout() {
   // FFP-003: Determine active connection mode from the active tab or credentials
   const activeConnectionMode = useMemo((): ConnectionMode | null => {
     if (openTabs.length === 0) return null
-    
+
     const activeTab = openTabs.find(t => t.id === activeTabId) || openTabs[0]
     return activeTab.connectionMode
   }, [activeTabId, openTabs])
@@ -46,6 +47,9 @@ export function FirestoreTabsLayout() {
     if (openTabs.length === 0) return null
     return openTabs.find(t => t.id === activeTabId) || openTabs[0]
   }, [activeTabId, openTabs])
+
+  // FFP-201: a restored tab has no live backend client until reattached; don't claim "Connected".
+  const activeTabAttached = activeTab ? isTabAttached(activeTab.id) : false
 
   const activeValue = useMemo(() => {
     if (activeTabId) {
@@ -71,6 +75,35 @@ export function FirestoreTabsLayout() {
     disconnectActiveTab()
   }
 
+  // FFP-206: workspace-level commands (tab management, theme).
+  function cycleTab(direction: 1 | -1) {
+    if (openTabs.length === 0) return
+    const currentIndex = openTabs.findIndex((t) => t.id === activeValue)
+    const baseIndex = currentIndex < 0 ? 0 : currentIndex
+    const nextIndex = (baseIndex + direction + openTabs.length) % openTabs.length
+    setActiveTabId(openTabs[nextIndex].id)
+  }
+
+  useRegisterCommands("workspace-tabs", [
+    { id: "tab.add", label: "New tab", group: "Workspace", run: () => setAddDialogOpen(true) },
+    {
+      id: "tab.close",
+      label: "Close active tab",
+      group: "Workspace",
+      run: () => {
+        if (activeTab) removeTab(activeTab.id)
+      },
+    },
+    { id: "tab.next", label: "Next tab", group: "Workspace", run: () => cycleTab(1) },
+    { id: "tab.prev", label: "Previous tab", group: "Workspace", run: () => cycleTab(-1) },
+    {
+      id: "theme.toggle",
+      label: "Toggle light/dark theme",
+      group: "Appearance",
+      run: () => setTheme(theme === "dark" ? "light" : "dark"),
+    },
+  ])
+
   return (
     <div className="flex min-h-0 h-full w-full flex-1 flex-col overflow-hidden bg-background">
       {/* Top Header Console Banner */}
@@ -83,19 +116,27 @@ export function FirestoreTabsLayout() {
             <span className="font-semibold tracking-tight">Firestore Workspace</span>
             {/* FFP-003: Show real connection status instead of hardcoded "Emulator Connected" */}
             {activeConnectionMode ? (
-              <>
-                <span
-                  className={cn(
-                    "flex h-2 w-2 rounded-full",
-                    getConnectionBadge(activeConnectionMode).color,
-                    getConnectionBadge(activeConnectionMode).shadow,
-                  )}
-                  title={`${getConnectionBadge(activeConnectionMode).label}: ${activeTab?.projectId ?? ""}`}
-                ></span>
-                <span className="text-xs text-neutral-400">
-                  {getConnectionBadge(activeConnectionMode).label} · {activeTab?.projectId}
+              activeTabAttached ? (
+                <>
+                  <span
+                    className={cn(
+                      "flex h-2 w-2 rounded-full",
+                      getConnectionBadge(activeConnectionMode).color,
+                      getConnectionBadge(activeConnectionMode).shadow,
+                    )}
+                    title={`${getConnectionBadge(activeConnectionMode).label}: ${activeTab?.projectId ?? ""}`}
+                  ></span>
+                  <span className="text-xs text-neutral-400">
+                    {getConnectionBadge(activeConnectionMode).label} · {activeTab?.projectId}
+                  </span>
+                </>
+              ) : (
+                /* FFP-201: restored tab awaiting reattachment */
+                <span className="flex items-center gap-2 text-xs text-amber-400">
+                  <span className="flex h-2 w-2 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)]"></span>
+                  Reconnect required · {activeTab?.projectId}
                 </span>
-              </>
+              )
             ) : (
               <span className="flex items-center gap-2 text-xs text-neutral-500">
                 <WifiOff className="h-3 w-3" />
