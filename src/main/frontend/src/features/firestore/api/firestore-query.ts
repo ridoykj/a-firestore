@@ -65,6 +65,20 @@ export function useFirestoreInitMutation() {
   })
 }
 
+export function useFirestoreInitEmulatorMutation() {
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      databaseId,
+      emulatorHost,
+    }: {
+      projectId: string
+      databaseId: string
+      emulatorHost: string
+    }) => firestoreService.initEmulator(projectId, databaseId, emulatorHost),
+  })
+}
+
 export function useFirestoreTransferInitMutation() {
   return useMutation({
     mutationFn: (file: File) => firestoreService.initTransfer(file),
