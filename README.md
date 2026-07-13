@@ -9,11 +9,14 @@ See the [future feature plan](docs/FUTURE_FEATURE_PLAN.md) for the prioritized p
 ### Connections and workspaces
 
 - Upload a Google Cloud service-account JSON file and discover accessible projects and Firestore databases.
+- Connect to a local Firestore emulator by host/project/database without any credentials; the header status distinguishes emulator from Google Cloud.
 - Open several project/database contexts as tabs and switch between them without leaving the workspace.
 - Change the project or database inside an open tab.
 - See the real connection status (emulator or service account) for the active tab and disconnect it, which also closes the backend Firestore client.
+- Workspaces are restored after a browser refresh: open tabs, the active tab, per-tab query forms, and column preferences are kept locally (never credentials). A restored tab prompts to reconnect before it runs any request.
 - Search and refresh root collections.
 - Switch between light and dark themes.
+- Run commands and shortcuts from a command palette (Ctrl/Cmd+K): run query, create document, save query, toggle panels, and switch or close tabs, without overriding the JSON editor's own shortcuts.
 - On narrow screens, open the collections, nested-browser, and filter drawers from dedicated toolbar buttons.
 
 ### Browse and query data
@@ -21,10 +24,13 @@ See the [future feature plan](docs/FUTURE_FEATURE_PLAN.md) for the prioritized p
 - Query root collections or nested collection paths such as `users/user-id/posts`.
 - Traverse documents and subcollections in a separate nested browser.
 - Filter nested nodes by document or collection ID, navigate to a parent path, and load long lists incrementally.
-- Add multiple server-side `where` clauses using AND logic.
+- Add multiple server-side `where` clauses, grouped into OR groups that combine with an AND/ANY toggle for AND-of-ORs (or OR-of-ANDs) filters.
 - Use Firestore operators including `==`, `!=`, comparisons, `array-contains`, `array-contains-any`, `in`, and `not-in`.
 - Enter typed filter values as strings, numbers, booleans, nulls, arrays, or ISO-8601 timestamps.
-- Order results by field and direction, set the page size, and move between result pages using stable cursors (document IDs always break ties, so pages never skip or repeat documents while data changes).
+- Order results by multiple fields and directions, run collection-group queries across every collection with a given id, set the page size, and move between result pages using stable cursors (document IDs always break ties, so pages never skip or repeat documents while data changes).
+- Get early validation of unsupported filter combinations, and a clickable "create index" link when a query needs a Firestore composite index.
+- Save queries with a name, mark favorites, rerun or export them, and re-run recent queries from a bounded per-project/database history.
+- Configure the result table per collection: show, hide, reorder, resize, and pin columns, and inspect nested map/array values in a popover. Preferences are remembered per collection.
 - Quick-search the rows on the current page.
 - Select individual or all visible rows for bulk actions.
 
@@ -54,7 +60,15 @@ See the [future feature plan](docs/FUTURE_FEATURE_PLAN.md) for the prioritized p
 - Import or export a single document as JSON or CSV.
 - Recursively copy selected documents or collections, including subcollections, between Firestore projects/databases.
 - Reuse the current credential file or provide separate source credentials for a copy.
-- Choose merge or overwrite conflict handling and watch streamed copy progress.
+- Choose merge or overwrite conflict handling; the copy runs as a durable job that streams committed progress, can be cancelled (committed documents remain), and reports failures.
+- Back up a document or collection subtree to a typed JSON artifact (with manifest and format version) and restore it with a dry run and a merge/overwrite/skip conflict policy.
+
+### Analyze, bulk-edit, and watch
+
+- Compare two documents or two collections' field schemas with a type-aware added/removed/changed diff, and export the result.
+- Profile a collection's schema (field frequency, observed types, type conflicts, nullability) from a bounded sample, and optionally save local validation rules that warn before creating documents (Firestore security rules are never touched).
+- Bulk-edit the selected documents with a typed patch (set fields, delete field paths): review a dry run, then apply with per-document conflict reporting.
+- Watch a document or collection in real time: live changes stream over SSE with a visible connection state, and the read-only watch view never overwrites an unsaved editor draft.
 
 ## Typical workflow
 
@@ -191,12 +205,18 @@ Requests that operate on an initialized Firestore context use `X-Project-Id` and
 | Endpoint group | Purpose |
 |---|---|
 | `POST /api/gcp/projects` | Discover projects from an uploaded credential file |
-| `POST /api/firestore/init` | Initialize a project/database client |
+| `POST /api/firestore/init` | Initialize a project/database client from a service-account file |
+| `POST /api/firestore/init-emulator` | Initialize a credential-free client against a Firestore emulator host |
 | `/api/collections` and `/api/collections/**` | List collections and read, create, write (typed merge/replace contract with optimistic concurrency), or delete documents |
-| `/api/workbench/query` | Run filtered, ordered, cursor-paginated collection queries |
+| `/api/workbench/query` | Run filtered (AND/OR groups), multi-ordered, cursor-paginated collection or collection-group queries |
 | `/api/workbench/nested` | Traverse documents and subcollections |
 | `POST /api/workbench/bulk-delete` | Atomically delete up to 500 validated document paths |
+| `POST /api/workbench/bulk-edit` | Preview (dry run) or apply a typed merge patch to selected documents |
+| `GET /api/workbench/sample` | Bounded typed collection sample for the schema profiler |
+| `GET /api/workbench/backup` | Export a typed backup artifact (manifest + format version) for a subtree |
+| `GET /api/workbench/watch` | Stream real-time document/collection changes over SSE |
 | `POST /api/workbench/replace` | Fully replace or upsert a document (used by file imports) |
+| `/api/jobs/**` | Create, stream (SSE), cancel, and report on durable deep-copy and restore jobs |
 | `/api/transfer/**` | Initialize transfer contexts and stream recursive deep-copy progress |
 
 ## Credential handling
