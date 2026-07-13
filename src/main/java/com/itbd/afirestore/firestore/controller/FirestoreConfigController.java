@@ -9,6 +9,7 @@ import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -62,6 +63,35 @@ public class FirestoreConfigController {
                         return ResponseEntity.internalServerError().body("Failed to initialize Firestore: " + e.getMessage());
                     }
                 });
+    }
+
+    /**
+     * FFP-205: Initialize a credential-free connection to a Firestore emulator.
+     * Expects a JSON body with the emulator host, project id, and optional database id.
+     */
+    @PostMapping("/init-emulator")
+    public ResponseEntity<String> initEmulator(@RequestBody EmulatorInitRequest request) {
+        if (request == null || request.projectId() == null || request.projectId().isBlank()) {
+            return ResponseEntity.badRequest().body("The 'projectId' field is required.");
+        }
+        if (request.emulatorHost() == null || request.emulatorHost().isBlank()) {
+            return ResponseEntity.badRequest().body("The 'emulatorHost' field is required.");
+        }
+        try {
+            firestoreManagerService.initializeEmulator(
+                    request.projectId(),
+                    request.databaseId(),
+                    request.emulatorHost());
+            return ResponseEntity.ok("Firestore emulator connected for project: " + request.projectId());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body("Failed to connect to emulator: " + e.getMessage());
+        }
+    }
+
+    /** FFP-205: request body for {@code POST /api/firestore/init-emulator}. */
+    public record EmulatorInitRequest(String projectId, String databaseId, String emulatorHost) {
     }
 
     // FFP-003/FFP-004: Connection lifecycle management endpoints
