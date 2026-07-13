@@ -16,6 +16,8 @@ import reactor.core.publisher.Mono;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @RestController
@@ -32,9 +34,18 @@ public class FirestoreWorkbenchController {
         this.firestoreManagerService = firestoreManagerService;
     }
 
+    /** FFP-203: matches a URL inside a Firestore error message (e.g. the create-index link). */
+    private static final Pattern INDEX_URL_PATTERN = Pattern.compile("(https?://[^\\s\"']+)");
+
     /**
-     * FFP-105: Cursor-paginated query. {@code cursor} is the opaque token returned as
+     * FFP-105/FFP-203: Cursor-paginated query. {@code cursor} is the opaque token returned as
      * {@code nextCursor} by a previous page; omit it for the first page.
+     *
+     * <p>FFP-203 extends the contract: {@code whereGroup} assigns each where clause to an OR
+     * group (clauses within a group AND together; groups combine with {@code filterCombinator}),
+     * {@code orderField}/{@code orderDirection} may repeat for multiple order clauses, and
+     * {@code collectionGroup=true} runs a collection-group query where {@code path} is the
+     * collection id.</p>
      */
     @GetMapping("/query")
     public Mono<ResponseEntity<Object>> query(
@@ -45,27 +56,37 @@ public class FirestoreWorkbenchController {
             @RequestParam(value = "whereOperator", required = false) List<String> whereOperators,
             @RequestParam(value = "whereValue", required = false) List<String> whereValues,
             @RequestParam(value = "whereType", required = false) List<String> whereTypes,
-            @RequestParam(value = "orderField", required = false) String orderField,
-            @RequestParam(value = "orderDirection", defaultValue = "desc") String orderDirection,
+            @RequestParam(value = "whereGroup", required = false) List<String> whereGroups,
+            @RequestParam(value = "filterCombinator", defaultValue = "and") String filterCombinator,
+            @RequestParam(value = "orderField", required = false) List<String> orderFields,
+            @RequestParam(value = "orderDirection", required = false) List<String> orderDirections,
+            @RequestParam(value = "collectionGroup", defaultValue = "false") boolean collectionGroup,
             @RequestParam(value = "limit", defaultValue = "50") Integer limit,
             @RequestParam(value = "cursor", required = false) String cursor) {
         String normalizedPath = normalize(path);
         if (normalizedPath.isBlank()) {
             return Mono.just(ResponseEntity.badRequest().body((Object) Map.of("message", "Path is required.")));
         }
-        if (!isCollectionPath(normalizedPath)) {
+        if (collectionGroup) {
+            if (normalizedPath.contains("/")) {
+                return Mono.just(ResponseEntity.badRequest().body((Object) Map.of(
+                        "message", "Collection-group id must be a single collection name without '/'.")));
+            }
+        } else if (!isCollectionPath(normalizedPath)) {
             return Mono.just(ResponseEntity.badRequest().body((Object) Map.of("message", "Path must be a collection path.")));
         }
 
         String normalizedDatabaseId = normalizeDatabaseId(databaseId);
         int safeLimit = Math.clamp(limit == null ? 50 : limit, 1, 500);
-        String normalizedOrderField = normalize(orderField);
-        String normalizedOrderDirection = "asc".equalsIgnoreCase(orderDirection) ? "asc" : "desc";
+        String normalizedCombinator = "or".equalsIgnoreCase(filterCombinator) ? "or" : "and";
         String normalizedCursor = cursor == null || cursor.isBlank() ? null : cursor.trim();
 
         List<GenericFirestoreService.WhereClause> whereClauses;
+        List<GenericFirestoreService.OrderClause> orderClauses;
         try {
-            whereClauses = buildWhereClauses(whereFields, whereOperators, whereValues, whereTypes);
+            whereClauses = buildWhereClauses(whereFields, whereOperators, whereValues, whereTypes, whereGroups);
+            orderClauses = buildOrderClauses(orderFields, orderDirections);
+            validateQuery(whereClauses);
         } catch (RuntimeException e) {
             return Mono.just(ResponseEntity.badRequest().body(Map.of("message", e.getMessage())));
         }
@@ -75,8 +96,9 @@ public class FirestoreWorkbenchController {
                         normalizedDatabaseId,
                         normalizedPath,
                         whereClauses,
-                        normalizedOrderField,
-                        normalizedOrderDirection,
+                        normalizedCombinator,
+                        orderClauses,
+                        collectionGroup,
                         safeLimit,
                         normalizedCursor)
                 .map(result -> {
@@ -96,6 +118,20 @@ public class FirestoreWorkbenchController {
                         Mono.just(ResponseEntity.badRequest().body(Map.of(
                                 "message", e.getMessage() == null ? "Invalid query." : e.getMessage()))))
                 .onErrorResume(e -> {
+                    // FFP-203: a missing composite index surfaces as FAILED_PRECONDITION with a
+                    // create-index URL; return structured, actionable guidance instead of a 500.
+                    String indexUrl = resolveIndexUrl(e);
+                    if (indexUrl != null) {
+                        Map<String, Object> body = new LinkedHashMap<>();
+                        body.put("errorCode", "INDEX_REQUIRED");
+                        body.put("message",
+                                "This query needs a Firestore composite index. Create it, then rerun the query.");
+                        if (!indexUrl.isBlank()) {
+                            body.put("indexUrl", indexUrl);
+                        }
+                        log.info("Workbench query needs an index for path='{}': {}", normalizedPath, indexUrl);
+                        return Mono.just(ResponseEntity.badRequest().body((Object) body));
+                    }
                     String errorMessage = resolveErrorMessage(e);
                     log.error("Workbench query failed for path='{}': {}", normalizedPath, errorMessage, e);
                     return Mono.just(ResponseEntity.internalServerError().body(Map.of(
@@ -128,6 +164,112 @@ public class FirestoreWorkbenchController {
                                 "message", e.getMessage() == null ? "Invalid bulk delete request." : e.getMessage()))))
                 .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().body(Map.of(
                         "message", e.getMessage() == null ? "Bulk delete failed." : e.getMessage()))));
+    }
+
+    /**
+     * FFP-302: Returns a bounded sample of a collection's documents (typed) for schema profiling.
+     */
+    @GetMapping("/sample")
+    public Mono<ResponseEntity<Object>> sample(
+            @RequestHeader("X-Project-Id") String projectId,
+            @RequestHeader(value = "X-Database-Id", required = false) String databaseId,
+            @RequestParam("path") String path,
+            @RequestParam(value = "limit", defaultValue = "200") Integer limit) {
+        String normalizedPath = normalize(path);
+        if (normalizedPath.isBlank() || !isCollectionPath(normalizedPath)) {
+            return Mono.just(ResponseEntity.badRequest().body((Object) Map.of(
+                    "message", "Path must be a collection path.")));
+        }
+        int safeLimit = Math.clamp(limit == null ? 200 : limit, 1, 1000);
+        return genericFirestoreService.sampleCollection(projectId, normalizeDatabaseId(databaseId), normalizedPath, safeLimit)
+                .map(documents -> {
+                    Map<String, Object> body = new LinkedHashMap<>();
+                    body.put("path", normalizedPath);
+                    body.put("sampled", documents.size());
+                    body.put("documents", documents);
+                    return ResponseEntity.ok((Object) body);
+                })
+                .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().body(Map.of(
+                        "message", resolveErrorMessage(e)))));
+    }
+
+    /**
+     * FFP-304: Streams a typed backup artifact for a document or collection subtree. The artifact
+     * carries a {@code formatVersion} and a manifest and preserves native Firestore value types.
+     */
+    @GetMapping("/backup")
+    public Mono<ResponseEntity<Object>> backup(
+            @RequestHeader("X-Project-Id") String projectId,
+            @RequestHeader(value = "X-Database-Id", required = false) String databaseId,
+            @RequestParam("path") String path,
+            @RequestParam(value = "limit", defaultValue = "5000") Integer limit) {
+        String normalizedPath = normalize(path);
+        if (normalizedPath.isBlank()) {
+            return Mono.just(ResponseEntity.badRequest().body((Object) Map.of("message", "Path is required.")));
+        }
+        int safeLimit = Math.clamp(limit == null ? 5000 : limit, 1, 50000);
+        boolean isCollection = isCollectionPath(normalizedPath);
+        return genericFirestoreService.backupSubtree(projectId, normalizeDatabaseId(databaseId), normalizedPath, safeLimit)
+                .map(documents -> {
+                    Map<String, Object> manifest = new LinkedHashMap<>();
+                    manifest.put("path", normalizedPath);
+                    manifest.put("kind", isCollection ? "collection" : "document");
+                    manifest.put("exportedAt", Instant.now().toString());
+                    manifest.put("documentCount", documents.size());
+
+                    Map<String, Object> artifact = new LinkedHashMap<>();
+                    artifact.put("formatVersion", 1);
+                    artifact.put("manifest", manifest);
+                    artifact.put("documents", documents);
+                    return ResponseEntity.ok((Object) artifact);
+                })
+                .onErrorResume(IllegalArgumentException.class, e ->
+                        Mono.just(ResponseEntity.badRequest().body(Map.of(
+                                "message", e.getMessage() == null ? "Invalid backup request." : e.getMessage()))))
+                .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().body(Map.of(
+                        "message", resolveErrorMessage(e)))));
+    }
+
+    /**
+     * FFP-303: Previewable bulk edit. A dry run reports the plan; execution applies a typed merge
+     * patch across the selected documents in a bounded batch and reports per-document outcomes.
+     */
+    @PostMapping("/bulk-edit")
+    public Mono<ResponseEntity<Object>> bulkEdit(
+            @RequestHeader("X-Project-Id") String projectId,
+            @RequestHeader(value = "X-Database-Id", required = false) String databaseId,
+            @RequestBody BulkEditRequest request) {
+        List<String> paths = request == null ? List.of() : request.paths();
+        Map<String, FirestoreValue> setFields = request == null || request.setFields() == null
+                ? Map.of()
+                : request.setFields();
+        List<String> deleteFieldPaths = request == null || request.deleteFieldPaths() == null
+                ? List.of()
+                : request.deleteFieldPaths();
+        boolean dryRun = request != null && request.dryRun();
+
+        return genericFirestoreService.bulkEditDocuments(
+                        projectId, normalizeDatabaseId(databaseId), paths, setFields, deleteFieldPaths, dryRun)
+                .map(result -> {
+                    Map<String, Object> body = new LinkedHashMap<>();
+                    body.put("dryRun", result.dryRun());
+                    body.put("requested", result.requested());
+                    body.put("succeeded", result.succeeded());
+                    body.put("failed", result.failed());
+                    body.put("results", result.results().stream()
+                            .map(item -> Map.of(
+                                    "path", item.path(),
+                                    "status", item.status(),
+                                    "message", item.message() == null ? "" : item.message()))
+                            .toList());
+                    body.put("complete", result.complete());
+                    return ResponseEntity.ok((Object) body);
+                })
+                .onErrorResume(IllegalArgumentException.class, e ->
+                        Mono.just(ResponseEntity.badRequest().body(Map.of(
+                                "message", e.getMessage() == null ? "Invalid bulk edit request." : e.getMessage()))))
+                .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().body(Map.of(
+                        "message", e.getMessage() == null ? "Bulk edit failed." : e.getMessage()))));
     }
 
     @GetMapping("/nested")
@@ -355,7 +497,8 @@ public class FirestoreWorkbenchController {
             List<String> whereFields,
             List<String> whereOperators,
             List<String> whereValues,
-            List<String> whereTypes) {
+            List<String> whereTypes,
+            List<String> whereGroups) {
         List<GenericFirestoreService.WhereClause> clauses = new ArrayList<>();
         int maxSize = Math.max(
                 Math.max(sizeOf(whereFields), sizeOf(whereOperators)),
@@ -382,9 +525,85 @@ public class FirestoreWorkbenchController {
 
             String rawValue = valueAt(whereValues, i);
             Object typedValue = parseWhereValue(rawValue, type);
-            clauses.add(new GenericFirestoreService.WhereClause(field, operator, typedValue));
+            int groupId = parseGroupId(valueAt(whereGroups, i));
+            clauses.add(new GenericFirestoreService.WhereClause(field, operator, typedValue, groupId));
         }
         return clauses;
+    }
+
+    private int parseGroupId(String rawGroup) {
+        if (rawGroup == null || rawGroup.isBlank()) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(rawGroup.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Filter group must be an integer: " + rawGroup);
+        }
+    }
+
+    private List<GenericFirestoreService.OrderClause> buildOrderClauses(
+            List<String> orderFields,
+            List<String> orderDirections) {
+        List<GenericFirestoreService.OrderClause> clauses = new ArrayList<>();
+        int size = sizeOf(orderFields);
+        for (int i = 0; i < size; i += 1) {
+            String field = normalize(valueAt(orderFields, i));
+            if (field.isBlank()) {
+                continue;
+            }
+            String direction = valueAt(orderDirections, i);
+            String normalizedDirection = "asc".equalsIgnoreCase(direction) ? "asc" : "desc";
+            clauses.add(new GenericFirestoreService.OrderClause(field, normalizedDirection));
+        }
+        return clauses;
+    }
+
+    /**
+     * FFP-203: reject clause combinations Firestore cannot serve, with an actionable message,
+     * before issuing the query.
+     */
+    private void validateQuery(List<GenericFirestoreService.WhereClause> whereClauses) {
+        if (whereClauses.size() > 30) {
+            throw new IllegalArgumentException("A query supports at most 30 filter clauses.");
+        }
+        long groupCount = whereClauses.stream().map(GenericFirestoreService.WhereClause::groupId).distinct().count();
+        if (groupCount > 10) {
+            throw new IllegalArgumentException("A query supports at most 10 OR groups.");
+        }
+        long arrayContains = whereClauses.stream()
+                .filter(c -> "array-contains".equals(c.operator())).count();
+        if (arrayContains > 1) {
+            throw new IllegalArgumentException("Only one 'array-contains' filter is allowed per query.");
+        }
+        long arrayContainsAny = whereClauses.stream()
+                .filter(c -> "array-contains-any".equals(c.operator())).count();
+        if (arrayContainsAny > 1) {
+            throw new IllegalArgumentException("Only one 'array-contains-any' filter is allowed per query.");
+        }
+    }
+
+    /**
+     * FFP-203: If the error is a missing-index failure, returns the create-index URL (or an empty
+     * string when the message names no URL); otherwise {@code null}.
+     */
+    private String resolveIndexUrl(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null) {
+                String lower = message.toLowerCase(Locale.ROOT);
+                boolean indexError = lower.contains("requires an index")
+                        || lower.contains("create_composite")
+                        || (lower.contains("failed_precondition") && lower.contains("index"));
+                if (indexError) {
+                    Matcher matcher = INDEX_URL_PATTERN.matcher(message);
+                    return matcher.find() ? matcher.group(1) : "";
+                }
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     private Object parseWhereValue(String rawValue, String type) {
@@ -550,6 +769,17 @@ public class FirestoreWorkbenchController {
     /** FFP-106: Bulk delete request body. */
     record BulkDeleteRequest(List<String> paths) {
         BulkDeleteRequest {
+            if (paths == null) paths = List.of();
+        }
+    }
+
+    /** FFP-303: Bulk edit request body. {@code setFields} are canonical typed values. */
+    record BulkEditRequest(
+            List<String> paths,
+            Map<String, FirestoreValue> setFields,
+            List<String> deleteFieldPaths,
+            boolean dryRun) {
+        BulkEditRequest {
             if (paths == null) paths = List.of();
         }
     }
