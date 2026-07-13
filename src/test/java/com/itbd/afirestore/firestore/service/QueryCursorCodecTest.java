@@ -52,6 +52,32 @@ class QueryCursorCodecTest {
     }
 
     @Test
+    void roundTripsMultipleOrderValues() {
+        java.util.List<FirestoreValue> orderValues = java.util.List.of(
+                new FirestoreValue.StringValue("alice"),
+                new FirestoreValue.IntegerValue(7L),
+                new FirestoreValue.TimestampValue(Instant.parse("2026-07-06T10:00:00Z")));
+
+        String token = QueryCursorCodec.encodeAll(orderValues, "doc-9");
+        QueryCursorCodec.DecodedCursor decoded = QueryCursorCodec.decode(token);
+
+        assertThat(decoded.documentId()).isEqualTo("doc-9");
+        assertThat(decoded.orderValues()).isEqualTo(orderValues);
+        assertThat(decoded.orderValue()).isEqualTo(orderValues.get(0));
+    }
+
+    @Test
+    void decodesLegacySingleValueToken() {
+        String legacyToken = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
+                "{\"orderValue\":{\"stringValue\":\"x\"},\"documentId\":\"d\"}".getBytes());
+
+        QueryCursorCodec.DecodedCursor decoded = QueryCursorCodec.decode(legacyToken);
+
+        assertThat(decoded.documentId()).isEqualTo("d");
+        assertThat(decoded.orderValues()).containsExactly(new FirestoreValue.StringValue("x"));
+    }
+
+    @Test
     void rejectsGarbageTokens() {
         assertThatThrownBy(() -> QueryCursorCodec.decode("not-a-cursor!!"))
                 .isInstanceOf(IllegalArgumentException.class);
