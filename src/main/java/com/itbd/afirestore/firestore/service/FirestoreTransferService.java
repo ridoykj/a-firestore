@@ -8,6 +8,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -105,6 +106,98 @@ public class FirestoreTransferService {
                 isFinished.set(true);
             }
         });
+    }
+
+    /**
+     * FFP-305: Runs a deep copy as a cancellable {@link JobRegistry.Job}. Unlike the fan-out
+     * streaming copy, this walks the subtree sequentially so cancellation is prompt and committed
+     * progress is accurate (counted on batch commit, not when queued). Source paths are
+     * deduplicated. Re-running in MERGE mode is idempotent, which is how a cancelled job is
+     * resumed; the job reports its committed checkpoint on cancel.
+     */
+    public void startDeepCopyJob(JobRegistry.Job job, DeepCopyRequest request) {
+        Thread.ofVirtual().start(() -> {
+            try {
+                job.markRunning();
+                Firestore source = firestoreManager.getFirestore(request.sourceProjectId(), request.sourceDatabaseId());
+                Firestore target = firestoreManager.getFirestore(request.targetProjectId(), request.targetDatabaseId());
+                String normalizedTargetBasePath = normalizePath(request.targetBasePath());
+                SetOptions setOptions = "MERGE".equalsIgnoreCase(request.conflictResolution()) ? SetOptions.merge() : null;
+
+                LinkedHashSet<String> normalizedSources = new LinkedHashSet<>();
+                for (String rawPath : request.sourcePaths()) {
+                    String normalized = normalizePath(rawPath);
+                    if (!normalized.isEmpty()) {
+                        normalizedSources.add(normalized);
+                    }
+                }
+                if (normalizedSources.isEmpty()) {
+                    throw new IllegalArgumentException("No valid source paths to copy.");
+                }
+
+                JobBatchManager batchManager = new JobBatchManager(target, job);
+                for (String path : normalizedSources) {
+                    if (job.isCancelRequested()) {
+                        break;
+                    }
+                    if (isDocumentPath(path)) {
+                        String resolved = resolveTargetDocumentPath(path, normalizedTargetBasePath);
+                        ensureDocumentPath(resolved, path, normalizedTargetBasePath);
+                        copyDocumentForJob(source.document(path), target.document(resolved), setOptions, batchManager, job);
+                    } else if (isCollectionPath(path)) {
+                        String resolved = resolveTargetCollectionPath(path, normalizedTargetBasePath);
+                        ensureCollectionPath(resolved, path, normalizedTargetBasePath);
+                        copyCollectionForJob(source.collection(path), target.collection(resolved), setOptions, batchManager, job);
+                    } else {
+                        job.recordFailure(path, "Invalid source path.");
+                    }
+                }
+                batchManager.commitAll();
+
+                if (job.isCancelRequested()) {
+                    job.cancelFinished("Cancelled after " + job.committed() + " committed document(s).");
+                } else {
+                    job.complete("Copied " + job.committed() + " document(s); " + job.failedCount() + " failed.");
+                }
+            } catch (Exception jobFailure) {
+                job.fail(jobFailure.getMessage() == null ? "Deep copy failed." : jobFailure.getMessage());
+            }
+        });
+    }
+
+    private void copyCollectionForJob(CollectionReference sourceCol, CollectionReference targetCol,
+            SetOptions setOptions, JobBatchManager batchManager, JobRegistry.Job job) {
+        for (DocumentReference docRef : sourceCol.listDocuments()) {
+            if (job.isCancelRequested()) {
+                return;
+            }
+            copyDocumentForJob(docRef, targetCol.document(docRef.getId()), setOptions, batchManager, job);
+        }
+    }
+
+    private void copyDocumentForJob(DocumentReference sourceDoc, DocumentReference targetDoc,
+            SetOptions setOptions, JobBatchManager batchManager, JobRegistry.Job job) {
+        if (job.isCancelRequested()) {
+            return;
+        }
+        try {
+            DocumentSnapshot snap = sourceDoc.get().get();
+            if (snap.exists() && snap.getData() != null) {
+                batchManager.set(targetDoc, snap.getData(), setOptions);
+            }
+        } catch (Exception documentFailure) {
+            job.recordFailure(sourceDoc.getPath(), documentFailure.getMessage());
+        }
+        try {
+            for (CollectionReference subCol : sourceDoc.listCollections()) {
+                if (job.isCancelRequested()) {
+                    return;
+                }
+                copyCollectionForJob(subCol, targetDoc.collection(subCol.getId()), setOptions, batchManager, job);
+            }
+        } catch (Exception subcollectionFailure) {
+            job.recordFailure(sourceDoc.getPath(), subcollectionFailure.getMessage());
+        }
     }
 
     private void copyCollectionRecursive(CollectionReference sourceCol, CollectionReference targetCol, SetOptions setOptions, BatchManager batchManager, ExecutorService executor) throws Exception {
@@ -284,6 +377,47 @@ public class FirestoreTransferService {
 
         public int getTotalCopied() {
             return totalCopied.get();
+        }
+    }
+
+    /**
+     * FFP-305: Batch manager that increments a job's committed count only when a batch actually
+     * commits, so progress reflects durable writes rather than queued operations.
+     */
+    private static class JobBatchManager {
+        private final Firestore db;
+        private final JobRegistry.Job job;
+        private WriteBatch batch;
+        private int opCount = 0;
+
+        JobBatchManager(Firestore db, JobRegistry.Job job) {
+            this.db = db;
+            this.job = job;
+            this.batch = db.batch();
+        }
+
+        void set(DocumentReference ref, Map<String, Object> data, SetOptions setOptions) throws Exception {
+            if (setOptions != null) {
+                batch.set(ref, data, setOptions);
+            } else {
+                batch.set(ref, data);
+            }
+            opCount += 1;
+            if (opCount >= 400) {
+                commitAll();
+            }
+        }
+
+        void commitAll() throws Exception {
+            if (opCount == 0) {
+                return;
+            }
+            int committing = opCount;
+            WriteBatch toCommit = this.batch;
+            this.batch = db.batch();
+            this.opCount = 0;
+            toCommit.commit().get();
+            job.addCommitted(committing);
         }
     }
 }
