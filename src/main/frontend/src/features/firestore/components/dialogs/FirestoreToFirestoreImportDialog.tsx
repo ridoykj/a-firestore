@@ -21,6 +21,7 @@ import {
   AlertCircle,
   CloudDownload,
   FileUp,
+  Search,
   ShieldAlert,
   X,
 } from "lucide-react"
@@ -80,6 +81,10 @@ export function FirestoreToFirestoreImportDialog({
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
   const [firebasePathInput, setFirebasePathInput] = useState("")
   const [isPathLoading, setIsPathLoading] = useState(false)
+  // Document search within the currently opened collection (document-ID prefix filter).
+  const [documentSearch, setDocumentSearch] = useState("")
+  const [appliedDocSearch, setAppliedDocSearch] = useState("")
+  const [isSearching, setIsSearching] = useState(false)
   const [conflictResolution, setConflictResolution] = useState<ConflictResolution>("MERGE")
   const [authAttempted, setAuthAttempted] = useState(false)
   const [copiedDocuments, setCopiedDocuments] = useState(0)
@@ -112,6 +117,12 @@ export function FirestoreToFirestoreImportDialog({
   const projects = projectsQuery.data ?? []
   const databases = databasesQuery.data ?? []
 
+  // Document-ID search only applies to collection paths (odd number of segments).
+  const currentPathIsCollection = useMemo(() => {
+    const segments = currentPath.split("/").filter(Boolean)
+    return segments.length > 0 && segments.length % 2 === 1
+  }, [currentPath])
+
   const stepIndex = Math.max(STEP_SEQUENCE.indexOf(step), 0)
   const sourceProjectMissing = authAttempted && !sourceProjectId.trim()
   const sourceCredentialsMissing = authAttempted && !activeCredentialsFile
@@ -127,6 +138,9 @@ export function FirestoreToFirestoreImportDialog({
     setSelectedPaths(new Set())
     setFirebasePathInput("")
     setIsPathLoading(false)
+    setDocumentSearch("")
+    setAppliedDocSearch("")
+    setIsSearching(false)
     setConflictResolution("MERGE")
     setAuthAttempted(false)
     setCopiedDocuments(0)
@@ -203,6 +217,8 @@ export function FirestoreToFirestoreImportDialog({
       setCurrentPath("")
       setSelectedPaths(new Set())
       setFirebasePathInput("")
+      setDocumentSearch("")
+      setAppliedDocSearch("")
       setStep("SELECT")
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to initialize source Firestore."
@@ -237,6 +253,8 @@ export function FirestoreToFirestoreImportDialog({
   async function handleLoadFirebasePath() {
     const normalizedPath = normalizeFirebasePath(firebasePathInput)
     setIsPathLoading(true)
+    setDocumentSearch("")
+    setAppliedDocSearch("")
     try {
       if (!normalizedPath) {
         await loadRootCollections()
@@ -277,12 +295,14 @@ export function FirestoreToFirestoreImportDialog({
     }
   }
 
-  async function loadChildren(nodePath: string) {
+  async function loadChildren(nodePath: string, idFilter = "") {
     try {
       const response = await firestoreService.getNested(
         { projectId: sourceProjectId, databaseId: sourceDatabaseId },
         nodePath,
         100,
+        null,
+        idFilter,
       )
 
       const children: TreeNode[] = [
@@ -362,6 +382,7 @@ export function FirestoreToFirestoreImportDialog({
         nodePath,
         100,
         node.nextCursor,
+        appliedDocSearch,
       )
 
       const moreChildren: TreeNode[] = [
@@ -407,9 +428,46 @@ export function FirestoreToFirestoreImportDialog({
     }
   }
 
+  function markNodeLoading(nodePath: string, isLoading: boolean) {
+    setTree((prev) => {
+      const nextTree = structuredClone(prev)
+      const updateNode = (nodes: TreeNode[]): boolean => {
+        for (const node of nodes) {
+          if (node.path === nodePath) {
+            node.isLoading = isLoading
+            return true
+          }
+          if (node.children && updateNode(node.children)) {
+            return true
+          }
+        }
+        return false
+      }
+      updateNode(nextTree)
+      return nextTree
+    })
+  }
+
+  // Reload the current collection's documents filtered by a document-ID prefix.
+  async function runDocumentSearch(filter: string) {
+    if (!currentPathIsCollection) {
+      return
+    }
+    setAppliedDocSearch(filter)
+    setIsSearching(true)
+    markNodeLoading(currentPath, true)
+    try {
+      await loadChildren(currentPath, filter)
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
   function handleNavigate(nodePath: string, isLoaded: boolean) {
     setCurrentPath(nodePath)
     setFirebasePathInput(nodePath)
+    setDocumentSearch("")
+    setAppliedDocSearch("")
 
     if (isLoaded) {
       return
@@ -740,6 +798,57 @@ export function FirestoreToFirestoreImportDialog({
                       {isPathLoading ? <Spinner data-icon="inline-start" /> : null}
                       Load
                     </Button>
+                  </div>
+
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center mb-2 px-1">
+                    <div className="relative flex-1">
+                      <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        placeholder={
+                          currentPathIsCollection
+                            ? "Search documents by ID in this collection..."
+                            : "Open a collection to search its documents"
+                        }
+                        className="h-8 pl-7"
+                        value={documentSearch}
+                        disabled={!currentPathIsCollection || isSearching}
+                        onChange={(event) => setDocumentSearch(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault()
+                            void runDocumentSearch(documentSearch.trim())
+                          }
+                        }}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 sm:w-auto"
+                        disabled={!currentPathIsCollection || isSearching}
+                        onClick={() => void runDocumentSearch(documentSearch.trim())}
+                      >
+                        {isSearching ? <Spinner data-icon="inline-start" /> : null}
+                        Search
+                      </Button>
+                      {appliedDocSearch ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-8"
+                          disabled={isSearching}
+                          onClick={() => {
+                            setDocumentSearch("")
+                            void runDocumentSearch("")
+                          }}
+                        >
+                          Clear
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
 
                   <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border bg-background">
