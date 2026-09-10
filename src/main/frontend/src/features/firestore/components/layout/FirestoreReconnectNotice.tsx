@@ -3,7 +3,7 @@ import { toast } from "sonner"
 import { PlugZap, ShieldAlert, UploadCloud } from "lucide-react"
 
 import { firestoreService } from "@/features/firestore/api/firestore-service"
-import type { ProjectTab } from "@/features/gcp/store/gcp-store"
+import { useGcpStore, type ProjectTab } from "@/features/gcp/store/gcp-store"
 import { Button } from "@/shadcn/components/ui/button"
 import { Input } from "@/shadcn/components/ui/input"
 import { normalizeDatabaseId } from "@/features/firestore/api/firestore-utils"
@@ -23,6 +23,7 @@ export function FirestoreReconnectNotice({ tab, onReattached }: FirestoreReconne
   const [credentialsFile, setCredentialsFile] = useState<File | null>(null)
   const [reconnecting, setReconnecting] = useState(false)
   const isEmulator = tab.connectionMode === "emulator"
+  const { setCredentialsFile: setSharedCredentialsFile } = useGcpStore()
 
   async function reconnectServiceAccount() {
     if (!credentialsFile) {
@@ -32,6 +33,9 @@ export function FirestoreReconnectNotice({ tab, onReattached }: FirestoreReconne
     setReconnecting(true)
     try {
       await firestoreService.initFirestore(tab.projectId, credentialsFile, tab.databaseId)
+      // The sidebar's Project ID/Database pickers read credentials from the shared store, not
+      // this component's local state — without this, they stay disabled after a reconnect.
+      setSharedCredentialsFile(credentialsFile)
       toast.success(`Reconnected to ${tab.label}.`)
       onReattached()
     } catch (error) {

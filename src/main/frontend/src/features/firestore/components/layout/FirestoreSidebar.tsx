@@ -83,6 +83,26 @@ export function FirestoreSidebar({
   const loadingDatabases = databasesQuery.isFetching
   const applyingContext = initFirestoreMutation.isPending
 
+  // The tab's own project/database is already a live connection, so it must always be
+  // selectable/visible even if the "list projects"/"list databases" call comes back without it —
+  // e.g. a service account scoped to Firestore data access but not `resourcemanager.projects.list`,
+  // or a project with only the default database. Without this, the Select shows blank (no matching
+  // SelectItem for the current value) and disables itself (an empty list), even though the
+  // connection the tab is already using is perfectly valid.
+  const projectOptions = useMemo(() => {
+    if (!selectedProjectId || projects.includes(selectedProjectId)) {
+      return projects
+    }
+    return [selectedProjectId, ...projects]
+  }, [projects, selectedProjectId])
+
+  const databaseOptions = useMemo(() => {
+    if (!selectedDatabaseId || databases.includes(selectedDatabaseId)) {
+      return databases
+    }
+    return [selectedDatabaseId, ...databases]
+  }, [databases, selectedDatabaseId])
+
   useEffect(() => {
     if (!projectsQuery.error || projectsQuery.errorUpdatedAt === 0) return
     toast.error(projectsQuery.error.message || "Failed to load project IDs.")
@@ -177,13 +197,13 @@ export function FirestoreSidebar({
         <Select
           value={selectedProjectId || undefined}
           onValueChange={(value) => void handleProjectChange(value)}
-          disabled={controlsDisabled || projects.length === 0}
+          disabled={controlsDisabled || projectOptions.length === 0}
         >
           <SelectTrigger className="w-full bg-card text-xs font-semibold px-3 py-4 rounded-xl border border-border shadow-sm">
             <SelectValue placeholder={credentialsFile ? "Load projects" : "Upload credentials"} />
           </SelectTrigger>
           <SelectContent>
-            {projects.map((project) => (
+            {projectOptions.map((project) => (
               <SelectItem key={project} value={project} className="text-xs font-medium">
                 {project}
               </SelectItem>
@@ -200,14 +220,14 @@ export function FirestoreSidebar({
         <Select
           value={selectedDatabaseId || "__default__"}
           onValueChange={(value) => void handleDatabaseChange(value)}
-          disabled={controlsDisabled || databases.length === 0}
+          disabled={controlsDisabled}
         >
           <SelectTrigger className="w-full bg-card text-xs font-semibold px-3 py-4 rounded-xl border border-border shadow-sm">
             <SelectValue placeholder="(default)" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__default__" className="text-xs font-medium">(default)</SelectItem>
-            {databases.map((db) => (
+            {databaseOptions.map((db) => (
               <SelectItem key={db} value={db} className="text-xs font-medium">
                 {db}
               </SelectItem>
