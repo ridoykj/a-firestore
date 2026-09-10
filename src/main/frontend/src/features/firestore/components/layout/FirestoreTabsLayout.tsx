@@ -10,6 +10,7 @@ import { useTheme } from "@/shared/components/ui/shadcn/components/theme-provide
 import { useRegisterCommands } from "@/shared/components/command/command-registry"
 import { Database, Folder, Moon, Plus, Sun, X, LogOut, WifiOff } from "lucide-react"
 import { useMemo, useState } from "react"
+import { normalizeDatabaseId } from "@/features/firestore/api/firestore-utils"
 
 function getConnectionBadge(mode: ConnectionMode) {
   switch (mode) {
@@ -162,7 +163,7 @@ export function FirestoreTabsLayout() {
           {activeTab && (
             <div className="flex items-center gap-2">
               <span className="text-xs text-neutral-400 font-mono">
-                {activeTab.projectId}/{activeTab.databaseId || "(default)"}
+                {activeTab.projectId}/{normalizeDatabaseId(activeTab.databaseId)}
               </span>
               <Button
                 variant="ghost"

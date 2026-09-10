@@ -17,6 +17,11 @@ import { Input } from "@/shadcn/components/ui/input"
 import { Label } from "@/shadcn/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shadcn/components/ui/select"
 import { ToggleGroup, ToggleGroupItem } from "@/shadcn/components/ui/toggle-group"
+import {
+  normalizeDatabaseId,
+  tabIdFor,
+  toStoredDatabaseId,
+} from "@/features/firestore/api/firestore-utils"
 import { useGcpStore, type ConnectionMode, type ProjectTab } from "@/features/gcp/store/gcp-store"
 import { Cloud, Server } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
@@ -32,10 +37,6 @@ type TabMode = "cloud" | "emulator"
 
 const DEFAULT_EMULATOR_HOST = "localhost:8080"
 
-function normalizeDatabase(databaseId: string): string {
-  return databaseId.trim() ? databaseId.trim() : "(default)"
-}
-
 // FFP-205: build a tab with an explicit connection mode (no more hardcoded "service-account").
 function buildTab(
   projectId: string,
@@ -44,11 +45,11 @@ function buildTab(
   emulatorHost?: string,
 ): ProjectTab {
   const normalizedProject = projectId.trim()
-  const normalizedDb = normalizeDatabase(databaseId)
+  const normalizedDb = normalizeDatabaseId(databaseId)
   return {
-    id: `${normalizedProject}:${normalizedDb}`,
+    id: tabIdFor(normalizedProject, normalizedDb),
     projectId: normalizedProject,
-    databaseId: normalizedDb === "(default)" ? "" : normalizedDb,
+    databaseId: toStoredDatabaseId(normalizedDb),
     label: `${normalizedProject} / ${normalizedDb}`,
     connectionMode,
     emulatorHost: connectionMode === "emulator" ? emulatorHost?.trim() : undefined,

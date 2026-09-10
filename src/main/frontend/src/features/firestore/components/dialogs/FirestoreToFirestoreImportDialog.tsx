@@ -28,6 +28,7 @@ import {
 import { useMemo, useState, type ChangeEvent } from "react"
 import { toast } from "sonner"
 import { FirestoreSelectionTree, findNodeByPath, type TreeNode } from "./FirestoreSelectionTree"
+import { normalizeDatabaseId } from "@/features/firestore/api/firestore-utils"
 
 interface FirestoreToFirestoreImportDialogProps {
   context: ProjectTab & { activePath: string }
@@ -97,7 +98,7 @@ export function FirestoreToFirestoreImportDialog({
   const sourceCredentialsReady = Boolean(activeCredentialsFile)
 
   const normalizedDatabaseLabel = useMemo(
-    () => (sourceDatabaseId.trim() ? sourceDatabaseId.trim() : "(default)"),
+    () => normalizeDatabaseId(sourceDatabaseId),
     [sourceDatabaseId],
   )
 
@@ -557,6 +558,7 @@ export function FirestoreToFirestoreImportDialog({
       setActiveJobId(jobId)
 
       const finalSnapshot = await streamJobEvents(jobId, {
+        context,
         onProgress: (snapshot) => {
           setCopiedDocuments(snapshot.committed)
           setFailedDocuments(snapshot.failed)
@@ -641,7 +643,7 @@ export function FirestoreToFirestoreImportDialog({
             <p className="text-sm text-muted-foreground">
               Deep copy nested collections/documents into <strong>{context.projectId}</strong>
               {" / "}
-              <strong>{context.databaseId || "(default)"}</strong>.
+              <strong>{normalizeDatabaseId(context.databaseId)}</strong>.
             </p>
             <div className="flex flex-wrap gap-1.5">
               {STEP_SEQUENCE.map((value, index) => {

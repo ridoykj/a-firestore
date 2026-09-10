@@ -9,6 +9,7 @@ import {
   isPersistedQueryState,
   type PersistedQueryState,
 } from "@/features/firestore/api/query-state-storage"
+import { contextKeyFor } from "@/features/firestore/api/firestore-utils"
 
 export type SavedQuery = {
   id: string
@@ -26,9 +27,8 @@ export type HistoryEntry = {
 
 export const HISTORY_LIMIT = 25
 
-function contextKey(projectId: string, databaseId: string): string {
-  return `${projectId}::${databaseId || "(default)"}`
-}
+// DUP-004: the storage scope uses the same normalization as the connection key and the tab id.
+const contextKey = contextKeyFor
 
 function savedKey(projectId: string, databaseId: string): string {
   return `${STORAGE_PREFIX}.savedQueries.${contextKey(projectId, databaseId)}.v1`

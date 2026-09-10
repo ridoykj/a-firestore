@@ -10,118 +10,80 @@
 
 export type FirestoreWireValue = Record<string, unknown>
 
+/**
+ * DUP-005: The value-kind taxonomy, declared once. It mirrors the backend's sealed
+ * `FirestoreValue` interface, which the compiler enforces there; on this side the union below is
+ * what links the guard, the unwrapper, the wrapper, and the diff's type mapping. Adding a kind to
+ * this list makes every exhaustive site fail to compile instead of silently degrading through a
+ * `default:` arm.
+ */
+export const FIRESTORE_VALUE_KINDS = [
+  "nullValue",
+  "booleanValue",
+  "integerValue",
+  "doubleValue",
+  "stringValue",
+  "timestampValue",
+  "geoPointValue",
+  "referenceValue",
+  "bytesValue",
+  "arrayValue",
+  "mapValue",
+] as const
+
+export type FirestoreValueKind = (typeof FIRESTORE_VALUE_KINDS)[number]
+
 const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function wireKind(value: FirestoreWireValue): string {
-  const keys = Object.keys(value)
-  if (keys.length !== 1) {
-    throw new Error(`A Firestore wire value must have exactly one kind, got: ${keys.join(", ")}`)
-  }
-  return keys[0]
-}
-
-export function isWireValue(value: unknown): value is FirestoreWireValue {
-  if (!isPlainObject(value)) {
-    return false
-  }
-  const keys = Object.keys(value)
-  if (keys.length !== 1) {
-    return false
-  }
-  return [
-    "nullValue",
-    "booleanValue",
-    "integerValue",
-    "doubleValue",
-    "stringValue",
-    "timestampValue",
-    "geoPointValue",
-    "referenceValue",
-    "bytesValue",
-    "arrayValue",
-    "mapValue",
-  ].includes(keys[0])
+function isFirestoreValueKind(key: string): key is FirestoreValueKind {
+  return (FIRESTORE_VALUE_KINDS as readonly string[]).includes(key)
 }
 
 /**
- * The backend (Spring Boot 4) encodes its FirestoreValue records with Jackson 3, which
- * ignores the Jackson 2 wire-format serializer and writes plain record components instead:
- * `{"value": x}` for scalars/timestamps, `{"items": [...]}` for arrays, `{"fields": {...}}`
- * for maps, `{"base64": "..."}` for bytes, `{"path": "..."}` for references,
- * `{"latitude", "longitude"}` for geo points, and `{}` for null. Normalizes either encoding
- * to the canonical wire value so the rest of the editor logic sees a single format.
+ * DUP-005: Compile-time exhaustiveness with a runtime fallback. If a kind is added to
+ * {@link FIRESTORE_VALUE_KINDS} and a switch does not handle it, `kind` is no longer `never` and
+ * the call fails to compile; at runtime an unexpected kind still degrades to `fallback` rather than
+ * throwing inside a render.
  */
-export function normalizeWireValue(value: unknown): FirestoreWireValue | null {
+function assertAllKindsHandled<T>(kind: never, fallback: T): T {
+  void kind
+  return fallback
+}
+
+export function isWireValue(value: unknown): value is FirestoreWireValue {
+  return kindOf(value) !== null
+}
+
+/** The single kind of a canonical wire value, or `null` if this is not one. */
+export function kindOf(value: unknown): FirestoreValueKind | null {
   if (!isPlainObject(value)) {
     return null
   }
-  if (isWireValue(value)) {
-    return value
+  const keys = Object.keys(value)
+  if (keys.length !== 1) {
+    return null
   }
-  // isWireValue's guard type equals Record<string, unknown>, so the false branch narrows
-  // `value` to never; re-widen for the checks below.
-  const record: Record<string, unknown> = value as Record<string, unknown>
+  return isFirestoreValueKind(keys[0]) ? keys[0] : null
+}
 
-  const keys = Object.keys(record)
-  if (keys.length === 0) {
-    return { nullValue: null }
-  }
-
-  if (keys.length === 1) {
-    const key = keys[0]
-    const body = record[key]
-    switch (key) {
-      case "value":
-        if (body === null) {
-          return { nullValue: null }
-        }
-        if (typeof body === "boolean") {
-          return { booleanValue: body }
-        }
-        if (typeof body === "number") {
-          return Number.isInteger(body)
-            ? { integerValue: String(body) }
-            : { doubleValue: body }
-        }
-        if (typeof body === "string") {
-          return { stringValue: body }
-        }
-        return null
-      case "items":
-        if (Array.isArray(body)) {
-          return {
-            arrayValue: {
-              values: body.map((item) => normalizeWireValue(item) ?? { nullValue: null }),
-            },
-          }
-        }
-        return null
-      case "fields":
-        if (isPlainObject(body)) {
-          const fields: Record<string, FirestoreWireValue> = {}
-          for (const [fieldKey, item] of Object.entries(body)) {
-            fields[fieldKey] = normalizeWireValue(item) ?? { nullValue: null }
-          }
-          return { mapValue: { fields } }
-        }
-        return null
-      case "base64":
-        return typeof body === "string" ? { bytesValue: body } : null
-      case "path":
-        return typeof body === "string" ? { referenceValue: body } : null
-      default:
-        return null
-    }
-  }
-
-  if (isGeoPointShape(record)) {
-    return { geoPointValue: { latitude: record.latitude, longitude: record.longitude } }
-  }
-  return null
+/**
+ * Returns the value if it is already a canonical wire value, otherwise `null`.
+ *
+ * DUP-006: This used to carry a second decoder for the backend's old record-component encoding
+ * (`{"value": x}`, `{"items": […]}`, `{"fields": {…}}`, `{"base64": …}`, `{"path": …}`, a bare
+ * `{latitude, longitude}`, `{}` for null), from when Jackson 3 ignored the Jackson 2 annotations.
+ * `FirestoreValue` now carries `tools.jackson` annotations and `DocumentDtoWireFormatTest` pins the
+ * canonical single-kind form through the real HTTP stack, so that branch was unreachable for API
+ * responses — while remaining a hazard for anything else routed through
+ * {@link normalizeFirestoreFields}, because it decoded on generic key names: a legitimate map field
+ * named `value`, `path`, `fields`, or `items` was reinterpreted as a typed Firestore value.
+ */
+export function normalizeWireValue(value: unknown): FirestoreWireValue | null {
+  return isWireValue(value) ? value : null
 }
 
 /** Normalizes a document `fields` map to canonical wire values (see normalizeWireValue). */
@@ -148,14 +110,12 @@ export function unwrapFirestoreValue(value: unknown): unknown {
     return value
   }
 
-  const wire = normalizeWireValue(value)
-  if (!wire) {
+  const kind = kindOf(value)
+  if (!kind) {
     // Not a recognizable value encoding; show the raw object rather than dropping it.
     return value
   }
-
-  const kind = Object.keys(wire)[0]
-  const body = (wire as Record<string, unknown>)[kind]
+  const body = value[kind]
 
   switch (kind) {
     case "nullValue":
@@ -197,7 +157,7 @@ export function unwrapFirestoreValue(value: unknown): unknown {
       return result
     }
     default:
-      return null
+      return assertAllKindsHandled(kind, null)
   }
 }
 
@@ -292,11 +252,10 @@ export function wrapValueWithOriginal(
   edited: unknown,
   original?: FirestoreWireValue,
 ): FirestoreWireValue {
-  if (!original || !isWireValue(original)) {
+  const kind = kindOf(original)
+  if (!original || !kind) {
     return inferWireValue(edited)
   }
-
-  const kind = wireKind(original)
 
   switch (kind) {
     case "nullValue":
@@ -378,6 +337,7 @@ export function wrapValueWithOriginal(
       }
       break
     default:
+      assertAllKindsHandled(kind, undefined)
       break
   }
 
@@ -426,7 +386,7 @@ export function computeDeleteFieldPaths(
     }
 
     const editedValue = edited[key]
-    const isOriginalMap = isWireValue(originalValue) && wireKind(originalValue) === "mapValue"
+    const isOriginalMap = kindOf(originalValue) === "mapValue"
     if (isOriginalMap && isPlainObject(editedValue)) {
       const body = originalValue.mapValue
       const originalFields =

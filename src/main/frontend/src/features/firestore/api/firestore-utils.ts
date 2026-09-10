@@ -3,8 +3,65 @@ import { normalizeFirestoreFields, unwrapFirestoreFields } from "@/features/fire
 
 const FIRESTORE_AUTO_ID_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
+/** Firestore's name for the unnamed database — the wire and key form of a blank database id. */
+export const DEFAULT_DATABASE_ID = "(default)"
+
+/**
+ * DUP-004: The one place a blank database id becomes `(default)`. This mapping keys the backend
+ * connection registry, the tab id, and every localStorage context key, so the three must agree
+ * exactly — a copy that trimmed differently produced a tab whose requests hit one connection while
+ * its persisted state lived under another key. Mirrors the backend's `FirestoreIds`.
+ */
+export function normalizeDatabaseId(databaseId?: string | null): string {
+  const trimmed = (databaseId ?? "").trim()
+  return trimmed ? trimmed : DEFAULT_DATABASE_ID
+}
+
+/**
+ * DUP-004: The inverse direction. Tabs and requests carry a blank database id for the unnamed
+ * database; only ids and labels use the explicit `(default)` spelling.
+ */
+export function toStoredDatabaseId(databaseId?: string | null): string {
+  const normalized = normalizeDatabaseId(databaseId)
+  return normalized === DEFAULT_DATABASE_ID ? "" : normalized
+}
+
+/** DUP-004: A workspace tab id — also the backend connection key's shape. */
+export function tabIdFor(projectId: string, databaseId?: string | null): string {
+  return `${projectId.trim()}:${normalizeDatabaseId(databaseId)}`
+}
+
+/** DUP-004: The connection scope for query caches and localStorage keys. */
+export function contextKeyFor(projectId: string, databaseId?: string | null): string {
+  return `${projectId}::${normalizeDatabaseId(databaseId)}`
+}
+
+/**
+ * DUP-004/DUP-009: The connection headers every backend request carries. Built here so axios calls
+ * and SSE streams cannot disagree about which connection they are addressing.
+ */
+export function firestoreContextHeaders(
+  projectId: string,
+  databaseId?: string | null,
+): Record<string, string> {
+  return {
+    "X-Project-Id": projectId,
+    "X-Database-Id": normalizeDatabaseId(databaseId),
+  }
+}
+
+/**
+ * Drops every empty path segment — leading, trailing, and interior — so this agrees with the
+ * backend's `FirestorePaths.normalize` (DUP-001) and `users//alice` cannot be a document on one side
+ * and a collection on the other.
+ */
 export function normalizePath(path: string): string {
-  return path.trim().replace(/^\/+|\/+$/g, "")
+  return path
+    .trim()
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0)
+    .join("/")
 }
 
 export function encodePath(path: string): string {

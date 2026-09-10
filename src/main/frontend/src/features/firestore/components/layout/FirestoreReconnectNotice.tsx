@@ -6,6 +6,7 @@ import { firestoreService } from "@/features/firestore/api/firestore-service"
 import type { ProjectTab } from "@/features/gcp/store/gcp-store"
 import { Button } from "@/shadcn/components/ui/button"
 import { Input } from "@/shadcn/components/ui/input"
+import { normalizeDatabaseId } from "@/features/firestore/api/firestore-utils"
 
 type FirestoreReconnectNoticeProps = {
   tab: ProjectTab
@@ -70,7 +71,7 @@ export function FirestoreReconnectNotice({ tab, onReattached }: FirestoreReconne
           column preferences are kept locally &mdash; credentials are never saved.
         </p>
         <p className="mt-2 font-mono text-xs text-muted-foreground">
-          {tab.projectId}/{tab.databaseId || "(default)"}
+          {tab.projectId}/{normalizeDatabaseId(tab.databaseId)}
         </p>
 
         {isEmulator ? (

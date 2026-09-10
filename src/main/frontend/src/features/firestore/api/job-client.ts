@@ -3,56 +3,57 @@
  * terminal state (complete / cancelled / failed). Cancellation is handled by the caller via
  * {@link firestoreService.cancelJob}; the job then emits a `cancelled` terminal event which
  * resolves this promise.
+ *
+ * DUP-009: the SSE plumbing (base URL, parse guard, reconnect suppression) lives in `sse-client`.
  */
-import { fetchEventSource } from "@microsoft/fetch-event-source"
-import type { JobSnapshot } from "@/features/firestore/api/firestore-service"
-
-const baseUrl: string = import.meta.env.VITE_BASE_URL || ""
+import type { FirestoreContext, JobSnapshot } from "@/features/firestore/api/firestore-service"
+import { firestoreContextHeaders } from "@/features/firestore/api/firestore-utils"
+import { streamSse } from "@/features/firestore/api/sse-client"
 
 const TERMINAL_EVENTS = new Set(["complete", "completed", "cancelled", "failed", "error"])
+const FAILURE_EVENTS = new Set(["failed", "error"])
 
 export type StreamJobOptions = {
   onProgress?: (snapshot: JobSnapshot) => void
   signal?: AbortSignal
+  /**
+   * The connection the job belongs to. `/api/jobs/**` currently resolves a job by id alone, but the
+   * headers are sent so this stream does not silently break the day it stops doing that.
+   */
+  context?: FirestoreContext
 }
 
 export async function streamJobEvents(
   jobId: string,
-  { onProgress, signal }: StreamJobOptions = {},
+  { onProgress, signal, context }: StreamJobOptions = {},
 ): Promise<JobSnapshot> {
   return new Promise<JobSnapshot>((resolve, reject) => {
     let settled = false
-    fetchEventSource(`${baseUrl}/api/jobs/${jobId}/events`, {
+
+    const settle = (outcome: () => void) => {
+      if (!settled) {
+        settled = true
+        outcome()
+      }
+    }
+
+    void streamSse<JobSnapshot>(`/api/jobs/${jobId}/events`, {
       signal,
-      openWhenHidden: true,
-      onmessage(event) {
-        let snapshot: JobSnapshot
-        try {
-          snapshot = JSON.parse(event.data) as JobSnapshot
-        } catch {
+      headers: context ? firestoreContextHeaders(context.projectId, context.databaseId) : undefined,
+      onEvent({ name, data }) {
+        onProgress?.(data)
+        if (!TERMINAL_EVENTS.has(name)) {
           return
         }
-        onProgress?.(snapshot)
-        if (event.event && TERMINAL_EVENTS.has(event.event)) {
-          settled = true
-          if (event.event === "failed" || event.event === "error") {
-            reject(new Error(snapshot.message || "Job failed."))
-          } else {
-            resolve(snapshot)
-          }
-        }
+        settle(() =>
+          FAILURE_EVENTS.has(name)
+            ? reject(new Error(data.message || "Job failed."))
+            : resolve(data),
+        )
       },
-      onerror(error) {
-        if (!settled) {
-          reject(error instanceof Error ? error : new Error("Job stream error."))
-        }
-        // Throw to stop the default reconnect behavior.
-        throw error
+      onError(error) {
+        settle(() => reject(error))
       },
-    }).catch((error) => {
-      if (!settled) {
-        reject(error instanceof Error ? error : new Error("Job stream failed."))
-      }
     })
   })
 }

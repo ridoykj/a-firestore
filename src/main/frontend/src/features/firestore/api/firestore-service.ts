@@ -9,7 +9,13 @@ import type {
   NestedResponse,
   QueryResponse,
 } from "@/features/firestore/schemas/FirestoreSchema"
-import { encodePath, extractApiMessage, mapDocumentDtoToFirestoreDocument } from "@/features/firestore/api/firestore-utils"
+import {
+  contextKeyFor,
+  encodePath,
+  extractApiMessage,
+  firestoreContextHeaders,
+  mapDocumentDtoToFirestoreDocument,
+} from "@/features/firestore/api/firestore-utils"
 import {
   normalizeFirestoreFields,
   unwrapFirestoreFields,
@@ -477,22 +483,14 @@ function buildQueryParams(requestData: FirestoreQueryRequest): URLSearchParams {
   return params
 }
 
-function normalizedDatabaseId(databaseId?: string): string {
-  if (!databaseId || !databaseId.trim()) {
-    return "(default)"
-  }
-  return databaseId.trim()
-}
-
+// DUP-004/DUP-009: the cache scope and the request headers both come from the shared helpers, so
+// they cannot disagree with the backend connection key or with the SSE streams.
 function contextKey(context: FirestoreContext): string {
-  return `${context.projectId}::${normalizedDatabaseId(context.databaseId)}`
+  return contextKeyFor(context.projectId, context.databaseId)
 }
 
 function firestoreHeaders(context: FirestoreContext): Record<string, string> {
-  return {
-    "X-Project-Id": context.projectId,
-    "X-Database-Id": normalizedDatabaseId(context.databaseId),
-  }
+  return firestoreContextHeaders(context.projectId, context.databaseId)
 }
 
 const firestoreApi: FirestoreServiceApi = {

@@ -28,6 +28,7 @@ import {
   useFirestoreInitMutation,
   useFirestoreProjectsQuery,
 } from "@/features/firestore/api/firestore-query"
+import { normalizeDatabaseId } from "@/features/firestore/api/firestore-utils"
 
 interface FirestoreSidebarProps {
   tab: ProjectTab
@@ -121,7 +122,7 @@ export function FirestoreSidebar({
 
       updateTabContext(tab.id, normalizedProjectId, normalizedDatabaseId)
       toast.success(
-        `Switched context to ${normalizedProjectId} / ${normalizedDatabaseId || "(default)"}.`,
+        `Switched context to ${normalizedProjectId} / ${normalizeDatabaseId(normalizedDatabaseId)}.`,
       )
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to initialize Firestore."

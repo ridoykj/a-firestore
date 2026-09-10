@@ -4,10 +4,10 @@
  */
 import { STORAGE_PREFIX, readJson, writeJson, removeJson } from "@/shared/lib/persistent-storage"
 import { EMPTY_RULES, type ValidationRules } from "@/features/firestore/api/schema-profiler"
+import { contextKeyFor } from "@/features/firestore/api/firestore-utils"
 
 function rulesKey(projectId: string, databaseId: string, collectionPath: string): string {
-  const context = `${projectId}::${databaseId || "(default)"}`
-  return `${STORAGE_PREFIX}.rules.${context}.${collectionPath}.v1`
+  return `${STORAGE_PREFIX}.rules.${contextKeyFor(projectId, databaseId)}.${collectionPath}.v1`
 }
 
 function isValidationRules(value: unknown): value is ValidationRules {

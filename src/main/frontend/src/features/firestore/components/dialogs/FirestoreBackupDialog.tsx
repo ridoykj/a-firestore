@@ -124,7 +124,7 @@ export function FirestoreBackupDialog({
         dryRun,
       })
       setActiveJobId(jobId)
-      const final = await streamJobEvents(jobId, { onProgress: setProgress })
+      const final = await streamJobEvents(jobId, { onProgress: setProgress, context })
       setProgress(final)
 
       if (dryRun) {

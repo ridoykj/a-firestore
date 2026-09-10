@@ -13,27 +13,29 @@ import {
   type FirestoreWireValue,
 } from "../api/firestore-value-utils"
 
-// Captured verbatim from the running backend (see DocumentDtoWireFormatTest): Spring Boot 4
-// encodes FirestoreValue records with Jackson 3, which writes plain record components
-// instead of the canonical Firestore wire format.
-const BACKEND_RECORD_FIELDS = JSON.parse(`{
-  "aString": {"value": "Ada"},
-  "anInteger": {"value": 42},
-  "aDouble": {"value": 4.5},
-  "aBoolean": {"value": true},
-  "aNull": {},
-  "aTimestamp": {"value": "2026-07-07T01:02:03.456Z"},
-  "aGeoPoint": {"latitude": 1.5, "longitude": 2.5},
-  "someBytes": {"base64": "AQID"},
-  "anArray": {"items": [{"value": "a"}, {"value": 1}]},
-  "aMap": {"fields": {"inner": {"value": true}}}
+// The canonical Firestore wire format, mirroring what DocumentDtoWireFormatTest pins through the
+// real HTTP stack: every node is an object with exactly one explicit kind, and integers are strings.
+const BACKEND_FIELDS = JSON.parse(`{
+  "aString": {"stringValue": "Ada"},
+  "anInteger": {"integerValue": "42"},
+  "aBigInteger": {"integerValue": "9007199254740993"},
+  "aDouble": {"doubleValue": 4.5},
+  "aBoolean": {"booleanValue": true},
+  "aNull": {"nullValue": null},
+  "aTimestamp": {"timestampValue": "2026-07-07T01:02:03.456Z"},
+  "aGeoPoint": {"geoPointValue": {"latitude": 1.5, "longitude": 2.5}},
+  "someBytes": {"bytesValue": "AQID"},
+  "anArray": {"arrayValue": {"values": [{"stringValue": "a"}, {"integerValue": "1"}]}},
+  "aMap": {"mapValue": {"fields": {"inner": {"booleanValue": true}}}}
 }`)
 
-describe("Jackson 3 record encoding from the backend", () => {
-  it("unwraps every backend record shape for display", () => {
-    expect(unwrapFirestoreFields(BACKEND_RECORD_FIELDS)).toEqual({
+describe("canonical wire format from the backend", () => {
+  it("unwraps every kind for display", () => {
+    expect(unwrapFirestoreFields(BACKEND_FIELDS)).toEqual({
       aString: "Ada",
       anInteger: 42,
+      // > 2^53: stays a string so no digits are lost.
+      aBigInteger: "9007199254740993",
       aDouble: 4.5,
       aBoolean: true,
       aNull: null,
@@ -45,33 +47,39 @@ describe("Jackson 3 record encoding from the backend", () => {
     })
   })
 
-  it("normalizes backend record shapes to canonical wire values", () => {
-    expect(normalizeWireValue({ value: "Ada" })).toEqual({ stringValue: "Ada" })
-    expect(normalizeWireValue({ value: 42 })).toEqual({ integerValue: "42" })
-    expect(normalizeWireValue({ value: 4.5 })).toEqual({ doubleValue: 4.5 })
-    expect(normalizeWireValue({ value: true })).toEqual({ booleanValue: true })
-    expect(normalizeWireValue({})).toEqual({ nullValue: null })
-    expect(normalizeWireValue({ base64: "AQID" })).toEqual({ bytesValue: "AQID" })
-    expect(normalizeWireValue({ path: "users/a" })).toEqual({ referenceValue: "users/a" })
-    expect(normalizeWireValue({ latitude: 1.5, longitude: 2.5 })).toEqual({
-      geoPointValue: { latitude: 1.5, longitude: 2.5 },
-    })
-    expect(normalizeWireValue({ items: [{ value: 1 }] })).toEqual({
-      arrayValue: { values: [{ integerValue: "1" }] },
-    })
-    expect(normalizeWireValue({ fields: { inner: { value: true } } })).toEqual({
-      mapValue: { fields: { inner: { booleanValue: true } } },
-    })
-  })
-
   it("passes canonical wire values through unchanged", () => {
     expect(normalizeWireValue({ stringValue: "x" })).toEqual({ stringValue: "x" })
     expect(normalizeWireValue({ integerValue: "42" })).toEqual({ integerValue: "42" })
+    expect(normalizeWireValue({ nullValue: null })).toEqual({ nullValue: null })
+  })
+
+  /**
+   * DUP-006: the old record-component decoder keyed on generic names, so a plain map field called
+   * `value`, `path`, `fields`, or `items` was silently reinterpreted as a typed Firestore value.
+   * Non-canonical input is now simply not a wire value.
+   */
+  it("does not reinterpret non-canonical objects as typed values", () => {
+    expect(normalizeWireValue({ value: "Ada" })).toBeNull()
+    expect(normalizeWireValue({ path: "users/a" })).toBeNull()
+    expect(normalizeWireValue({ fields: { inner: true } })).toBeNull()
+    expect(normalizeWireValue({ items: [1] })).toBeNull()
+    expect(normalizeWireValue({ base64: "AQID" })).toBeNull()
+    expect(normalizeWireValue({ latitude: 1.5, longitude: 2.5 })).toBeNull()
+    expect(normalizeWireValue({})).toBeNull()
+    // Two keys is never a wire value, even when one of them is a valid kind.
+    expect(normalizeWireValue({ stringValue: "x", extra: 1 })).toBeNull()
+  })
+
+  it("keeps a map field named like a legacy key as a map", () => {
+    const fields = normalizeFirestoreFields({
+      config: { mapValue: { fields: { value: { integerValue: "1" } } } },
+    })
+    expect(unwrapFirestoreFields(fields)).toEqual({ config: { value: 1 } })
   })
 
   it("reports an unchanged draft as no-op in the write preview", () => {
-    const typedFields = normalizeFirestoreFields(BACKEND_RECORD_FIELDS)
-    const edited = unwrapFirestoreFields(BACKEND_RECORD_FIELDS) as Record<string, unknown>
+    const typedFields = normalizeFirestoreFields(BACKEND_FIELDS)
+    const edited = unwrapFirestoreFields(BACKEND_FIELDS) as Record<string, unknown>
     const preview = computeWritePreview(edited, typedFields, "MERGE")
     expect(preview).toEqual({ addedFields: [], changedFields: [], deletedFields: [] })
   })

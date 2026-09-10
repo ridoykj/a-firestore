@@ -1,5 +1,4 @@
 import { useRef, useState } from "react"
-import { fetchEventSource } from "@microsoft/fetch-event-source"
 import { Radio, Square } from "lucide-react"
 
 import { Button } from "@/shadcn/components/ui/button"
@@ -16,14 +15,14 @@ import { Badge } from "@/shadcn/components/ui/badge"
 import { ScrollArea } from "@/shadcn/components/ui/scroll-area"
 import { cn } from "@/shadcn/lib/utils"
 import type { FirestoreContext } from "@/features/firestore/api/firestore-service"
-import { normalizePath } from "@/features/firestore/api/firestore-utils"
+import { firestoreContextHeaders, normalizePath } from "@/features/firestore/api/firestore-utils"
+import { streamSse } from "@/features/firestore/api/sse-client"
 
 type WatchStatus = "idle" | "connecting" | "connected" | "error" | "closed"
 
 type WatchEvent = { at: string; kind: string; summary: string }
 
 const MAX_EVENTS = 100
-const baseUrl: string = import.meta.env.VITE_BASE_URL || ""
 
 type FirestoreWatchDialogProps = {
   context: FirestoreContext
@@ -68,27 +67,17 @@ export function FirestoreWatchDialog({
     setStatus("connecting")
 
     const params = new URLSearchParams({ path: normalized, limit: "50" })
-    void fetchEventSource(`${baseUrl}/api/workbench/watch?${params.toString()}`, {
+    void streamSse<Record<string, unknown>>(`/api/workbench/watch?${params.toString()}`, {
       signal: controller.signal,
-      openWhenHidden: true,
-      headers: {
-        "X-Project-Id": context.projectId,
-        "X-Database-Id": context.databaseId?.trim() ? context.databaseId : "(default)",
-      },
-      onmessage(event) {
-        let data: Record<string, unknown>
-        try {
-          data = JSON.parse(event.data) as Record<string, unknown>
-        } catch {
-          return
-        }
-        if (event.event === "connected") {
+      headers: firestoreContextHeaders(context.projectId, context.databaseId),
+      onEvent({ name, data }) {
+        if (name === "connected") {
           setStatus("connected")
           pushEvent("connected", `Watching ${String(data.kind)} ${String(data.path)}`)
-        } else if (event.event === "error") {
+        } else if (name === "error") {
           setStatus("error")
           pushEvent("error", String(data.message ?? "Listener error"))
-        } else if (event.event === "change") {
+        } else if (name === "change") {
           if (Array.isArray(data.changes)) {
             const changes = data.changes as Array<Record<string, unknown>>
             for (const change of changes) {
@@ -98,17 +87,12 @@ export function FirestoreWatchDialog({
               pushEvent("SNAPSHOT", `${String(data.size ?? 0)} document(s)`)
             }
           } else {
-            pushEvent(
-              data.exists ? "MODIFIED" : "REMOVED",
-              String(data.path ?? ""),
-            )
+            pushEvent(data.exists ? "MODIFIED" : "REMOVED", String(data.path ?? ""))
           }
         }
       },
-      onerror(error) {
+      onError() {
         setStatus("error")
-        // Stop the default reconnect loop; the user can restart explicitly.
-        throw error
       },
     })
   }

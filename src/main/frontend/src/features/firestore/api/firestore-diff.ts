@@ -8,8 +8,9 @@
  */
 import {
   deepEqualJson,
-  normalizeWireValue,
+  kindOf,
   unwrapFirestoreValue,
+  type FirestoreValueKind,
   type FirestoreWireValue,
 } from "@/features/firestore/api/firestore-value-utils"
 
@@ -48,33 +49,23 @@ export type DiffResult = {
 
 type Leaf = { value: unknown; type: DiffValueType }
 
-function wireKindToType(kind: string): DiffValueType {
-  switch (kind) {
-    case "stringValue":
-      return "string"
-    case "integerValue":
-      return "integer"
-    case "doubleValue":
-      return "double"
-    case "booleanValue":
-      return "boolean"
-    case "nullValue":
-      return "null"
-    case "timestampValue":
-      return "timestamp"
-    case "geoPointValue":
-      return "geopoint"
-    case "referenceValue":
-      return "reference"
-    case "bytesValue":
-      return "bytes"
-    case "arrayValue":
-      return "array"
-    case "mapValue":
-      return "map"
-    default:
-      return "unknown"
-  }
+/**
+ * DUP-005: Keyed by the shared {@link FirestoreValueKind} union rather than by `string`, so a kind
+ * added to the taxonomy fails to compile here instead of silently diffing as `"unknown"` — which
+ * used to surface as a phantom type conflict in the schema profiler.
+ */
+const WIRE_KIND_TO_DIFF_TYPE: Record<FirestoreValueKind, DiffValueType> = {
+  stringValue: "string",
+  integerValue: "integer",
+  doubleValue: "double",
+  booleanValue: "boolean",
+  nullValue: "null",
+  timestampValue: "timestamp",
+  geoPointValue: "geopoint",
+  referenceValue: "reference",
+  bytesValue: "bytes",
+  arrayValue: "array",
+  mapValue: "map",
 }
 
 /** Flattens a typed field map into leaf paths. Maps recurse; arrays are compared as whole leaves. */
@@ -84,15 +75,14 @@ export function flattenTypedFields(
 ): Map<string, Leaf> {
   const leaves = new Map<string, Leaf>()
   for (const [key, rawValue] of Object.entries(fields)) {
-    const wire = normalizeWireValue(rawValue)
+    const kind = kindOf(rawValue)
     const path = prefix ? `${prefix}.${key}` : key
-    if (!wire) {
+    if (!kind) {
       leaves.set(path, { value: rawValue, type: "unknown" })
       continue
     }
-    const kind = Object.keys(wire)[0]
     if (kind === "mapValue") {
-      const body = wire.mapValue as { fields?: Record<string, FirestoreWireValue> } | undefined
+      const body = rawValue.mapValue as { fields?: Record<string, FirestoreWireValue> } | undefined
       const nested = body && body.fields ? body.fields : {}
       const nestedLeaves = flattenTypedFields(nested, path)
       if (nestedLeaves.size === 0) {
@@ -105,7 +95,7 @@ export function flattenTypedFields(
       }
       continue
     }
-    leaves.set(path, { value: unwrapFirestoreValue(wire), type: wireKindToType(kind) })
+    leaves.set(path, { value: unwrapFirestoreValue(rawValue), type: WIRE_KIND_TO_DIFF_TYPE[kind] })
   }
   return leaves
 }

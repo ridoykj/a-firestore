@@ -11,6 +11,11 @@ import {
 } from "react"
 import { STORAGE_PREFIX, readJson, writeJson } from "@/shared/lib/persistent-storage"
 import { clearQueryState } from "@/features/firestore/api/query-state-storage"
+import {
+  normalizeDatabaseId,
+  tabIdFor,
+  toStoredDatabaseId,
+} from "@/features/firestore/api/firestore-utils"
 
 export type ConnectionMode = "emulator" | "service-account"
 
@@ -94,18 +99,16 @@ function loadPersistedWorkspace(): PersistedWorkspace {
   )
 }
 
-function normalizeDatabaseId(databaseId: string): string {
-  return databaseId.trim() ? databaseId.trim() : "(default)"
-}
-
+// DUP-004: id, label, and stored databaseId all derive from the shared normalization, so a tab's
+// requests and its persisted state can never key to different connections.
 function buildTab(projectId: string, databaseId: string, connectionMode: ConnectionMode): ProjectTab {
   const normalizedProjectId = projectId.trim()
   const normalizedDatabaseId = normalizeDatabaseId(databaseId)
 
   return {
-    id: `${normalizedProjectId}:${normalizedDatabaseId}`,
+    id: tabIdFor(normalizedProjectId, normalizedDatabaseId),
     projectId: normalizedProjectId,
-    databaseId: normalizedDatabaseId === "(default)" ? "" : normalizedDatabaseId,
+    databaseId: toStoredDatabaseId(normalizedDatabaseId),
     label: `${normalizedProjectId} / ${normalizedDatabaseId}`,
     connectionMode,
   }
