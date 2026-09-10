@@ -23,7 +23,8 @@ public class GcpProjectService {
      * @return A list of project IDs.
      */
     public List<String> listAvailableProjects(String serviceAccountJson) throws IOException {
-        ByteArrayInputStream credentialsStream = new ByteArrayInputStream(serviceAccountJson.getBytes(StandardCharsets.UTF_8));
+        String sanitizedJson = stripUtf8Bom(serviceAccountJson).trim();
+        ByteArrayInputStream credentialsStream = new ByteArrayInputStream(sanitizedJson.getBytes(StandardCharsets.UTF_8));
 
         // 1. Initialize credentials from your stream
         GoogleCredentials credentials = GoogleCredentials.fromStream(credentialsStream);
@@ -43,5 +44,16 @@ public class GcpProjectService {
             }
             return projectIds;
         }
+    }
+
+    private static final char BOM = '﻿';
+
+    /**
+     * Service-account JSON saved via Windows editors (Notepad, PowerShell Out-File) is often
+     * prefixed with a UTF-8 BOM. Gson's strict JsonReader treats that as malformed JSON at
+     * line 1 column 1, so strip it before parsing credentials.
+     */
+    private static String stripUtf8Bom(String json) {
+        return (!json.isEmpty() && json.charAt(0) == BOM) ? json.substring(1) : json;
     }
 }
