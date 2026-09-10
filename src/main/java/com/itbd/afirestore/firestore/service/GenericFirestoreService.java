@@ -19,10 +19,13 @@ import com.google.cloud.firestore.WriteResult;
 import com.google.cloud.firestore.v1.FirestoreAdminClient;
 import com.google.cloud.firestore.v1.FirestoreAdminSettings;
 import com.google.firestore.admin.v1.Database;
+import com.itbd.afirestore.common.exception.IndexRequiredException;
 import com.itbd.afirestore.common.exception.NotFoundException;
+import com.itbd.afirestore.common.exception.OperationFailedException;
 import com.itbd.afirestore.firestore.dto.DocumentDto;
 import com.itbd.afirestore.firestore.dto.DocumentWriteRequest;
 import com.itbd.afirestore.firestore.dto.FirestoreValue;
+import com.itbd.afirestore.firestore.support.FirestorePaths;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -244,7 +247,7 @@ public class GenericFirestoreService {
 
             long elapsedMs = Math.max(1L, (System.nanoTime() - startNanos) / 1_000_000L);
             return new CursorQueryResult(documents, elapsedMs, safeLimit, hasMore, nextCursor);
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).as(GenericFirestoreService::firestoreCall);
     }
 
     /**
@@ -327,7 +330,7 @@ public class GenericFirestoreService {
         return Mono.fromCallable(() -> {
             Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
             return readDocumentDetails(firestore, documentPath);
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).as(GenericFirestoreService::firestoreCall);
     }
 
     /**
@@ -373,7 +376,7 @@ public class GenericFirestoreService {
             }
 
             return readDocumentDetails(firestore, normalizedPath);
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).as(GenericFirestoreService::firestoreCall);
     }
 
     /**
@@ -407,7 +410,7 @@ public class GenericFirestoreService {
                 throw unwrapCause(e);
             }
             return (Void) null;
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).as(GenericFirestoreService::firestoreCall);
     }
 
     /**
@@ -434,28 +437,39 @@ public class GenericFirestoreService {
                 return new BulkDeleteResult(List.of(), validatedPaths);
             }
             return new BulkDeleteResult(validatedPaths, List.of());
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).as(GenericFirestoreService::firestoreCall);
     }
 
     /** Visible for testing: dedupes, validates, and bounds a bulk delete path list. */
     static List<String> validateBulkDeletePaths(List<String> documentPaths) {
+        return validateDocumentPaths(documentPaths, MAX_BULK_DELETE_PATHS, "Bulk delete");
+    }
+
+    /**
+     * DUP-003: The one validator behind both bulk entry points. Rejects blank and non-document
+     * paths, dedupes while preserving request order, and bounds the batch — so hardening it (or
+     * changing a cap) can no longer leave the other endpoint accepting what this one refuses.
+     *
+     * @param operationLabel prefix for the user-facing messages ("Bulk delete", "Bulk edit")
+     */
+    static List<String> validateDocumentPaths(List<String> documentPaths, int maxPaths, String operationLabel) {
         if (documentPaths == null || documentPaths.isEmpty()) {
             throw new IllegalArgumentException("At least one document path is required.");
         }
         LinkedHashSet<String> unique = new LinkedHashSet<>();
         for (String rawPath : documentPaths) {
-            String normalized = rawPath == null ? "" : rawPath.trim().replaceAll("^/+|/+$", "");
+            String normalized = FirestorePaths.normalize(rawPath);
             if (normalized.isBlank()) {
-                throw new IllegalArgumentException("Bulk delete paths cannot be blank.");
+                throw new IllegalArgumentException(operationLabel + " paths cannot be blank.");
             }
-            if (normalized.split("/").length % 2 != 0) {
+            if (!FirestorePaths.isDocument(normalized)) {
                 throw new IllegalArgumentException("Not a document path: '" + normalized + "'.");
             }
             unique.add(normalized);
         }
-        if (unique.size() > MAX_BULK_DELETE_PATHS) {
+        if (unique.size() > maxPaths) {
             throw new IllegalArgumentException(
-                    "Bulk delete accepts at most " + MAX_BULK_DELETE_PATHS
+                    operationLabel + " accepts at most " + maxPaths
                             + " unique document paths per request, got " + unique.size() + ".");
         }
         return List.copyOf(unique);
@@ -585,31 +599,12 @@ public class GenericFirestoreService {
                 }
             }
             return new BulkEditResult(false, validated.size(), succeeded, failed, results, failed == 0);
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).as(GenericFirestoreService::firestoreCall);
     }
 
     /** Visible for testing: dedupes, validates, and bounds a bulk edit path list. */
     static List<String> validateBulkEditPaths(List<String> documentPaths) {
-        if (documentPaths == null || documentPaths.isEmpty()) {
-            throw new IllegalArgumentException("At least one document path is required.");
-        }
-        LinkedHashSet<String> unique = new LinkedHashSet<>();
-        for (String rawPath : documentPaths) {
-            String normalized = rawPath == null ? "" : rawPath.trim().replaceAll("^/+|/+$", "");
-            if (normalized.isBlank()) {
-                throw new IllegalArgumentException("Bulk edit paths cannot be blank.");
-            }
-            if (normalized.split("/").length % 2 != 0) {
-                throw new IllegalArgumentException("Not a document path: '" + normalized + "'.");
-            }
-            unique.add(normalized);
-        }
-        if (unique.size() > MAX_BULK_EDIT_PATHS) {
-            throw new IllegalArgumentException(
-                    "Bulk edit accepts at most " + MAX_BULK_EDIT_PATHS
-                            + " unique document paths per request, got " + unique.size() + ".");
-        }
-        return List.copyOf(unique);
+        return validateDocumentPaths(documentPaths, MAX_BULK_EDIT_PATHS, "Bulk edit");
     }
 
     private void enforceUpdateTimePrecondition(
@@ -686,13 +681,60 @@ public class GenericFirestoreService {
     }
 
     private static String normalizeDocumentPath(String documentPath) {
-        String normalized = documentPath == null ? "" : documentPath.trim().replaceAll("^/+|/+$", "");
-        if (normalized.isBlank() || normalized.split("/").length % 2 != 0) {
-            throw new IllegalArgumentException(
-                    "A document path with an even number of segments is required, got: '"
-                            + documentPath + "'.");
+        return FirestorePaths.requireDocument(documentPath);
+    }
+
+    /**
+     * DUP-007: The single tail every Firestore call in this service goes through — it moves the
+     * blocking SDK work onto the elastic scheduler and translates failures once, so controllers can
+     * simply return the {@code Mono} and let {@code RestExceptionHandler} format the response.
+     *
+     * <p>Used as {@code .as(GenericFirestoreService::firestoreCall)} on the
+     * {@code Mono.fromCallable(…)} that wraps the SDK call.</p>
+     */
+    private static <T> Mono<T> firestoreCall(Mono<T> call) {
+        return call.onErrorMap(GenericFirestoreService::translateFailure)
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * DUP-007: Maps an SDK or internal failure onto the exception the web layer knows how to render.
+     * Exceptions that already carry a client contract pass through untouched; a missing composite
+     * index becomes {@link IndexRequiredException} (previously detected only by the workbench
+     * controller); anything else becomes an {@link OperationFailedException} carrying the deepest
+     * useful message, which is what the old per-method error ladders reported.
+     */
+    private static Throwable translateFailure(Throwable error) {
+        Throwable meaningful = error instanceof ExecutionException executionFailure
+                ? unwrapCause(executionFailure)
+                : error;
+
+        if (meaningful instanceof IllegalArgumentException
+                || meaningful instanceof NotFoundException
+                || meaningful instanceof OptimisticConcurrencyException
+                || meaningful instanceof IndexRequiredException
+                || meaningful instanceof OperationFailedException) {
+            return meaningful;
         }
-        return normalized;
+
+        IndexRequiredException indexRequired = IndexRequiredException.from(error);
+        if (indexRequired != null) {
+            return indexRequired;
+        }
+        return new OperationFailedException(describeFailure(meaningful), error);
+    }
+
+    /** Deepest non-blank message in the cause chain — the actual Firestore complaint. */
+    private static String describeFailure(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null && !message.isBlank()) {
+                return message;
+            }
+            current = current.getCause();
+        }
+        return "Firestore request failed.";
     }
 
     private static RuntimeException unwrapCause(ExecutionException e) {
@@ -745,29 +787,7 @@ public class GenericFirestoreService {
                 }
                 return databaseIds;
             }
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    public Mono<List<String>> getAllDatabases() {
-        return Mono.fromCallable(() -> {
-            FirestoreOptions options = (FirestoreOptions) firestoreManagerService.getFirestore().getOptions();
-
-            FirestoreAdminSettings adminSettings = FirestoreAdminSettings.newBuilder()
-                    .setCredentialsProvider(FixedCredentialsProvider.create(options.getCredentials()))
-                    .build();
-
-            try (FirestoreAdminClient adminClient = FirestoreAdminClient.create(adminSettings)) {
-                String parent = "projects/" + options.getProjectId();
-                List<String> databaseIds = new ArrayList<>();
-
-                for (Database database : adminClient.listDatabases(parent).getDatabasesList()) {
-                    String name = database.getName();
-                    String dbId = name.substring(name.lastIndexOf('/') + 1);
-                    databaseIds.add(dbId);
-                }
-                return databaseIds;
-            }
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).as(GenericFirestoreService::firestoreCall);
     }
 
     public Mono<List<String>> getAllCollections(String projectId, String databaseId) {
@@ -776,16 +796,7 @@ public class GenericFirestoreService {
             return StreamSupport.stream(collections.spliterator(), false)
                     .map(CollectionReference::getId)
                     .collect(Collectors.toList());
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    public Mono<List<String>> getAllCollections() {
-        return Mono.fromCallable(() -> {
-            Iterable<CollectionReference> collections = firestoreManagerService.getFirestore().listCollections();
-            return StreamSupport.stream(collections.spliterator(), false)
-                    .map(CollectionReference::getId)
-                    .collect(Collectors.toList());
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).as(GenericFirestoreService::firestoreCall);
     }
 
     public Mono<Map<String, Object>> createDocument(
@@ -797,24 +808,7 @@ public class GenericFirestoreService {
         return Mono.fromCallable(() -> {
             Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
             return createDocumentInternal(firestore, collectionPath, docId, data);
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    public Mono<Map<String, Object>> createDocument(String collectionPath, Map<String, Object> data) {
-        return Mono.fromCallable(() -> {
-            Firestore firestore = firestoreManagerService.getFirestore();
-            return createDocumentInternal(firestore, collectionPath, null, data);
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    public Mono<Map<String, Object>> createDocument(
-            String collectionPath,
-            String docId,
-            Map<String, Object> data) {
-        return Mono.fromCallable(() -> {
-            Firestore firestore = firestoreManagerService.getFirestore();
-            return createDocumentInternal(firestore, collectionPath, docId, data);
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).as(GenericFirestoreService::firestoreCall);
     }
 
     /**
@@ -831,7 +825,7 @@ public class GenericFirestoreService {
             return documents.stream()
                     .map(this::toDocumentDto)
                     .collect(Collectors.toList());
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).as(GenericFirestoreService::firestoreCall);
     }
 
     /**
@@ -852,7 +846,7 @@ public class GenericFirestoreService {
             return documents.stream()
                     .map(this::toDocumentDto)
                     .collect(Collectors.toList());
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).as(GenericFirestoreService::firestoreCall);
     }
 
     /**
@@ -863,21 +857,20 @@ public class GenericFirestoreService {
     public Mono<List<DocumentDto>> backupSubtree(
             String projectId, String databaseId, String path, int maxDocuments) {
         return Mono.fromCallable(() -> {
-            String normalized = path == null ? "" : path.trim().replaceAll("^/+|/+$", "");
+            String normalized = FirestorePaths.normalize(path);
             if (normalized.isBlank()) {
                 throw new IllegalArgumentException("A path is required for backup.");
             }
             int cap = Math.clamp(maxDocuments, 1, 50000);
             Firestore firestore = firestoreManagerService.getFirestore(projectId, databaseId);
             List<DocumentDto> collected = new ArrayList<>();
-            boolean isDocument = normalized.split("/").length % 2 == 0;
-            if (isDocument) {
+            if (FirestorePaths.isDocument(normalized)) {
                 collectDocumentSubtree(firestore.document(normalized), collected, cap);
             } else {
                 collectCollectionSubtree(firestore.collection(normalized), collected, cap);
             }
             return collected;
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).as(GenericFirestoreService::firestoreCall);
     }
 
     private void collectCollectionSubtree(CollectionReference collection, List<DocumentDto> out, int cap)
@@ -943,7 +936,7 @@ public class GenericFirestoreService {
                     : null;
 
             return new NodePage(nodes, nextCursor, hasMore, safeLimit);
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).as(GenericFirestoreService::firestoreCall);
     }
 
     public Mono<NodePage> listSubcollectionNodesPage(
@@ -989,7 +982,7 @@ public class GenericFirestoreService {
             String nextCursor = hasMore ? pageNodes.get(pageNodes.size() - 1).id() : null;
 
             return new NodePage(pageNodes, nextCursor, hasMore, safeLimit);
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).as(GenericFirestoreService::firestoreCall);
     }
 
     public Mono<PaginatedDocuments> getAllDocumentsPage(
@@ -1016,7 +1009,7 @@ public class GenericFirestoreService {
                     .collect(Collectors.toList());
 
             return new PaginatedDocuments(documents, safePage, safeLimit, hasNextPage);
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).as(GenericFirestoreService::firestoreCall);
     }
 
     public Mono<List<String>> listSubcollections(String projectId, String databaseId, String documentPath) {
@@ -1027,7 +1020,7 @@ public class GenericFirestoreService {
             return StreamSupport.stream(collections.spliterator(), false)
                     .map(CollectionReference::getId)
                     .collect(Collectors.toList());
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).as(GenericFirestoreService::firestoreCall);
     }
 
     public Mono<Map<String, Object>> replaceDocument(
@@ -1045,7 +1038,7 @@ public class GenericFirestoreService {
             String id = documentPath.contains("/") ? documentPath.substring(documentPath.lastIndexOf('/') + 1) : documentPath;
             mutable.put("id", id);
             return mutable;
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).as(GenericFirestoreService::firestoreCall);
     }
 
     private Map<String, Object> createDocumentInternal(

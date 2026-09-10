@@ -8,6 +8,7 @@ import com.google.cloud.firestore.v1.FirestoreAdminClient;
 import com.google.cloud.firestore.v1.FirestoreAdminSettings;
 import com.google.firestore.admin.v1.Database;
 import com.google.api.gax.core.FixedCredentialsProvider;
+import com.itbd.afirestore.firestore.support.FirestoreIds;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -259,25 +260,22 @@ public class FirestoreManagerService {
         }
     }
 
+    // DUP-004: connection identity lives in FirestoreIds so the key, the tab id, and the
+    // localStorage context key cannot drift apart.
+
     private String connectionKey(String projectId, String databaseId) {
         return projectId + ":" + databaseId;
     }
 
     private String normalizeProjectId(String projectId) {
-        if (projectId == null || projectId.trim().isEmpty()) {
-            throw new IllegalArgumentException("projectId is required.");
-        }
-        return projectId.trim();
+        return FirestoreIds.requireProjectId(projectId);
     }
 
     private String normalizeDatabaseId(String databaseId) {
-        if (databaseId == null || databaseId.trim().isEmpty()) {
-            return "(default)";
-        }
-        return databaseId.trim();
+        return FirestoreIds.normalizeDatabaseId(databaseId);
     }
 
     private boolean isDefaultDatabaseId(String databaseId) {
-        return "(default)".equals(databaseId);
+        return FirestoreIds.DEFAULT_DATABASE_ID.equals(databaseId);
     }
 }

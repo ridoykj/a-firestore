@@ -1,25 +1,43 @@
 package com.itbd.afirestore.firestore.service;
 
-import com.google.cloud.firestore.*;
-import com.itbd.afirestore.firestore.service.FirestoreManagerService;
+import com.google.cloud.firestore.CollectionReference;
+import com.google.cloud.firestore.DocumentReference;
+import com.google.cloud.firestore.DocumentSnapshot;
+import com.google.cloud.firestore.Firestore;
+import com.google.cloud.firestore.SetOptions;
+import com.google.cloud.firestore.WriteBatch;
 import com.itbd.afirestore.firestore.dto.DeepCopyRequest;
+import com.itbd.afirestore.firestore.support.FirestorePaths;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+/**
+ * FFP-305/DUP-002: Deep copy between two Firestore connections.
+ *
+ * <p>There is one copy engine ({@link #copySources}) behind two entry points — the SSE stream and
+ * the cancellable job. They used to be separate implementations (four methods and a batch manager
+ * each) that had already drifted: only the job path could be cancelled, only the job path recorded
+ * per-path failures, only the SSE path fanned out across virtual threads, and the two disagreed on
+ * whether an invalid path aborted the copy. Both entry points now differ only in their
+ * {@link CopyProgressSink}, so a fix lands once.</p>
+ */
 @Service
 public class FirestoreTransferService {
+
+    /** Firestore caps a batch at 500 writes; commit below that so a retry has headroom. */
+    private static final int BATCH_COMMIT_THRESHOLD = 400;
 
     private final FirestoreManagerService firestoreManager;
 
@@ -27,132 +45,33 @@ public class FirestoreTransferService {
         this.firestoreManager = firestoreManager;
     }
 
-    public Mono<Map<String, Object>> performDeepCopy(DeepCopyRequest request) {
-        return Mono.fromCallable(() -> {
-            AtomicInteger totalCopied = new AtomicInteger(0);
-            AtomicBoolean isFinished = new AtomicBoolean(false);
-            AtomicReference<Throwable> errorRef = new AtomicReference<>(null);
-            
-            performDeepCopyAsync(request, totalCopied, isFinished, errorRef);
-            
-            // Wait for it to finish for the non-streaming endpoint
-            while (!isFinished.get()) {
-                Thread.sleep(100);
-            }
-            if (errorRef.get() != null) {
-                throw new RuntimeException(errorRef.get());
-            }
-            
-            return Map.of("success", (Object) true, "copiedDocuments", totalCopied.get());
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
+    /**
+     * DUP-002: Where a running copy reports progress and asks whether it should stop. The engine
+     * consults {@link #isCancelled()} before every document, so cancellation is prompt on both
+     * entry points.
+     */
+    public interface CopyProgressSink {
 
-    public void performDeepCopyAsync(DeepCopyRequest request, AtomicInteger totalCopied, AtomicBoolean isFinished, AtomicReference<Throwable> errorRef) {
-        Thread.ofVirtual().start(() -> {
-            try {
-                Firestore source = firestoreManager.getFirestore(request.sourceProjectId(), request.sourceDatabaseId());
-                Firestore target = firestoreManager.getFirestore(request.targetProjectId(), request.targetDatabaseId());
-                String normalizedTargetBasePath = normalizePath(request.targetBasePath());
+        /** Called once per committed batch, with the number of documents that batch durably wrote. */
+        void onCommitted(int documents);
 
-                SetOptions setOptions = "MERGE".equalsIgnoreCase(request.conflictResolution()) ? SetOptions.merge() : null;
-                BatchManager batchManager = new BatchManager(target, totalCopied);
-                List<String> normalizedSourcePaths = new ArrayList<>();
-                List<String> invalidSourcePaths = new ArrayList<>();
+        /** Called for a path that could not be copied; the copy continues with the next path. */
+        void onFailure(String path, String reason);
 
-                for (String rawPath : request.sourcePaths()) {
-                    String normalizedPath = normalizePath(rawPath);
-                    if (normalizedPath.isEmpty()) {
-                        invalidSourcePaths.add(rawPath == null ? "null" : rawPath);
-                        continue;
-                    }
-                    normalizedSourcePaths.add(normalizedPath);
-                }
-
-                if (!invalidSourcePaths.isEmpty()) {
-                    throw new IllegalArgumentException("Invalid source path(s): " + invalidSourcePaths);
-                }
-
-                try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                    List<Callable<Void>> tasks = new ArrayList<>();
-                    for (String path : normalizedSourcePaths) {
-                        tasks.add(() -> {
-                            if (isDocumentPath(path)) {
-                                DocumentReference sourceDoc = source.document(path);
-                                String resolvedTargetDocPath = resolveTargetDocumentPath(path, normalizedTargetBasePath);
-                                ensureDocumentPath(resolvedTargetDocPath, path, normalizedTargetBasePath);
-                                DocumentReference targetDoc = target.document(resolvedTargetDocPath);
-                                copyDocumentRecursive(sourceDoc, targetDoc, setOptions, batchManager, executor);
-                            } else if (isCollectionPath(path)) {
-                                CollectionReference sourceCol = source.collection(path);
-                                String resolvedTargetCollectionPath = resolveTargetCollectionPath(path, normalizedTargetBasePath);
-                                ensureCollectionPath(resolvedTargetCollectionPath, path, normalizedTargetBasePath);
-                                CollectionReference targetCol = target.collection(resolvedTargetCollectionPath);
-                                copyCollectionRecursive(sourceCol, targetCol, setOptions, batchManager, executor);
-                            } else {
-                                throw new IllegalArgumentException("Invalid source path: " + path);
-                            }
-                            return null;
-                        });
-                    }
-                    for (var future : executor.invokeAll(tasks)) {
-                        future.get();
-                    }
-                }
-
-                batchManager.commitAll(); // Ensure remaining operations are flushed
-            } catch (Exception e) {
-                errorRef.compareAndSet(null, e);
-            } finally {
-                isFinished.set(true);
-            }
-        });
+        /** True once the caller has asked for the copy to stop. */
+        boolean isCancelled();
     }
 
     /**
-     * FFP-305: Runs a deep copy as a cancellable {@link JobRegistry.Job}. Unlike the fan-out
-     * streaming copy, this walks the subtree sequentially so cancellation is prompt and committed
-     * progress is accurate (counted on batch commit, not when queued). Source paths are
-     * deduplicated. Re-running in MERGE mode is idempotent, which is how a cancelled job is
-     * resumed; the job reports its committed checkpoint on cancel.
+     * FFP-305: Runs a deep copy as a cancellable {@link JobRegistry.Job}. Re-running in MERGE mode
+     * is idempotent, which is how a cancelled job is resumed; the job reports its committed
+     * checkpoint on cancel.
      */
     public void startDeepCopyJob(JobRegistry.Job job, DeepCopyRequest request) {
         Thread.ofVirtual().start(() -> {
             try {
                 job.markRunning();
-                Firestore source = firestoreManager.getFirestore(request.sourceProjectId(), request.sourceDatabaseId());
-                Firestore target = firestoreManager.getFirestore(request.targetProjectId(), request.targetDatabaseId());
-                String normalizedTargetBasePath = normalizePath(request.targetBasePath());
-                SetOptions setOptions = "MERGE".equalsIgnoreCase(request.conflictResolution()) ? SetOptions.merge() : null;
-
-                LinkedHashSet<String> normalizedSources = new LinkedHashSet<>();
-                for (String rawPath : request.sourcePaths()) {
-                    String normalized = normalizePath(rawPath);
-                    if (!normalized.isEmpty()) {
-                        normalizedSources.add(normalized);
-                    }
-                }
-                if (normalizedSources.isEmpty()) {
-                    throw new IllegalArgumentException("No valid source paths to copy.");
-                }
-
-                JobBatchManager batchManager = new JobBatchManager(target, job);
-                for (String path : normalizedSources) {
-                    if (job.isCancelRequested()) {
-                        break;
-                    }
-                    if (isDocumentPath(path)) {
-                        String resolved = resolveTargetDocumentPath(path, normalizedTargetBasePath);
-                        ensureDocumentPath(resolved, path, normalizedTargetBasePath);
-                        copyDocumentForJob(source.document(path), target.document(resolved), setOptions, batchManager, job);
-                    } else if (isCollectionPath(path)) {
-                        String resolved = resolveTargetCollectionPath(path, normalizedTargetBasePath);
-                        ensureCollectionPath(resolved, path, normalizedTargetBasePath);
-                        copyCollectionForJob(source.collection(path), target.collection(resolved), setOptions, batchManager, job);
-                    } else {
-                        job.recordFailure(path, "Invalid source path.");
-                    }
-                }
-                batchManager.commitAll();
+                copySources(request, new JobProgressSink(job));
 
                 if (job.isCancelRequested()) {
                     job.cancelFinished("Cancelled after " + job.committed() + " committed document(s).");
@@ -165,84 +84,181 @@ public class FirestoreTransferService {
         });
     }
 
-    private void copyCollectionForJob(CollectionReference sourceCol, CollectionReference targetCol,
-            SetOptions setOptions, JobBatchManager batchManager, JobRegistry.Job job) {
-        for (DocumentReference docRef : sourceCol.listDocuments()) {
-            if (job.isCancelRequested()) {
-                return;
+    /**
+     * Runs a deep copy in the background for the SSE endpoint, reporting committed documents through
+     * {@code totalCopied}. Per-path failures are summarized into {@code errorRef} once the copy
+     * finishes, so a bad source path is reported rather than silently skipped.
+     */
+    public void performDeepCopyAsync(
+            DeepCopyRequest request,
+            AtomicInteger totalCopied,
+            AtomicBoolean isFinished,
+            AtomicReference<Throwable> errorRef) {
+        Thread.ofVirtual().start(() -> {
+            CollectingProgressSink sink = new CollectingProgressSink(totalCopied);
+            try {
+                copySources(request, sink);
+                if (sink.hasFailures()) {
+                    errorRef.compareAndSet(null, new IllegalArgumentException(sink.describeFailures()));
+                }
+            } catch (Exception copyFailure) {
+                errorRef.compareAndSet(null, copyFailure);
+            } finally {
+                isFinished.set(true);
             }
-            copyDocumentForJob(docRef, targetCol.document(docRef.getId()), setOptions, batchManager, job);
-        }
+        });
     }
 
-    private void copyDocumentForJob(DocumentReference sourceDoc, DocumentReference targetDoc,
-            SetOptions setOptions, JobBatchManager batchManager, JobRegistry.Job job) {
-        if (job.isCancelRequested()) {
+    /**
+     * DUP-002: The one copy engine. Resolves both clients, normalizes and dedupes the source paths,
+     * then walks each subtree concurrently on virtual threads, batching writes.
+     */
+    private void copySources(DeepCopyRequest request, CopyProgressSink sink) throws Exception {
+        Firestore source = firestoreManager.getFirestore(request.sourceProjectId(), request.sourceDatabaseId());
+        Firestore target = firestoreManager.getFirestore(request.targetProjectId(), request.targetDatabaseId());
+        String targetBasePath = FirestorePaths.normalize(request.targetBasePath());
+        SetOptions setOptions = "MERGE".equalsIgnoreCase(request.conflictResolution())
+                ? SetOptions.merge()
+                : null;
+
+        LinkedHashSet<String> sourcePaths = new LinkedHashSet<>();
+        if (request.sourcePaths() != null) {
+            for (String rawPath : request.sourcePaths()) {
+                String normalized = FirestorePaths.normalize(rawPath);
+                if (!normalized.isEmpty()) {
+                    sourcePaths.add(normalized);
+                }
+            }
+        }
+        if (sourcePaths.isEmpty()) {
+            throw new IllegalArgumentException("No valid source paths to copy.");
+        }
+
+        CopyBatch batch = new CopyBatch(target, sink);
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Callable<Void>> tasks = new ArrayList<>();
+            for (String path : sourcePaths) {
+                tasks.add(() -> {
+                    copySource(source, target, path, targetBasePath, setOptions, batch, sink, executor);
+                    return null;
+                });
+            }
+            awaitAll(executor, tasks);
+        }
+        batch.commitAll();
+    }
+
+    /**
+     * Dispatches one requested path to the document or collection walker. A path that cannot be
+     * resolved is recorded as a failure rather than aborting the whole copy, so one bad selection
+     * does not discard the rest.
+     */
+    private void copySource(
+            Firestore source,
+            Firestore target,
+            String path,
+            String targetBasePath,
+            SetOptions setOptions,
+            CopyBatch batch,
+            CopyProgressSink sink,
+            ExecutorService executor) {
+        if (sink.isCancelled()) {
             return;
         }
         try {
-            DocumentSnapshot snap = sourceDoc.get().get();
-            if (snap.exists() && snap.getData() != null) {
-                batchManager.set(targetDoc, snap.getData(), setOptions);
+            if (FirestorePaths.isDocument(path)) {
+                String resolved = resolveTargetDocumentPath(path, targetBasePath);
+                ensureDocumentPath(resolved, path, targetBasePath);
+                copyDocument(source.document(path), target.document(resolved), setOptions, batch, sink, executor);
+            } else if (FirestorePaths.isCollection(path)) {
+                String resolved = resolveTargetCollectionPath(path, targetBasePath);
+                ensureCollectionPath(resolved, path, targetBasePath);
+                copyCollection(source.collection(path), target.collection(resolved), setOptions, batch, sink, executor);
+            } else {
+                sink.onFailure(path, "Invalid source path.");
             }
-        } catch (Exception documentFailure) {
-            job.recordFailure(sourceDoc.getPath(), documentFailure.getMessage());
+        } catch (Exception sourceFailure) {
+            sink.onFailure(path, reasonOf(sourceFailure));
+        }
+    }
+
+    private void copyCollection(
+            CollectionReference sourceCollection,
+            CollectionReference targetCollection,
+            SetOptions setOptions,
+            CopyBatch batch,
+            CopyProgressSink sink,
+            ExecutorService executor) throws Exception {
+        List<Callable<Void>> tasks = new ArrayList<>();
+        for (DocumentReference documentRef : sourceCollection.listDocuments()) {
+            if (sink.isCancelled()) {
+                break;
+            }
+            tasks.add(() -> {
+                copyDocument(documentRef, targetCollection.document(documentRef.getId()),
+                        setOptions, batch, sink, executor);
+                return null;
+            });
+        }
+        awaitAll(executor, tasks);
+    }
+
+    private void copyDocument(
+            DocumentReference sourceDoc,
+            DocumentReference targetDoc,
+            SetOptions setOptions,
+            CopyBatch batch,
+            CopyProgressSink sink,
+            ExecutorService executor) throws Exception {
+        if (sink.isCancelled()) {
+            return;
         }
         try {
-            for (CollectionReference subCol : sourceDoc.listCollections()) {
-                if (job.isCancelRequested()) {
-                    return;
-                }
-                copyCollectionForJob(subCol, targetDoc.collection(subCol.getId()), setOptions, batchManager, job);
+            DocumentSnapshot snapshot = sourceDoc.get().get();
+            if (snapshot.exists() && snapshot.getData() != null) {
+                batch.set(targetDoc, snapshot.getData(), setOptions);
             }
-        } catch (Exception subcollectionFailure) {
-            job.recordFailure(sourceDoc.getPath(), subcollectionFailure.getMessage());
+        } catch (Exception documentFailure) {
+            sink.onFailure(sourceDoc.getPath(), reasonOf(documentFailure));
         }
-    }
 
-    private void copyCollectionRecursive(CollectionReference sourceCol, CollectionReference targetCol, SetOptions setOptions, BatchManager batchManager, ExecutorService executor) throws Exception {
         List<Callable<Void>> tasks = new ArrayList<>();
-        // Use stream() to avoid loading massive collections entirely into memory
-        for (DocumentReference docRef : sourceCol.listDocuments()) {
+        for (CollectionReference subCollection : sourceDoc.listCollections()) {
+            if (sink.isCancelled()) {
+                break;
+            }
             tasks.add(() -> {
-                copyDocumentRecursive(docRef, targetCol.document(docRef.getId()), setOptions, batchManager, executor);
+                copyCollection(subCollection, targetDoc.collection(subCollection.getId()),
+                        setOptions, batch, sink, executor);
                 return null;
             });
         }
-        for (var future : executor.invokeAll(tasks)) {
+        awaitAll(executor, tasks);
+    }
+
+    /** Runs every task and propagates the first failure, so no subtree is silently abandoned. */
+    private static void awaitAll(ExecutorService executor, List<Callable<Void>> tasks) throws Exception {
+        if (tasks.isEmpty()) {
+            return;
+        }
+        for (Future<Void> future : executor.invokeAll(tasks)) {
             future.get();
         }
     }
 
-    private void copyDocumentRecursive(DocumentReference sourceDoc, DocumentReference targetDoc, SetOptions setOptions, BatchManager batchManager, ExecutorService executor) throws Exception {
-        DocumentSnapshot snap = sourceDoc.get().get();
-        if (snap.exists() && snap.getData() != null) {
-            batchManager.set(targetDoc, snap.getData(), setOptions);
-        }
-
-        List<Callable<Void>> tasks = new ArrayList<>();
-        // Recursively copy sub-collections
-        for (CollectionReference subCol : sourceDoc.listCollections()) {
-            tasks.add(() -> {
-                copyCollectionRecursive(subCol, targetDoc.collection(subCol.getId()), setOptions, batchManager, executor);
-                return null;
-            });
-        }
-        for (var future : executor.invokeAll(tasks)) {
-            future.get();
-        }
+    private static String reasonOf(Throwable error) {
+        return error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
     }
 
     private String resolveTargetDocumentPath(String sourceDocumentPath, String normalizedTargetBasePath) {
-        String sourceDocId = lastSegment(sourceDocumentPath);
         if (normalizedTargetBasePath.isEmpty()) {
             return sourceDocumentPath;
         }
-        if (isDocumentPath(normalizedTargetBasePath)) {
+        if (FirestorePaths.isDocument(normalizedTargetBasePath)) {
             return normalizedTargetBasePath;
         }
-        if (isCollectionPath(normalizedTargetBasePath)) {
-            return normalizedTargetBasePath + "/" + sourceDocId;
+        if (FirestorePaths.isCollection(normalizedTargetBasePath)) {
+            return normalizedTargetBasePath + "/" + FirestorePaths.lastSegment(sourceDocumentPath);
         }
         throw new IllegalArgumentException(
                 "Unable to resolve document destination for sourcePath='" + sourceDocumentPath
@@ -250,15 +266,14 @@ public class FirestoreTransferService {
     }
 
     private String resolveTargetCollectionPath(String sourceCollectionPath, String normalizedTargetBasePath) {
-        String sourceCollectionId = lastSegment(sourceCollectionPath);
         if (normalizedTargetBasePath.isEmpty()) {
             return sourceCollectionPath;
         }
-        if (isDocumentPath(normalizedTargetBasePath)) {
-            return normalizedTargetBasePath + "/" + sourceCollectionId;
-        }
-        if (isCollectionPath(normalizedTargetBasePath)) {
-            return normalizedTargetBasePath + "/" + sourceCollectionId;
+        // A collection is always nested under the base path, whether that names a document or a
+        // collection; only the parity check below differs.
+        if (FirestorePaths.isDocument(normalizedTargetBasePath)
+                || FirestorePaths.isCollection(normalizedTargetBasePath)) {
+            return normalizedTargetBasePath + "/" + FirestorePaths.lastSegment(sourceCollectionPath);
         }
         throw new IllegalArgumentException(
                 "Unable to resolve collection destination for sourcePath='" + sourceCollectionPath
@@ -266,7 +281,7 @@ public class FirestoreTransferService {
     }
 
     private void ensureDocumentPath(String candidatePath, String sourcePath, String normalizedTargetBasePath) {
-        if (!isDocumentPath(candidatePath)) {
+        if (!FirestorePaths.isDocument(candidatePath)) {
             throw new IllegalArgumentException(
                     "Resolved target is not a valid document path. sourcePath='" + sourcePath
                             + "', targetBasePath='" + normalizedTargetBasePath
@@ -275,7 +290,7 @@ public class FirestoreTransferService {
     }
 
     private void ensureCollectionPath(String candidatePath, String sourcePath, String normalizedTargetBasePath) {
-        if (!isCollectionPath(candidatePath)) {
+        if (!FirestorePaths.isCollection(candidatePath)) {
             throw new IllegalArgumentException(
                     "Resolved target is not a valid collection path. sourcePath='" + sourcePath
                             + "', targetBasePath='" + normalizedTargetBasePath
@@ -283,141 +298,131 @@ public class FirestoreTransferService {
         }
     }
 
-    private String normalizePath(String rawPath) {
-        if (rawPath == null) {
-            return "";
-        }
-
-        String trimmed = rawPath.trim();
-        if (trimmed.isEmpty()) {
-            return "";
-        }
-
-        String[] pieces = trimmed.split("/");
-        List<String> normalizedSegments = new ArrayList<>();
-        for (String piece : pieces) {
-            String segment = piece == null ? "" : piece.trim();
-            if (!segment.isEmpty()) {
-                normalizedSegments.add(segment);
-            }
-        }
-
-        return String.join("/", normalizedSegments);
-    }
-
-    private boolean isDocumentPath(String normalizedPath) {
-        if (normalizedPath == null || normalizedPath.isBlank()) {
-            return false;
-        }
-        return normalizedPath.split("/").length % 2 == 0;
-    }
-
-    private boolean isCollectionPath(String normalizedPath) {
-        if (normalizedPath == null || normalizedPath.isBlank()) {
-            return false;
-        }
-        return normalizedPath.split("/").length % 2 != 0;
-    }
-
-    private String lastSegment(String normalizedPath) {
-        String[] segments = normalizedPath.split("/");
-        return segments[segments.length - 1];
-    }
-
     /**
-     * Helper class to manage Firestore WriteBatch limits (max 500 ops)
+     * DUP-002: The one batch manager. Writes are queued under a lock and committed outside it;
+     * progress is reported only after a batch durably commits, so a cancelled copy's committed count
+     * is a real checkpoint rather than a queue depth.
      */
-    private static class BatchManager {
-        private final Firestore db;
-        private WriteBatch batch;
-        private int opCount = 0;
-        private final AtomicInteger totalCopied;
+    private static final class CopyBatch {
 
-        public BatchManager(Firestore db, AtomicInteger totalCopied) {
-            this.db = db;
-            this.batch = db.batch();
-            this.totalCopied = totalCopied;
+        private final Firestore target;
+        private final CopyProgressSink sink;
+        private WriteBatch batch;
+        private int queued;
+
+        CopyBatch(Firestore target, CopyProgressSink sink) {
+            this.target = target;
+            this.sink = sink;
+            this.batch = target.batch();
         }
 
-        public void set(DocumentReference ref, Map<String, Object> data, SetOptions setOptions) throws Exception {
-            WriteBatch batchToCommit = null;
+        void set(DocumentReference ref, Map<String, Object> data, SetOptions setOptions) throws Exception {
+            WriteBatch ready = null;
+            int readyCount = 0;
             synchronized (this) {
                 if (setOptions != null) {
                     batch.set(ref, data, setOptions);
                 } else {
                     batch.set(ref, data);
                 }
-                opCount++;
-                totalCopied.incrementAndGet();
-
-                if (opCount >= 500) {
-                    batchToCommit = this.batch;
-                    this.batch = db.batch();
-                    this.opCount = 0;
+                queued += 1;
+                if (queued >= BATCH_COMMIT_THRESHOLD) {
+                    ready = batch;
+                    readyCount = queued;
+                    batch = target.batch();
+                    queued = 0;
                 }
             }
-            if (batchToCommit != null) {
-                batchToCommit.commit().get();
-            }
+            commit(ready, readyCount);
         }
 
-        public void commitAll() throws Exception {
-            WriteBatch batchToCommit = null;
+        void commitAll() throws Exception {
+            WriteBatch ready;
+            int readyCount;
             synchronized (this) {
-                if (opCount > 0) {
-                    batchToCommit = this.batch;
-                    this.batch = db.batch();
-                    this.opCount = 0;
+                if (queued == 0) {
+                    return;
                 }
+                ready = batch;
+                readyCount = queued;
+                batch = target.batch();
+                queued = 0;
             }
-            if (batchToCommit != null) {
-                batchToCommit.commit().get();
-            }
+            commit(ready, readyCount);
         }
 
-        public int getTotalCopied() {
-            return totalCopied.get();
+        private void commit(WriteBatch ready, int readyCount) throws Exception {
+            if (ready == null) {
+                return;
+            }
+            ready.commit().get();
+            sink.onCommitted(readyCount);
+        }
+    }
+
+    /** FFP-305: reports into a {@link JobRegistry.Job} and honours its cancel flag. */
+    private record JobProgressSink(JobRegistry.Job job) implements CopyProgressSink {
+
+        @Override
+        public void onCommitted(int documents) {
+            job.addCommitted(documents);
+        }
+
+        @Override
+        public void onFailure(String path, String reason) {
+            job.recordFailure(path, reason);
+        }
+
+        @Override
+        public boolean isCancelled() {
+            return job.isCancelRequested();
         }
     }
 
     /**
-     * FFP-305: Batch manager that increments a job's committed count only when a batch actually
-     * commits, so progress reflects durable writes rather than queued operations.
+     * Reports into the counter the SSE endpoint polls, collecting failures so they can be summarized
+     * for a client that has no job to inspect. That stream has no cancel channel, so
+     * {@link #isCancelled()} is always false.
      */
-    private static class JobBatchManager {
-        private final Firestore db;
-        private final JobRegistry.Job job;
-        private WriteBatch batch;
-        private int opCount = 0;
+    private static final class CollectingProgressSink implements CopyProgressSink {
 
-        JobBatchManager(Firestore db, JobRegistry.Job job) {
-            this.db = db;
-            this.job = job;
-            this.batch = db.batch();
+        private static final int MAX_REPORTED_FAILURES = 20;
+
+        private final AtomicInteger totalCopied;
+        private final List<String> failures = Collections.synchronizedList(new ArrayList<>());
+
+        CollectingProgressSink(AtomicInteger totalCopied) {
+            this.totalCopied = totalCopied;
         }
 
-        void set(DocumentReference ref, Map<String, Object> data, SetOptions setOptions) throws Exception {
-            if (setOptions != null) {
-                batch.set(ref, data, setOptions);
-            } else {
-                batch.set(ref, data);
-            }
-            opCount += 1;
-            if (opCount >= 400) {
-                commitAll();
-            }
+        @Override
+        public void onCommitted(int documents) {
+            totalCopied.addAndGet(documents);
         }
 
-        void commitAll() throws Exception {
-            if (opCount == 0) {
-                return;
+        @Override
+        public void onFailure(String path, String reason) {
+            failures.add(path + ": " + reason);
+        }
+
+        @Override
+        public boolean isCancelled() {
+            return false;
+        }
+
+        boolean hasFailures() {
+            return !failures.isEmpty();
+        }
+
+        String describeFailures() {
+            synchronized (failures) {
+                int total = failures.size();
+                List<String> reported = failures.subList(0, Math.min(total, MAX_REPORTED_FAILURES));
+                String summary = String.join("; ", reported);
+                return total > MAX_REPORTED_FAILURES
+                        ? total + " path(s) failed: " + summary + "; …"
+                        : total + " path(s) failed: " + summary;
             }
-            int committing = opCount;
-            WriteBatch toCommit = this.batch;
-            this.batch = db.batch();
-            this.opCount = 0;
-            toCommit.commit().get();
-            job.addCommitted(committing);
         }
     }
 }

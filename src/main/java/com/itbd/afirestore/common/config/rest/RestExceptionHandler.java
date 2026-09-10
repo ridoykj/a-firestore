@@ -1,8 +1,13 @@
 package com.itbd.afirestore.common.config.rest;
 
+import com.itbd.afirestore.common.exception.IndexRequiredException;
 import com.itbd.afirestore.common.exception.NotFoundException;
+import com.itbd.afirestore.common.exception.OperationFailedException;
+import com.itbd.afirestore.common.exception.handler.error.ConflictErrorResponse;
 import com.itbd.afirestore.common.exception.handler.error.ErrorResponse;
 import com.itbd.afirestore.common.exception.handler.error.FieldError;
+import com.itbd.afirestore.common.exception.handler.error.IndexRequiredErrorResponse;
+import com.itbd.afirestore.firestore.service.GenericFirestoreService.OptimisticConcurrencyException;
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import jakarta.validation.ConstraintViolationException;
@@ -43,6 +48,7 @@ public class RestExceptionHandler {
     static final String CODE_REQUEST_FAILED = "REQUEST_FAILED";
     static final String CODE_CONFLICT = "CONFLICT";
     static final String CODE_INTERNAL_ERROR = "INTERNAL_ERROR";
+    static final String CODE_INDEX_REQUIRED = "INDEX_REQUIRED";
 
     /**
      * Uses the client-supplied X-Request-ID when present, otherwise generates one so
@@ -68,6 +74,61 @@ public class RestExceptionHandler {
         return new ResponseEntity<>(errorResponse, HttpStatus.NOT_FOUND);
     }
 
+    /**
+     * DUP-007: A rejected request argument. Controllers and services throw
+     * {@link IllegalArgumentException} with a user-facing message; this is the one place that turns
+     * it into a 400, replacing the {@code onErrorResume(IllegalArgumentException.class, …)} ladder
+     * that used to be repeated in every handler method.
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalArgument(final IllegalArgumentException exception,
+            final ServerWebExchange exchange) {
+        final String correlationId = resolveCorrelationId(exchange);
+        final String message = exception.getMessage() == null || exception.getMessage().isBlank()
+                ? "Invalid request."
+                : exception.getMessage();
+        log.info("Invalid request [correlationId={}]: {}", correlationId, message);
+        final ErrorResponse errorResponse = new ErrorResponse(HttpStatus.BAD_REQUEST.value(),
+                CODE_VALIDATION_FAILED, message, correlationId, Collections.emptyList());
+        return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
+    }
+
+    /**
+     * FFP-104/DUP-007: A stale {@code expectedUpdateTime}. The 409 carries the server's current
+     * copy of the document so the client can diff before overwriting.
+     */
+    @ExceptionHandler(OptimisticConcurrencyException.class)
+    public ResponseEntity<ConflictErrorResponse> handleOptimisticConcurrency(
+            final OptimisticConcurrencyException exception, final ServerWebExchange exchange) {
+        final String correlationId = resolveCorrelationId(exchange);
+        log.info("Write conflict [correlationId={}]: {}", correlationId, exception.getMessage());
+        final ConflictErrorResponse body = new ConflictErrorResponse(
+                HttpStatus.CONFLICT.value(),
+                CODE_CONFLICT,
+                exception.getMessage(),
+                correlationId,
+                exception.getLatestDocument());
+        return new ResponseEntity<>(body, HttpStatus.CONFLICT);
+    }
+
+    /**
+     * FFP-203/DUP-007: A query blocked on a missing composite index. Returned as a 400 with the
+     * create-index URL rather than a 500, so the client can offer the link.
+     */
+    @ExceptionHandler(IndexRequiredException.class)
+    public ResponseEntity<IndexRequiredErrorResponse> handleIndexRequired(
+            final IndexRequiredException exception, final ServerWebExchange exchange) {
+        final String correlationId = resolveCorrelationId(exchange);
+        log.info("Query needs an index [correlationId={}]: {}", correlationId, exception.getIndexUrl());
+        final IndexRequiredErrorResponse body = new IndexRequiredErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                CODE_INDEX_REQUIRED,
+                exception.getMessage(),
+                correlationId,
+                exception.getIndexUrl());
+        return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleMethodArgumentNotValid(
             final MethodArgumentNotValidException exception, final ServerWebExchange exchange) {
@@ -81,6 +142,24 @@ public class RestExceptionHandler {
         final ErrorResponse errorResponse = new ErrorResponse(HttpStatus.BAD_REQUEST.value(),
                 CODE_VALIDATION_FAILED, "Validation failed", correlationId, fieldErrors);
         return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
+    }
+
+    /**
+     * DUP-007: A Firestore operation that failed for a reportable reason. The message is returned
+     * verbatim — unlike {@link #handleThrowable}, which withholds details for errors we did not
+     * anticipate.
+     */
+    @ExceptionHandler(OperationFailedException.class)
+    public ResponseEntity<ErrorResponse> handleOperationFailed(final OperationFailedException exception,
+            final ServerWebExchange exchange) {
+        final String correlationId = resolveCorrelationId(exchange);
+        final String message = exception.getMessage() == null || exception.getMessage().isBlank()
+                ? "Request failed."
+                : exception.getMessage();
+        log.warn("Operation failed [correlationId={}]: {}", correlationId, message, exception);
+        final ErrorResponse errorResponse = new ErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                CODE_REQUEST_FAILED, message, correlationId, Collections.emptyList());
+        return new ResponseEntity<>(errorResponse, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
     @ExceptionHandler(ResponseStatusException.class)

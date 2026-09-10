@@ -1,10 +1,10 @@
 package com.itbd.afirestore.firestore.controller;
 
-import com.itbd.afirestore.common.exception.NotFoundException;
 import com.itbd.afirestore.firestore.dto.DocumentWriteRequest;
 import com.itbd.afirestore.firestore.service.GenericFirestoreService;
+import com.itbd.afirestore.firestore.support.FirestoreIds;
+import com.itbd.afirestore.firestore.support.FirestorePaths;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.ResponseEntity;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
@@ -15,6 +15,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * DUP-007: This controller throws; it does not format errors. {@code RestExceptionHandler} turns
+ * {@link IllegalArgumentException} into a 400, {@code NotFoundException} into a 404, and
+ * {@link GenericFirestoreService.OptimisticConcurrencyException} into a 409 carrying the latest
+ * document, so every endpoint returns the same {@code ErrorResponse} shape with a correlation ID.
+ */
 @Slf4j
 @RestController
 @RequestMapping("/api/collections")
@@ -30,102 +36,82 @@ public class GenericFirestoreController {
      * GET a list of all root collections in the Firestore database.
      */
     @GetMapping
-    public Mono<ResponseEntity<List<String>>> getAllCollections(
+    public Mono<List<String>> getAllCollections(
             @RequestHeader("X-Project-Id") String projectId,
             @RequestHeader(value = "X-Database-Id", required = false) String databaseId) {
-        return genericFirestoreService.getAllCollections(projectId, normalizeDatabaseId(databaseId))
-                .map(ResponseEntity::ok)
-                .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().build()));
+        return genericFirestoreService.getAllCollections(projectId, FirestoreIds.normalizeDatabaseId(databaseId));
     }
 
     /**
      * READ either ALL documents from a collection OR a single document, depending on path depth.
      */
     @GetMapping("/**")
-    public Mono<ResponseEntity<Object>> get(
+    public Mono<Object> get(
             ServerHttpRequest request,
             @RequestHeader("X-Project-Id") String projectId,
             @RequestHeader(value = "X-Database-Id", required = false) String databaseId,
             @RequestParam(value = "limit", required = false) Integer limit,
             @RequestParam(value = "page", required = false) Integer page) {
         String path = extractFirestorePath(request);
-        String normalizedDatabaseId = normalizeDatabaseId(databaseId);
+        String normalizedDatabaseId = FirestoreIds.normalizeDatabaseId(databaseId);
 
-        int segmentCount = path.split("/").length;
-        if (segmentCount % 2 != 0) {
-            // Odd number of segments -> Collection Path
-            if (limit == null && page == null) {
-                return genericFirestoreService.getAllDocuments(projectId, normalizedDatabaseId, path)
-                        .map(docs -> ResponseEntity.ok((Object) docs))
-                        .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().build()));
-            }
-
-            int safeLimit = Math.clamp(limit == null ? 50 : limit, 1, 500);
-            int safePage = Math.max(0, page == null ? 0 : page);
-            return genericFirestoreService.getAllDocumentsPage(projectId, normalizedDatabaseId, path, safePage, safeLimit)
-                    .map(result -> {
-                        Map<String, Object> payload = new LinkedHashMap<>();
-                        payload.put("documents", result.documents());
-                        payload.put("page", result.pageIndex());
-                        payload.put("limit", result.pageSize());
-                        payload.put("hasNextPage", result.hasNextPage());
-                        payload.put("hasPreviousPage", result.pageIndex() > 0);
-                        return ResponseEntity.ok((Object) payload);
-                    })
-                    .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().build()));
-        } else {
-            // Even number of segments -> Document Path
+        if (FirestorePaths.isDocument(path)) {
             return genericFirestoreService.getDocumentDetails(projectId, normalizedDatabaseId, path)
-                    .map(doc -> ResponseEntity.ok((Object) doc))
-                    .onErrorResume(NotFoundException.class, e ->
-                            Mono.just(ResponseEntity.status(404).body(errorBodyObject(e.getMessage()))))
-                    .onErrorResume(e -> {
-                        log.error("Failed to read document at path '{}': {}", path, e.getMessage(), e);
-                        return Mono.just(ResponseEntity.internalServerError().body(errorBodyObject(e.getMessage())));
-                    });
+                    .map(document -> (Object) document);
         }
+
+        if (limit == null && page == null) {
+            return genericFirestoreService.getAllDocuments(projectId, normalizedDatabaseId, path)
+                    .map(documents -> (Object) documents);
+        }
+
+        int safeLimit = Math.clamp(limit == null ? 50 : limit, 1, 500);
+        int safePage = Math.max(0, page == null ? 0 : page);
+        return genericFirestoreService
+                .getAllDocumentsPage(projectId, normalizedDatabaseId, path, safePage, safeLimit)
+                .map(result -> {
+                    Map<String, Object> payload = new LinkedHashMap<>();
+                    payload.put("documents", result.documents());
+                    payload.put("page", result.pageIndex());
+                    payload.put("limit", result.pageSize());
+                    payload.put("hasNextPage", result.hasNextPage());
+                    payload.put("hasPreviousPage", result.pageIndex() > 0);
+                    return (Object) payload;
+                });
     }
 
     /**
      * CREATE a document in a dynamic collection.
      */
     @PostMapping("/**")
-    public Mono<ResponseEntity<Map<String, Object>>> create(
+    public Mono<Map<String, Object>> create(
             ServerHttpRequest request,
             @RequestHeader("X-Project-Id") String projectId,
             @RequestHeader(value = "X-Database-Id", required = false) String databaseId,
             @RequestParam(value = "docId", required = false) String docId,
             @RequestBody Map<String, Object> data) {
-        String path = normalizePath(extractFirestorePath(request));
-        if (path.isEmpty()) {
-            return Mono.just(ResponseEntity.badRequest().body(errorBody("Collection path is required.")));
+        String collectionPath = FirestorePaths.normalize(extractFirestorePath(request));
+        if (collectionPath.isEmpty()) {
+            throw new IllegalArgumentException("Collection path is required.");
         }
-        if (!isCollectionPath(path)) {
-            return Mono.just(ResponseEntity.badRequest().body(errorBody(
-                    "Collection path must contain an odd number of path segments.")));
+        if (!FirestorePaths.isCollection(collectionPath)) {
+            throw new IllegalArgumentException("Collection path must contain an odd number of path segments.");
         }
 
-        String normalizedDocId = normalizeDocId(docId);
+        String normalizedDocId = docId == null ? "" : docId.trim();
         if (normalizedDocId.contains("/")) {
-            return Mono.just(ResponseEntity.badRequest().body(errorBody(
-                    "Document ID cannot contain '/'. Provide only the ID, not a path.")));
+            throw new IllegalArgumentException("Document ID cannot contain '/'. Provide only the ID, not a path.");
         }
         if (".".equals(normalizedDocId) || "..".equals(normalizedDocId)) {
-            return Mono.just(ResponseEntity.badRequest().body(errorBody("Document ID cannot be '.' or '..'.")));
+            throw new IllegalArgumentException("Document ID cannot be '.' or '..'.");
         }
 
         return genericFirestoreService.createDocument(
-                        projectId,
-                        normalizeDatabaseId(databaseId),
-                        path,
-                        normalizedDocId.isEmpty() ? null : normalizedDocId,
-                        data == null ? Map.of() : data)
-                .map(ResponseEntity::ok)
-                .onErrorResume(IllegalArgumentException.class, e ->
-                        Mono.just(ResponseEntity.badRequest().body(errorBody(e.getMessage()))))
-                .onErrorResume(e ->
-                        Mono.just(ResponseEntity.internalServerError().body(errorBody(
-                                e.getMessage() == null ? "Create failed." : e.getMessage()))));
+                projectId,
+                FirestoreIds.normalizeDatabaseId(databaseId),
+                collectionPath,
+                normalizedDocId.isEmpty() ? null : normalizedDocId,
+                data == null ? Map.of() : data);
     }
 
     /**
@@ -137,23 +123,15 @@ public class GenericFirestoreController {
      * the latest document so the client can show a conflict diff.</p>
      */
     @PutMapping("/**")
-    public Mono<ResponseEntity<Object>> update(
+    public Mono<Object> update(
             ServerHttpRequest request,
             @RequestHeader("X-Project-Id") String projectId,
             @RequestHeader(value = "X-Database-Id", required = false) String databaseId,
             @RequestBody DocumentWriteRequest writeRequest) {
         String path = extractFirestorePath(request);
-        return genericFirestoreService.writeDocument(projectId, normalizeDatabaseId(databaseId), path, writeRequest)
-                .map(doc -> ResponseEntity.ok((Object) doc))
-                .onErrorResume(GenericFirestoreService.OptimisticConcurrencyException.class, e ->
-                        Mono.just(ResponseEntity.status(409).body(conflictBody(e))))
-                .onErrorResume(IllegalArgumentException.class, e ->
-                        Mono.just(ResponseEntity.badRequest().body(errorBodyObject(e.getMessage()))))
-                .onErrorResume(e -> {
-                    log.error("Failed to write document at path '{}': {}", path, e.getMessage(), e);
-                    return Mono.just(ResponseEntity.internalServerError().body(errorBodyObject(
-                            e.getMessage() == null ? "Write failed." : e.getMessage())));
-                });
+        return genericFirestoreService
+                .writeDocument(projectId, FirestoreIds.normalizeDatabaseId(databaseId), path, writeRequest)
+                .map(document -> (Object) document);
     }
 
     /**
@@ -161,92 +139,40 @@ public class GenericFirestoreController {
      * guarded by an atomic update-time precondition (FFP-104).
      */
     @DeleteMapping("/**")
-    public Mono<ResponseEntity<Object>> delete(
+    public Mono<Map<String, Object>> delete(
             ServerHttpRequest request,
             @RequestHeader("X-Project-Id") String projectId,
             @RequestHeader(value = "X-Database-Id", required = false) String databaseId,
             @RequestParam(value = "expectedUpdateTime", required = false) String expectedUpdateTime) {
         String path = extractFirestorePath(request);
+        Instant expected = parseExpectedUpdateTime(expectedUpdateTime);
 
-        Instant expected;
-        try {
-            expected = expectedUpdateTime == null || expectedUpdateTime.isBlank()
-                    ? null
-                    : Instant.parse(expectedUpdateTime.trim());
-        } catch (DateTimeParseException e) {
-            return Mono.just(ResponseEntity.badRequest().body(errorBodyObject(
-                    "expectedUpdateTime must be an ISO-8601 instant.")));
-        }
-
-        return genericFirestoreService.deleteDocument(projectId, normalizeDatabaseId(databaseId), path, expected)
-                .thenReturn(ResponseEntity.ok(errorBodyObject("Document deleted successfully.")))
-                .onErrorResume(GenericFirestoreService.OptimisticConcurrencyException.class, e ->
-                        Mono.just(ResponseEntity.status(409).body(conflictBody(e))))
-                .onErrorResume(IllegalArgumentException.class, e ->
-                        Mono.just(ResponseEntity.badRequest().body(errorBodyObject(e.getMessage()))))
-                .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().body(errorBodyObject(
-                        "Error deleting document: " + e.getMessage()))));
+        return genericFirestoreService
+                .deleteDocument(projectId, FirestoreIds.normalizeDatabaseId(databaseId), path, expected)
+                .thenReturn(Map.of("message", (Object) "Document deleted successfully."));
     }
 
+    /** FFP-104: the optional optimistic-concurrency guard, as an ISO-8601 instant. */
+    private static Instant parseExpectedUpdateTime(String rawExpectedUpdateTime) {
+        if (rawExpectedUpdateTime == null || rawExpectedUpdateTime.isBlank()) {
+            return null;
+        }
+        try {
+            return Instant.parse(rawExpectedUpdateTime.trim());
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException("expectedUpdateTime must be an ISO-8601 instant.");
+        }
+    }
+
+    /**
+     * Firestore paths arrive as the wildcard tail of the mapping, so they are pulled from the
+     * request rather than bound with {@code @PathVariable} (they contain slashes). Slash cleanup is
+     * {@link FirestorePaths#normalize(String)}'s job.
+     */
     private String extractFirestorePath(ServerHttpRequest request) {
         String fullPath = request.getPath().pathWithinApplication().value();
         String prefix = "/api/collections/";
-        String extracted = fullPath;
-        if (fullPath.startsWith(prefix)) {
-            extracted = fullPath.substring(prefix.length());
-        }
-        // Clean trailing slashes if they exist
-        if (extracted.endsWith("/")) {
-            extracted = extracted.substring(0, extracted.length() - 1);
-        }
-        return extracted;
-    }
-
-    private String normalizeDatabaseId(String databaseId) {
-        return databaseId == null || databaseId.trim().isEmpty() ? "(default)" : databaseId.trim();
-    }
-
-    private String normalizePath(String path) {
-        if (path == null) {
-            return "";
-        }
-        String normalized = path.trim();
-        if (normalized.startsWith("/")) {
-            normalized = normalized.substring(1);
-        }
-        while (normalized.endsWith("/")) {
-            normalized = normalized.substring(0, normalized.length() - 1);
-        }
-        return normalized;
-    }
-
-    private boolean isCollectionPath(String path) {
-        if (path == null || path.isBlank()) {
-            return false;
-        }
-        return path.split("/").length % 2 != 0;
-    }
-
-    private String normalizeDocId(String docId) {
-        return docId == null ? "" : docId.trim();
-    }
-
-    private Map<String, Object> errorBody(String message) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("message", message == null || message.isBlank() ? "Request failed." : message);
-        return body;
-    }
-
-    private Object errorBodyObject(String message) {
-        return errorBody(message);
-    }
-
-    /** FFP-104: 409 payload carrying the latest document so clients can diff before overwriting. */
-    private Object conflictBody(GenericFirestoreService.OptimisticConcurrencyException e) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("errorCode", "CONFLICT");
-        body.put("message", e.getMessage());
-        body.put("latestDocument", e.getLatestDocument());
-        return body;
+        String extracted = fullPath.startsWith(prefix) ? fullPath.substring(prefix.length()) : fullPath;
+        return FirestorePaths.normalize(extracted);
     }
 }

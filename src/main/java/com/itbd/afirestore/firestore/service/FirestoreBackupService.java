@@ -4,6 +4,7 @@ import com.google.cloud.firestore.DocumentReference;
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.SetOptions;
 import com.itbd.afirestore.firestore.dto.FirestoreValue;
+import com.itbd.afirestore.firestore.support.FirestorePaths;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -61,8 +62,8 @@ public class FirestoreBackupService {
                         job.cancelFinished("Cancelled after " + job.committed() + " document(s).");
                         return;
                     }
-                    String path = document.path() == null ? "" : document.path().trim().replaceAll("^/+|/+$", "");
-                    if (path.isBlank() || path.split("/").length % 2 != 0) {
+                    String path = FirestorePaths.normalize(document.path());
+                    if (!FirestorePaths.isDocument(path)) {
                         job.recordFailure(document.path(), "Not a valid document path.");
                         continue;
                     }

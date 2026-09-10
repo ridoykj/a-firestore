@@ -5,6 +5,7 @@ import com.itbd.afirestore.firestore.dto.FirestoreValue;
 import com.itbd.afirestore.firestore.service.FirestoreBackupService;
 import com.itbd.afirestore.firestore.service.FirestoreTransferService;
 import com.itbd.afirestore.firestore.service.JobRegistry;
+import com.itbd.afirestore.firestore.support.FirestoreIds;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
@@ -61,7 +62,7 @@ public class JobController {
         backupService.startRestore(
                 job,
                 projectId,
-                normalizeDatabaseId(databaseId),
+                FirestoreIds.normalizeDatabaseId(databaseId),
                 request.documents(),
                 request.conflictPolicy(),
                 request.dryRun());
@@ -118,10 +119,6 @@ public class JobController {
                         .event(job.isTerminal() ? job.status().name().toLowerCase() : "progress")
                         .data(snapshot)
                         .build());
-    }
-
-    private String normalizeDatabaseId(String databaseId) {
-        return databaseId == null || databaseId.trim().isEmpty() ? "(default)" : databaseId.trim();
     }
 
     /** FFP-304 restore request body: typed documents + conflict policy + dry-run flag. */

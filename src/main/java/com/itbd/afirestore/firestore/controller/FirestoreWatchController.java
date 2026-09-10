@@ -7,6 +7,8 @@ import com.google.cloud.firestore.ListenerRegistration;
 import com.google.cloud.firestore.Query;
 import com.itbd.afirestore.firestore.dto.DocumentDto;
 import com.itbd.afirestore.firestore.service.FirestoreManagerService;
+import com.itbd.afirestore.firestore.support.FirestoreIds;
+import com.itbd.afirestore.firestore.support.FirestorePaths;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
@@ -46,20 +48,21 @@ public class FirestoreWatchController {
             @RequestHeader(value = "X-Database-Id", required = false) String databaseId,
             @RequestParam("path") String path,
             @RequestParam(value = "limit", defaultValue = "50") Integer limit) {
-        String normalizedPath = normalize(path);
+        String normalizedPath = FirestorePaths.normalize(path);
         if (normalizedPath.isBlank()) {
             return Flux.just(sse("error", Map.of("message", "Path is required.")));
         }
 
         Firestore firestore;
         try {
-            firestore = firestoreManagerService.getFirestore(projectId, normalizeDatabaseId(databaseId));
+            firestore = firestoreManagerService.getFirestore(
+                    projectId, FirestoreIds.normalizeDatabaseId(databaseId));
         } catch (RuntimeException e) {
             return Flux.just(sse("error", Map.of("message", e.getMessage() == null ? "Not connected." : e.getMessage())));
         }
 
         int safeLimit = Math.clamp(limit == null ? 50 : limit, 1, 500);
-        boolean isCollection = normalizedPath.split("/").length % 2 != 0;
+        boolean isCollection = FirestorePaths.isCollection(normalizedPath);
 
         Sinks.Many<ServerSentEvent<Object>> sink = Sinks.many().multicast().onBackpressureBuffer();
         final ListenerRegistration registration;
@@ -122,16 +125,5 @@ public class FirestoreWatchController {
 
     private static ServerSentEvent<Object> sse(String event, Object data) {
         return ServerSentEvent.<Object>builder().event(event).data(data).build();
-    }
-
-    private String normalize(String input) {
-        if (input == null) {
-            return "";
-        }
-        return input.trim().replaceAll("^/+|/+$", "");
-    }
-
-    private String normalizeDatabaseId(String databaseId) {
-        return databaseId == null || databaseId.trim().isEmpty() ? "(default)" : databaseId.trim();
     }
 }

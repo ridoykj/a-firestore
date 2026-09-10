@@ -1,6 +1,7 @@
 package com.itbd.afirestore.firestore.controller;
 
 import com.itbd.afirestore.firestore.service.GenericFirestoreService;
+import com.itbd.afirestore.firestore.support.FirestoreIds;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -27,12 +28,9 @@ public class AdminFirestoreController {
     public Mono<ResponseEntity<List<String>>> getAllDatabases(
             @RequestHeader("X-Project-Id") String projectId,
             @RequestHeader(value = "X-Database-Id", required = false) String databaseId) {
-        String normalizedDatabaseId = databaseId == null || databaseId.trim().isEmpty()
-                ? "(default)"
-                : databaseId.trim();
-        return genericFirestoreService.getAllDatabases(projectId, normalizedDatabaseId)
-                .map(ResponseEntity::ok)
-                .onErrorResume(e -> Mono.just(ResponseEntity.internalServerError().build()));
+        return genericFirestoreService
+                .getAllDatabases(projectId, FirestoreIds.normalizeDatabaseId(databaseId))
+                .map(ResponseEntity::ok);
     }
 
 
