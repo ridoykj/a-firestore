@@ -1,7 +1,8 @@
 import { Link } from "@tanstack/react-router"
+import type * as React from "react"
 import { useMemo } from "react"
 import { Badge } from "@/shadcn/components/ui/badge"
-import { Button } from "@/shadcn/components/ui/button"
+import { Button, LinkButton } from "@/shadcn/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/shadcn/components/ui/card"
 import { useGcpStore } from "@/features/gcp/store/gcp-store"
 import {
@@ -45,18 +46,25 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button asChild variant="outline" size="sm" className="h-9">
-            <Link to="/">
-              <KeyRound data-icon="inline-start" />
-              Credentials
-            </Link>
-          </Button>
-          <Button asChild size="sm" className="h-9">
-            <Link to="/app/firestore">
-              Open Firestore
-              <ArrowRight data-icon="inline-end" />
-            </Link>
-          </Button>
+          <LinkButton
+            variant="outline"
+            size="sm"
+            className="h-9"
+            href="/"
+            render={(props) => <Link to="/" {...(props as React.ComponentPropsWithRef<"a">)} />}
+          >
+            <KeyRound data-icon="inline-start" />
+            Credentials
+          </LinkButton>
+          <LinkButton
+            size="sm"
+            className="h-9"
+            href="/app/firestore"
+            render={(props) => <Link to="/app/firestore" {...(props as React.ComponentPropsWithRef<"a">)} />}
+          >
+            Open Firestore
+            <ArrowRight data-icon="inline-end" />
+          </LinkButton>
         </div>
       </div>
 
@@ -71,16 +79,15 @@ export default function DashboardPage() {
               Upload a Google Cloud service account file to browse data, run queries, and manage resources.
             </p>
           </div>
-          <Button
-            asChild
+          <LinkButton
             size="sm"
             className="h-9 border-amber-700 bg-amber-700 text-amber-50 hover:bg-amber-800 dark:bg-amber-600 dark:hover:bg-amber-600/90"
+            href="/"
+            render={(props) => <Link to="/" {...(props as React.ComponentPropsWithRef<"a">)} />}
           >
-            <Link to="/">
-              <UploadCloud data-icon="inline-start" />
-              Upload credentials
-            </Link>
-          </Button>
+            <UploadCloud data-icon="inline-start" />
+            Upload credentials
+          </LinkButton>
         </div>
       ) : null}
 
@@ -213,7 +220,7 @@ export default function DashboardPage() {
             </CardHeader>
             <CardFooter className="flex items-center justify-between border-t pt-4">
               <span className="text-xs text-muted-foreground">Planned</span>
-              <Button variant="outline" size="sm" className="h-7.5 text-xs" disabled>
+              <Button variant="outline" size="sm" className="h-7.5 text-xs" isDisabled>
                 Notify me
               </Button>
             </CardFooter>

@@ -86,8 +86,8 @@ export function FirestoreReconnectNotice({ tab, onReattached }: FirestoreReconne
             </p>
             <Button
               className="w-full"
-              onClick={() => void reconnectEmulator()}
-              disabled={reconnecting}
+              onPress={() => void reconnectEmulator()}
+              isDisabled={reconnecting}
             >
               <PlugZap data-icon="inline-start" />
               {reconnecting ? "Reconnecting..." : "Reconnect to emulator"}
@@ -106,8 +106,8 @@ export function FirestoreReconnectNotice({ tab, onReattached }: FirestoreReconne
             />
             <Button
               className="w-full"
-              onClick={() => void reconnectServiceAccount()}
-              disabled={reconnecting || !credentialsFile}
+              onPress={() => void reconnectServiceAccount()}
+              isDisabled={reconnecting || !credentialsFile}
             >
               <UploadCloud data-icon="inline-start" />
               {reconnecting ? "Reconnecting..." : "Reconnect"}

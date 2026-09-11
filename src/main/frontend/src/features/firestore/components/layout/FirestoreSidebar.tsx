@@ -4,7 +4,6 @@ import { Input } from "@/shadcn/components/ui/input"
 import { Label } from "@/shadcn/components/ui/label"
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
@@ -195,16 +194,17 @@ export function FirestoreSidebar({
           {loadingProjects ? <Spinner className="size-3" /> : null}
         </Label>
         <Select
-          value={selectedProjectId || undefined}
-          onValueChange={(value) => void handleProjectChange(value)}
-          disabled={controlsDisabled || projectOptions.length === 0}
+          selectedKey={selectedProjectId || null}
+          onSelectionChange={(key) => void handleProjectChange(key === null ? "" : String(key))}
+          isDisabled={controlsDisabled || projectOptions.length === 0}
+          placeholder={credentialsFile ? "Load projects" : "Upload credentials"}
         >
           <SelectTrigger className="w-full bg-card text-xs font-semibold px-3 py-4 rounded-xl border border-border shadow-sm">
-            <SelectValue placeholder={credentialsFile ? "Load projects" : "Upload credentials"} />
+            <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {projectOptions.map((project) => (
-              <SelectItem key={project} value={project} className="text-xs font-medium">
+              <SelectItem key={project} id={project} className="text-xs font-medium">
                 {project}
               </SelectItem>
             ))}
@@ -218,17 +218,18 @@ export function FirestoreSidebar({
           {loadingDatabases ? <Spinner className="size-3" /> : null}
         </Label>
         <Select
-          value={selectedDatabaseId || "__default__"}
-          onValueChange={(value) => void handleDatabaseChange(value)}
-          disabled={controlsDisabled}
+          selectedKey={selectedDatabaseId || "__default__"}
+          onSelectionChange={(key) => void handleDatabaseChange(String(key))}
+          isDisabled={controlsDisabled}
+          placeholder="(default)"
         >
           <SelectTrigger className="w-full bg-card text-xs font-semibold px-3 py-4 rounded-xl border border-border shadow-sm">
-            <SelectValue placeholder="(default)" />
+            <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__default__" className="text-xs font-medium">(default)</SelectItem>
+            <SelectItem id="__default__" className="text-xs font-medium">(default)</SelectItem>
             {databaseOptions.map((db) => (
-              <SelectItem key={db} value={db} className="text-xs font-medium">
+              <SelectItem key={db} id={db} className="text-xs font-medium">
                 {db}
               </SelectItem>
             ))}
@@ -288,7 +289,7 @@ export function FirestoreSidebar({
                         ? "bg-secondary text-primary font-bold border-l-4 border-primary shadow-sm hover:bg-secondary hover:text-primary"
                         : "text-muted-foreground hover:bg-accent hover:text-foreground",
                     )}
-                    onClick={() => {
+                    onPress={() => {
                       runCollectionQuery(collection)
                       onDrawerOpenChange?.(false)
                     }}
@@ -309,19 +310,22 @@ export function FirestoreSidebar({
 
   if (drawerMode) {
     return (
-      <Sheet open={drawerOpen} onOpenChange={onDrawerOpenChange}>
-        <SheetContent side="left" className="w-[88vw] max-w-sm p-0">
-          <SheetHeader className="border-b px-4 py-3 text-left">
-            <SheetTitle className="inline-flex items-center gap-2 text-base">
-              <Database className="text-primary" />
-              Firestore Collections
-            </SheetTitle>
-            <SheetDescription>Browse available root collections and run quick queries.</SheetDescription>
-          </SheetHeader>
-          {contextSelectors}
-          {collectionList}
-          {belowCollections}
-        </SheetContent>
+      <Sheet
+        isOpen={drawerOpen}
+        onOpenChange={onDrawerOpenChange}
+        side="left"
+        className="w-[88vw] max-w-sm p-0"
+      >
+        <SheetHeader className="border-b px-4 py-3 text-left">
+          <SheetTitle className="inline-flex items-center gap-2 text-base">
+            <Database className="text-primary" />
+            Firestore Collections
+          </SheetTitle>
+          <SheetDescription>Browse available root collections and run quick queries.</SheetDescription>
+        </SheetHeader>
+        {contextSelectors}
+        {collectionList}
+        {belowCollections}
       </Sheet>
     )
   }
@@ -341,37 +345,40 @@ export function FirestoreSidebar({
               <span className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-wider">Collections</span>
             </div>
             <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => void refreshCollections()}
-                disabled={collectionsLoading}
-                className="text-primary"
-                title="Refresh collections schema"
-              >
-                <RefreshCw className={cn("size-4", collectionsLoading && "animate-spin")} />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => setLeftSidebarExpanded(false)}
-                className="text-muted-foreground"
-                title="Hide Left Side Panel"
-              >
-                <ChevronLeft className="size-4" />
-              </Button>
+              <span title="Refresh collections schema">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onPress={() => void refreshCollections()}
+                  isDisabled={collectionsLoading}
+                  className="text-primary"
+                >
+                  <RefreshCw className={cn("size-4", collectionsLoading && "animate-spin")} />
+                </Button>
+              </span>
+              <span title="Hide Left Side Panel">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onPress={() => setLeftSidebarExpanded(false)}
+                  className="text-muted-foreground"
+                >
+                  <ChevronLeft className="size-4" />
+                </Button>
+              </span>
             </div>
           </>
         ) : (
-          <Button
-            variant="secondary"
-            size="icon-lg"
-            onClick={() => setLeftSidebarExpanded(true)}
-            className="rounded-xl text-primary shadow-sm"
-            title="Expand Left side panel"
-          >
-            <Layers className="size-5" />
-          </Button>
+          <span title="Expand Left side panel">
+            <Button
+              variant="secondary"
+              size="icon-lg"
+              onPress={() => setLeftSidebarExpanded(true)}
+              className="rounded-xl text-primary shadow-sm"
+            >
+              <Layers className="size-5" />
+            </Button>
+          </span>
         )}
       </div>
 

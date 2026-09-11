@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router"
-import { Button } from "@/shadcn/components/ui/button"
+import type * as React from "react"
+import { LinkButton } from "@/shadcn/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/shadcn/components/ui/card"
 
 const NotFoundPage = () => {
@@ -14,9 +15,10 @@ const NotFoundPage = () => {
           <p className="text-sm text-muted-foreground">
             Oops! The page you&apos;re looking for doesn&apos;t exist.
           </p>
-          <Button asChild>
-            <Link to="/">Return to Homepage</Link>
-          </Button>
+          <LinkButton href="/"
+            render={(props) => <Link to="/" {...(props as React.ComponentPropsWithRef<"a">)} />}>
+            Return to Homepage
+          </LinkButton>
         </CardContent>
       </Card>
     </main>

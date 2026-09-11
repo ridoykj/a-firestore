@@ -4,7 +4,6 @@ import {
     BreadcrumbLink,
     BreadcrumbList,
     BreadcrumbPage,
-    BreadcrumbSeparator,
 } from "@/shadcn/components/ui/breadcrumb"
 import { Button } from "@/shadcn/components/ui/button"
 import { Checkbox } from "@/shadcn/components/ui/checkbox"
@@ -100,16 +99,13 @@ export function FirestoreSelectionTree({
                                 </BreadcrumbPage>
                             ) : (
                                 <BreadcrumbLink
-                                    asChild
                                     className="cursor-pointer flex items-center gap-1"
-                                    onClick={() => onNavigate("", true)}
+                                    onPress={() => onNavigate("", true)}
                                 >
-                                    <span><Home className="h-4 w-4" /> Root</span>
+                                    <Home className="h-4 w-4" /> Root
                                 </BreadcrumbLink>
                             )}
                         </BreadcrumbItem>
-
-                        {segments.length > 0 && <BreadcrumbSeparator />}
 
                         {segments.map((segment, index) => {
                             const path = segments.slice(0, index + 1).join("/")
@@ -122,44 +118,44 @@ export function FirestoreSelectionTree({
                                             <BreadcrumbPage>{segment}</BreadcrumbPage>
                                         ) : (
                                             <BreadcrumbLink
-                                                asChild
                                                 className="cursor-pointer"
-                                                onClick={() => {
+                                                onPress={() => {
                                                     const node = findNodeByPath(tree, path)
                                                     onNavigate(path, node?.isLoaded ?? false)
                                                 }}
                                             >
-                                                <span>{segment}</span>
+                                                {segment}
                                             </BreadcrumbLink>
                                         )}
                                     </BreadcrumbItem>
-                                    {!isLast && <BreadcrumbSeparator />}
                                 </React.Fragment>
                             )
                         })}
                     </BreadcrumbList>
                 </Breadcrumb>
                 <div className="flex items-center gap-1 shrink-0 ml-4">
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => setViewMode("list")}
-                        className={viewMode === "list" ? "bg-background shadow-sm text-foreground hover:bg-background" : "text-muted-foreground"}
-                        title="List View"
-                    >
-                        <List className="h-4 w-4" />
-                    </Button>
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => setViewMode("grid")}
-                        className={viewMode === "grid" ? "bg-background shadow-sm text-foreground hover:bg-background" : "text-muted-foreground"}
-                        title="Grid View"
-                    >
-                        <LayoutGrid className="h-4 w-4" />
-                    </Button>
+                    <span title="List View">
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            onPress={() => setViewMode("list")}
+                            className={viewMode === "list" ? "bg-background shadow-sm text-foreground hover:bg-background" : "text-muted-foreground"}
+                        >
+                            <List className="h-4 w-4" />
+                        </Button>
+                    </span>
+                    <span title="Grid View">
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            onPress={() => setViewMode("grid")}
+                            className={viewMode === "grid" ? "bg-background shadow-sm text-foreground hover:bg-background" : "text-muted-foreground"}
+                        >
+                            <LayoutGrid className="h-4 w-4" />
+                        </Button>
+                    </span>
                 </div>
             </div>
         )
@@ -196,14 +192,18 @@ export function FirestoreSelectionTree({
                                     className="flex flex-col items-center justify-center gap-2 rounded-lg border p-3 hover:bg-muted/50 group cursor-pointer relative"
                                     onClick={() => onNavigate(node.path, node.isLoaded)}
                                 >
-                                    <Checkbox
-                                        checked={isSelected}
-                                        onCheckedChange={() => onToggleSelect(node.path)}
+                                    <span
                                         onClick={(e) => e.stopPropagation()}
-                                        className={`absolute top-2 left-2 shrink-0 ${isSelected ? "" : "opacity-50 group-hover:opacity-100"}`}
                                         title={isSelected ? "Unselect" : "Select"}
-                                        aria-label={isSelected ? `Unselect ${node.name}` : `Select ${node.name}`}
-                                    />
+                                        className="absolute top-2 left-2"
+                                    >
+                                        <Checkbox
+                                            isSelected={isSelected}
+                                            onChange={() => onToggleSelect(node.path)}
+                                            className={`shrink-0 ${isSelected ? "" : "opacity-50 group-hover:opacity-100"}`}
+                                            aria-label={isSelected ? `Unselect ${node.name}` : `Select ${node.name}`}
+                                        />
+                                    </span>
 
                                     {node.type === "collection" ? (
                                         <Folder className="h-8 w-8 text-blue-500" />
@@ -222,14 +222,17 @@ export function FirestoreSelectionTree({
                                     onClick={() => onNavigate(node.path, node.isLoaded)}
                                 >
                                     <div className="flex items-center min-w-0 flex-1">
-                                        <Checkbox
-                                            checked={isSelected}
-                                            onCheckedChange={() => onToggleSelect(node.path)}
+                                        <span
                                             onClick={(e) => e.stopPropagation()}
-                                            className="mr-2 shrink-0"
                                             title={isSelected ? "Unselect" : "Select"}
-                                            aria-label={isSelected ? `Unselect ${node.name}` : `Select ${node.name}`}
-                                        />
+                                        >
+                                            <Checkbox
+                                                isSelected={isSelected}
+                                                onChange={() => onToggleSelect(node.path)}
+                                                className="mr-2 shrink-0"
+                                                aria-label={isSelected ? `Unselect ${node.name}` : `Select ${node.name}`}
+                                            />
+                                        </span>
 
                                         <div className="flex items-center gap-2 min-w-0 flex-1">
                                             {node.type === "collection" ? (
@@ -261,7 +264,7 @@ export function FirestoreSelectionTree({
                                         type="button"
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => onLoadMore?.(currentPath)}
+                                        onPress={() => onLoadMore?.(currentPath)}
                                         className="text-muted-foreground hover:text-primary"
                                     >
                                         Scroll or click to load more

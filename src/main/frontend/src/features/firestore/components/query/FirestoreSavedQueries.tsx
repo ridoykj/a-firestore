@@ -85,7 +85,7 @@ export function FirestoreSavedQueries({
             variant={tab === "saved" ? "secondary" : "ghost"}
             size="sm"
             className="h-7 gap-1.5 px-2 text-[11px] font-bold"
-            onClick={() => setTab("saved")}
+            onPress={() => setTab("saved")}
           >
             <Bookmark className="size-3.5" />
             Saved
@@ -94,7 +94,7 @@ export function FirestoreSavedQueries({
             variant={tab === "history" ? "secondary" : "ghost"}
             size="sm"
             className="h-7 gap-1.5 px-2 text-[11px] font-bold"
-            onClick={() => setTab("history")}
+            onPress={() => setTab("history")}
           >
             <History className="size-3.5" />
             History
@@ -105,7 +105,7 @@ export function FirestoreSavedQueries({
             variant="ghost"
             size="sm"
             className="h-7 px-2 text-[10px] text-muted-foreground"
-            onClick={onClearHistory}
+            onPress={onClearHistory}
           >
             Clear
           </Button>
@@ -125,7 +125,7 @@ export function FirestoreSavedQueries({
             placeholder="Save current query as..."
             className="h-8 text-[11px]"
           />
-          <Button size="sm" className="h-8 px-2 text-[11px]" onClick={submitSave}>
+          <Button size="sm" className="h-8 px-2 text-[11px]" onPress={submitSave}>
             Save
           </Button>
         </div>
@@ -156,28 +156,29 @@ export function FirestoreSavedQueries({
                         }}
                         className="h-7 text-[11px]"
                       />
-                      <Button variant="ghost" size="icon-xs" onClick={() => commitRename(entry.id)}>
+                      <Button variant="ghost" size="icon-xs" onPress={() => commitRename(entry.id)}>
                         <Check className="size-3.5 text-emerald-500" />
                       </Button>
-                      <Button variant="ghost" size="icon-xs" onClick={() => setEditingId(null)}>
+                      <Button variant="ghost" size="icon-xs" onPress={() => setEditingId(null)}>
                         <X className="size-3.5" />
                       </Button>
                     </div>
                   ) : (
                     <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => onToggleFavorite(entry.id)}
-                        title={entry.favorite ? "Unfavorite" : "Favorite"}
-                      >
-                        <Star
-                          className={cn(
-                            "size-3.5",
-                            entry.favorite ? "fill-amber-400 text-amber-400" : "text-muted-foreground",
-                          )}
-                        />
-                      </Button>
+                      <span title={entry.favorite ? "Unfavorite" : "Favorite"}>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onPress={() => onToggleFavorite(entry.id)}
+                        >
+                          <Star
+                            className={cn(
+                              "size-3.5",
+                              entry.favorite ? "fill-amber-400 text-amber-400" : "text-muted-foreground",
+                            )}
+                          />
+                        </Button>
+                      </span>
                       <button
                         type="button"
                         className="min-w-0 flex-1 text-left"
@@ -193,30 +194,33 @@ export function FirestoreSavedQueries({
                           {describeQuery(entry.query)}
                         </span>
                       </button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => onRun(entry.query)}
-                        title="Run"
-                      >
-                        <Play className="size-3.5 text-primary" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => exportQuery(entry.name, entry.query)}
-                        title="Export as JSON"
-                      >
-                        <Download className="size-3.5 text-muted-foreground" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => onDelete(entry.id)}
-                        title="Delete"
-                      >
-                        <Trash2 className="size-3.5 text-muted-foreground hover:text-rose-500" />
-                      </Button>
+                      <span title="Run">
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onPress={() => onRun(entry.query)}
+                        >
+                          <Play className="size-3.5 text-primary" />
+                        </Button>
+                      </span>
+                      <span title="Export as JSON">
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onPress={() => exportQuery(entry.name, entry.query)}
+                        >
+                          <Download className="size-3.5 text-muted-foreground" />
+                        </Button>
+                      </span>
+                      <span title="Delete">
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onPress={() => onDelete(entry.id)}
+                        >
+                          <Trash2 className="size-3.5 text-muted-foreground hover:text-rose-500" />
+                        </Button>
+                      </span>
                     </div>
                   )}
                 </div>
@@ -244,9 +248,11 @@ export function FirestoreSavedQueries({
                     {describeQuery(entry.query)}
                   </span>
                 </button>
-                <Button variant="ghost" size="icon-xs" onClick={() => onRun(entry.query)} title="Run">
-                  <Play className="size-3.5 text-primary" />
-                </Button>
+                <span title="Run">
+                  <Button variant="ghost" size="icon-xs" onPress={() => onRun(entry.query)}>
+                    <Play className="size-3.5 text-primary" />
+                  </Button>
+                </span>
               </div>
             ))}
           </div>

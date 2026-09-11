@@ -38,7 +38,6 @@ import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
-  AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
@@ -1944,15 +1943,15 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
         />
 
         <AlertDialog
-          open={previewDiscardOpen}
+          isOpen={previewDiscardOpen}
           onOpenChange={(nextOpen) => {
             setPreviewDiscardOpen(nextOpen)
             if (!nextOpen) {
               setPendingPreviewIntent(null)
             }
           }}
+          size="sm"
         >
-          <AlertDialogContent size="sm">
             <AlertDialogHeader>
               <AlertDialogTitle>Discard unsaved JSON changes?</AlertDialogTitle>
               <AlertDialogDescription>
@@ -1960,26 +1959,24 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel onClick={handlePreviewDiscardCancel}>
+              <AlertDialogCancel onPress={handlePreviewDiscardCancel}>
                 Keep Editing
               </AlertDialogCancel>
-              <AlertDialogAction variant="destructive" onClick={handlePreviewDiscardConfirm}>
+              <AlertDialogAction variant="destructive" onPress={handlePreviewDiscardConfirm}>
                 Discard Changes
               </AlertDialogAction>
             </AlertDialogFooter>
-          </AlertDialogContent>
         </AlertDialog>
 
         {/* FFP-104: Stale-write conflict dialog with reload / compare / overwrite choices */}
         <AlertDialog
-          open={previewConflict !== null}
+          isOpen={previewConflict !== null}
           onOpenChange={(nextOpen) => {
             if (!nextOpen) {
               setPreviewConflict(null)
             }
           }}
         >
-          <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Document changed on the server</AlertDialogTitle>
               <AlertDialogDescription>
@@ -2009,25 +2006,23 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
               </div>
             </div>
             <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => setPreviewConflict(null)}>
+              <AlertDialogCancel onPress={() => setPreviewConflict(null)}>
                 Keep Editing
               </AlertDialogCancel>
-              <AlertDialogAction variant="outline" onClick={() => void handleConflictReload()}>
+              <AlertDialogAction variant="outline" onPress={() => void handleConflictReload()}>
                 Reload Server Version
               </AlertDialogAction>
               <AlertDialogAction
                 variant="destructive"
-                onClick={() => void handleConflictOverwrite()}
+                onPress={() => void handleConflictOverwrite()}
               >
                 Overwrite Anyway
               </AlertDialogAction>
             </AlertDialogFooter>
-          </AlertDialogContent>
         </AlertDialog>
 
         {/* FFP-002: Bulk delete confirmation dialog */}
-        <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
-          <AlertDialogContent size="sm">
+        <AlertDialog isOpen={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen} size="sm">
             <AlertDialogHeader>
               <AlertDialogTitle className="text-destructive flex items-center gap-2">
                 <Trash className="w-5 h-5" />
@@ -2053,14 +2048,13 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => setBulkDeleteOpen(false)}>
+              <AlertDialogCancel onPress={() => setBulkDeleteOpen(false)}>
                 Cancel
               </AlertDialogCancel>
-              <AlertDialogAction variant="destructive" onClick={confirmBulkDelete}>
+              <AlertDialogAction variant="destructive" onPress={confirmBulkDelete}>
                 Delete {bulkDeletePaths.length} Document(s)
               </AlertDialogAction>
             </AlertDialogFooter>
-          </AlertDialogContent>
         </AlertDialog>
 
         <FirestoreToFirestoreImportDialog

@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router"
-import { Button } from "@/shadcn/components/ui/button"
+import type * as React from "react"
+import { LinkButton } from "@/shadcn/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/shadcn/components/ui/card"
 
 const GlobalErrorComponent = ({ props }: { props: Error }) => {
@@ -17,9 +18,10 @@ const GlobalErrorComponent = ({ props }: { props: Error }) => {
           <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             {props.message}
           </p>
-          <Button asChild>
-            <Link to="/">Go Back to Home</Link>
-          </Button>
+          <LinkButton href="/"
+            render={(props) => <Link to="/" {...(props as React.ComponentPropsWithRef<"a">)} />}>
+            Go Back to Home
+          </LinkButton>
         </CardContent>
       </Card>
     </div>

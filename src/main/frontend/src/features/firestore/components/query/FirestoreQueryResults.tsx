@@ -5,7 +5,6 @@ import { Button } from "@/shadcn/components/ui/button"
 import { Checkbox } from "@/shadcn/components/ui/checkbox"
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -19,7 +18,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/shadcn/components/ui/pagination"
-import { Popover, PopoverContent, PopoverTrigger } from "@/shadcn/components/ui/popover"
+import { Popover, PopoverTrigger } from "@/shadcn/components/ui/popover"
 import { Skeleton } from "@/shadcn/components/ui/skeleton"
 import { Spinner } from "@/shadcn/components/ui/spinner"
 import {
@@ -53,7 +52,7 @@ import {
   XCircle,
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ScrollArea, ScrollBar } from "@/shadcn/components/ui/scroll-area"
+import { ScrollArea } from "@/shadcn/components/ui/scroll-area"
 
 type FirestoreQueryResultsProps = {
   queryLoading: boolean
@@ -110,22 +109,20 @@ function CellValue({ value }: { value: unknown }) {
     ? (value as unknown[]).length
     : Object.keys(value as Record<string, unknown>).length
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="inline-flex items-center gap-1 rounded-md border border-dashed border-border px-1.5 py-0.5 text-[11px] font-medium text-primary hover:bg-accent"
-          onClick={(event) => event.stopPropagation()}
-        >
-          {isArray ? `Array(${size})` : `Object(${size})`}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="max-h-80 w-80 overflow-auto p-0">
+    <PopoverTrigger>
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 rounded-md border border-dashed border-border px-1.5 py-0.5 text-[11px] font-medium text-primary hover:bg-accent"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {isArray ? `Array(${size})` : `Object(${size})`}
+      </button>
+      <Popover placement="bottom start" className="max-h-80 w-80 overflow-auto p-0">
         <pre className="whitespace-pre-wrap wrap-break-word p-3 text-xs">
           {JSON.stringify(value, null, 2)}
         </pre>
-      </PopoverContent>
-    </Popover>
+      </Popover>
+    </PopoverTrigger>
   )
 }
 
@@ -278,8 +275,8 @@ export function FirestoreQueryResults({
   const anyVisibleSelected = visibleRowKeys.some((key) => selectedRowKeys.has(key))
   const allVisibleSelected =
     visibleRowKeys.length > 0 && visibleRowKeys.every((key) => selectedRowKeys.has(key))
-  const headerCheckboxState: boolean | "indeterminate" =
-    allVisibleSelected ? true : anyVisibleSelected ? "indeterminate" : false
+  const headerCheckboxSelected = allVisibleSelected
+  const headerCheckboxIndeterminate = !allVisibleSelected && anyVisibleSelected
 
   const toggleRowSelection = (rowKey: string, shouldSelect: boolean) => {
     setSelectedRowKeys((prev) => {
@@ -431,41 +428,47 @@ export function FirestoreQueryResults({
             {/* FFP-204: column configuration menu */}
             {serverColumnNames.length > 0 ? (
               <div className="flex items-center justify-end gap-2 border-b px-3 py-1.5">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
-                      <Settings2 className="size-3.5" />
-                      Columns
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuTrigger>
+                  <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs">
+                    <Settings2 className="size-3.5" />
+                    Columns
+                  </Button>
+                  <DropdownMenu placement="bottom end" className="w-64">
                     <DropdownMenuLabel>Configure columns</DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     {resolvedColumns.map((column, index) => (
                       <DropdownMenuItem
                         key={column.name}
                         className="flex items-center justify-between gap-2"
-                        onSelect={(event) => event.preventDefault()}
+                        shouldCloseOnSelect={false}
                       >
                         <span className="truncate text-xs font-medium">{column.name}</span>
                         <span className="flex items-center gap-0.5">
-                          <Button variant="ghost" size="icon-xs" onClick={() => moveColumn(column.name, -1)} disabled={index === 0} title="Move left">
-                            <ArrowLeft className="size-3.5" />
-                          </Button>
-                          <Button variant="ghost" size="icon-xs" onClick={() => moveColumn(column.name, 1)} disabled={index === resolvedColumns.length - 1} title="Move right">
-                            <ArrowRight className="size-3.5" />
-                          </Button>
-                          <Button variant="ghost" size="icon-xs" onClick={() => toggleColumnPinned(column.name)} title={column.pinned ? "Unpin" : "Pin"}>
-                            {column.pinned ? <PinOff className="size-3.5 text-primary" /> : <Pin className="size-3.5" />}
-                          </Button>
-                          <Button variant="ghost" size="icon-xs" onClick={() => toggleColumnHidden(column.name)} title={column.hidden ? "Show" : "Hide"}>
-                            {column.hidden ? <EyeOff className="size-3.5 text-muted-foreground" /> : <Eye className="size-3.5" />}
-                          </Button>
+                          <span title="Move left">
+                            <Button variant="ghost" size="icon-xs" onPress={() => moveColumn(column.name, -1)} isDisabled={index === 0}>
+                              <ArrowLeft className="size-3.5" />
+                            </Button>
+                          </span>
+                          <span title="Move right">
+                            <Button variant="ghost" size="icon-xs" onPress={() => moveColumn(column.name, 1)} isDisabled={index === resolvedColumns.length - 1}>
+                              <ArrowRight className="size-3.5" />
+                            </Button>
+                          </span>
+                          <span title={column.pinned ? "Unpin" : "Pin"}>
+                            <Button variant="ghost" size="icon-xs" onPress={() => toggleColumnPinned(column.name)}>
+                              {column.pinned ? <PinOff className="size-3.5 text-primary" /> : <Pin className="size-3.5" />}
+                            </Button>
+                          </span>
+                          <span title={column.hidden ? "Show" : "Hide"}>
+                            <Button variant="ghost" size="icon-xs" onPress={() => toggleColumnHidden(column.name)}>
+                              {column.hidden ? <EyeOff className="size-3.5 text-muted-foreground" /> : <Eye className="size-3.5" />}
+                            </Button>
+                          </span>
                         </span>
                       </DropdownMenuItem>
                     ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                  </DropdownMenu>
+                </DropdownMenuTrigger>
               </div>
             ) : null}
 
@@ -499,9 +502,9 @@ export function FirestoreQueryResults({
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
                             <Checkbox
-                              checked={selectedRowKeys.has(row.key)}
-                              onCheckedChange={(checked) =>
-                                toggleRowSelection(row.key, checked === true)
+                              isSelected={selectedRowKeys.has(row.key)}
+                              onChange={(isSelected) =>
+                                toggleRowSelection(row.key, isSelected)
                               }
                               className="h-5 w-5 shrink-0"
                             />
@@ -541,8 +544,8 @@ export function FirestoreQueryResults({
                           size="sm"
                           variant="outline"
                           className="w-full"
-                          onClick={() => openRowPreview(row)}
-                          disabled={row.rowPreviewDisabled}
+                          onPress={() => openRowPreview(row)}
+                          isDisabled={row.rowPreviewDisabled}
                         >
                           <Eye data-icon="inline-start" />
                           Open Preview
@@ -568,8 +571,9 @@ export function FirestoreQueryResults({
                             <div className="flex items-center justify-between gap-2">
                               <span>Document ID</span>
                               <Checkbox
-                                checked={headerCheckboxState}
-                                onCheckedChange={toggleAllVisibleRows}
+                                isSelected={headerCheckboxSelected}
+                                isIndeterminate={headerCheckboxIndeterminate}
+                                onChange={toggleAllVisibleRows}
                                 className="h-5 w-5 shrink-0"
                               />
                             </div>
@@ -659,9 +663,9 @@ export function FirestoreQueryResults({
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex min-w-0 items-center gap-2">
                                 <Checkbox
-                                  checked={selectedRowKeys.has(row.key)}
-                                  onCheckedChange={(checked) =>
-                                    toggleRowSelection(row.key, checked === true)
+                                  isSelected={selectedRowKeys.has(row.key)}
+                                  onChange={(isSelected) =>
+                                    toggleRowSelection(row.key, isSelected)
                                   }
                                   className="h-5 w-5 shrink-0"
                                 />
@@ -699,7 +703,6 @@ export function FirestoreQueryResults({
                     </TableBody>
                   </Table>
                 </div>
-                <ScrollBar orientation="horizontal" />
               </ScrollArea>
             </div>
 
@@ -758,28 +761,16 @@ export function FirestoreQueryResults({
             <PaginationContent>
               <PaginationItem>
                 <PaginationPrevious
-                  href="#"
-                  aria-disabled={!canPrev}
+                  isDisabled={!canPrev}
                   className={cn(!canPrev && "pointer-events-none opacity-50")}
-                  onClick={(event) => {
-                    event.preventDefault()
-                    if (canPrev) {
-                      onRunPrevPage()
-                    }
-                  }}
+                  onPress={() => onRunPrevPage()}
                 />
               </PaginationItem>
               <PaginationItem>
                 <PaginationNext
-                  href="#"
-                  aria-disabled={!canNext}
+                  isDisabled={!canNext}
                   className={cn(!canNext && "pointer-events-none opacity-50")}
-                  onClick={(event) => {
-                    event.preventDefault()
-                    if (canNext) {
-                      onRunNextPage()
-                    }
-                  }}
+                  onPress={() => onRunNextPage()}
                 />
               </PaginationItem>
             </PaginationContent>

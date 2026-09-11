@@ -5,7 +5,6 @@ import { ArrowLeftRight, Download } from "lucide-react"
 import { Button } from "@/shadcn/components/ui/button"
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -140,8 +139,7 @@ export function FirestoreCompareDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl">
+    <Dialog isOpen={open} onOpenChange={onOpenChange} className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ArrowLeftRight className="size-5 text-primary" />
@@ -153,19 +151,19 @@ export function FirestoreCompareDialog({
         </DialogHeader>
 
         <ToggleGroup
-          type="single"
-          value={mode}
-          onValueChange={(value) => {
-            if (value === "documents" || value === "collections") {
-              setMode(value)
-              setResult(null)
-            }
+          selectionMode="single"
+          disallowEmptySelection
+          selectedKeys={[mode]}
+          onSelectionChange={(keys) => {
+            const value = [...keys][0] as CompareMode
+            setMode(value)
+            setResult(null)
           }}
           variant="outline"
           className="w-full"
         >
-          <ToggleGroupItem value="documents" className="flex-1">Documents</ToggleGroupItem>
-          <ToggleGroupItem value="collections" className="flex-1">Collections</ToggleGroupItem>
+          <ToggleGroupItem id="documents" className="flex-1">Documents</ToggleGroupItem>
+          <ToggleGroupItem id="collections" className="flex-1">Collections</ToggleGroupItem>
         </ToggleGroup>
 
         <div className="grid gap-3 sm:grid-cols-2">
@@ -234,16 +232,15 @@ export function FirestoreCompareDialog({
 
         <DialogFooter>
           {result ? (
-            <Button variant="outline" onClick={exportResult}>
+            <Button variant="outline" onPress={exportResult}>
               <Download data-icon="inline-start" />
               Export JSON
             </Button>
           ) : null}
-          <Button onClick={() => void runCompare()} disabled={busy}>
+          <Button onPress={() => void runCompare()} isDisabled={busy}>
             {busy ? "Comparing..." : "Compare"}
           </Button>
         </DialogFooter>
-      </DialogContent>
     </Dialog>
   )
 }

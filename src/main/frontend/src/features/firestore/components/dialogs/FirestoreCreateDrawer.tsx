@@ -11,7 +11,7 @@ import {
   FieldLegend,
   FieldSet,
 } from "@/shadcn/components/ui/field"
-import { Sheet, SheetContent, SheetHeader } from "@/shadcn/components/ui/sheet"
+import { Sheet, SheetHeader } from "@/shadcn/components/ui/sheet"
 import { Input } from "@/shadcn/components/ui/input"
 import { Skeleton } from "@/shadcn/components/ui/skeleton"
 import { Spinner } from "@/shadcn/components/ui/spinner"
@@ -94,12 +94,13 @@ export function FirestoreCreateDrawer({
     !semanticJsonErrorMessage
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        showCloseButton={false}
-        className="w-[90%]! sm:w-[85%]! sm:max-w-[85%]! p-0 gap-0 flex flex-col overflow-y-auto shadow-2xl"
-      >
+    <Sheet
+      isOpen={open}
+      onOpenChange={onOpenChange}
+      side="right"
+      showCloseButton={false}
+      className="w-[90%]! sm:w-[85%]! sm:max-w-[85%]! p-0 gap-0 flex flex-col overflow-y-auto shadow-2xl"
+    >
         <SheetHeader className="p-3">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
             <div className="flex items-start justify-between w-full sm:w-auto">
@@ -112,7 +113,7 @@ export function FirestoreCreateDrawer({
               <Button
                 variant="ghost"
                 size="icon-lg"
-                onClick={() => onOpenChange(false)}
+                onPress={() => onOpenChange(false)}
                 className="sm:hidden -mr-1.5 rounded-full text-muted-foreground shrink-0"
               >
                 <X className="w-5 h-5" />
@@ -122,9 +123,9 @@ export function FirestoreCreateDrawer({
               <Button
                 variant="outline"
                 size="icon-lg"
-                onClick={() => onOpenChange(false)}
+                onPress={() => onOpenChange(false)}
                 className="rounded-full hover:bg-muted text-muted-foreground transition-colors ml-2 hidden sm:inline-flex"
-                disabled={isSubmitting}
+                isDisabled={isSubmitting}
               >
                 <X className="w-5 h-5" />
               </Button>
@@ -185,8 +186,8 @@ export function FirestoreCreateDrawer({
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={onGenerateDocumentId}
-                      disabled={isSubmitting}
+                      onPress={onGenerateDocumentId}
+                      isDisabled={isSubmitting}
                       className="h-9 sm:w-auto"
                     >
                       Generate ID
@@ -219,8 +220,8 @@ export function FirestoreCreateDrawer({
                   type="button"
                   size="xs"
                   variant="outline"
-                  onClick={() => setFormatRequestVersion((value) => value + 1)}
-                  disabled={isSubmitting}
+                  onPress={() => setFormatRequestVersion((value) => value + 1)}
+                  isDisabled={isSubmitting}
                 >
                   <WandSparkles data-icon="inline-start" />
                   Format JSON
@@ -266,7 +267,7 @@ export function FirestoreCreateDrawer({
         </div>
 
         <div className="flex flex-col-reverse sm:flex-row sm:flex-wrap items-center sm:justify-end gap-3 border-t border-border px-4 py-2 sm:px-4 shrink-0 bg-background">
-          <Button type="button" variant="ghost" onClick={onDiscardDraft} disabled={isSubmitting} className="w-full sm:w-auto">
+          <Button type="button" variant="ghost" onPress={onDiscardDraft} isDisabled={isSubmitting} className="w-full sm:w-auto">
             <RefreshCcw className="w-4 h-4 mr-1.5" />
             Discard Draft
           </Button>
@@ -275,18 +276,17 @@ export function FirestoreCreateDrawer({
               type="button"
               variant="outline"
               className="flex-1 sm:flex-none"
-              onClick={() => onOpenChange(false)}
-              disabled={isSubmitting}
+              onPress={() => onOpenChange(false)}
+              isDisabled={isSubmitting}
             >
               Cancel
             </Button>
-            <Button type="button" onClick={onSubmit} disabled={!canSubmit} className="flex-1 sm:flex-none shadow-sm">
+            <Button type="button" onPress={onSubmit} isDisabled={!canSubmit} className="flex-1 sm:flex-none shadow-sm">
               {isSubmitting ? <Spinner className="mr-1.5" /> : null}
               {isSubmitting ? "Creating..." : "Create Document"}
             </Button>
           </div>
         </div>
-      </SheetContent>
     </Sheet>
   )
 }

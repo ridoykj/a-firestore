@@ -165,15 +165,16 @@ export function FirestoreTabsLayout() {
               <span className="text-xs text-neutral-400 font-mono">
                 {activeTab.projectId}/{normalizeDatabaseId(activeTab.databaseId)}
               </span>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={handleDisconnect}
-                className="h-8 w-8 text-neutral-400 hover:text-red-400 hover:bg-neutral-800"
-                title="Disconnect from current connection"
-              >
-                <LogOut className="h-4 w-4" />
-              </Button>
+              <span title="Disconnect from current connection">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onPress={handleDisconnect}
+                  className="h-8 w-8 text-neutral-400 hover:text-red-400 hover:bg-neutral-800"
+                >
+                  <LogOut className="h-4 w-4" />
+                </Button>
+              </span>
             </div>
           )}
         </div>
@@ -192,7 +193,7 @@ export function FirestoreTabsLayout() {
             <p className="mt-2 text-sm text-muted-foreground">
               Open a project/database connection to start browsing data.
             </p>
-            <Button className="mt-4" onClick={() => setAddDialogOpen(true)}>
+            <Button className="mt-4" onPress={() => setAddDialogOpen(true)}>
               <Plus data-icon="inline-start" />
               Add Tab
             </Button>
@@ -200,8 +201,8 @@ export function FirestoreTabsLayout() {
         </div>
       ) : (
         <Tabs
-          value={activeValue}
-          onValueChange={setActiveTabId}
+          selectedKey={activeValue}
+          onSelectionChange={(key) => setActiveTabId(String(key))}
           className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden"
         >
           {/* SUB-HEADER TABS PANEL */}
@@ -215,14 +216,14 @@ export function FirestoreTabsLayout() {
                   return (
                     <div key={tab.id} className="group relative shrink-0">
                       <TabsTrigger
-                        value={tab.id}
+                        id={tab.id}
                         className={cn(
                           "h-8 min-w-0 max-w-60 justify-start gap-2 rounded-lg text-xs font-medium border border-foreground-700 px-3 pr-8 transition-all",
                           "bg-transparent text-muted-foreground shadow-none",
                           "hover:bg-foreground/10 hover:text-foreground",
-                          "data-[state=active]:border-blue-500/80 data-[state=active]:bg-blue-600 data-[state=active]:text-white",
-                          "data-[state=active]:hover:bg-blue-600",
-                          "data-[state=active]:shadow-sm",
+                          "data-selected:border-blue-500/80 data-selected:bg-blue-600 data-selected:text-white",
+                          "data-selected:hover:bg-blue-600",
+                          "data-selected:shadow-sm",
                         )}
                       >
                         <Folder className={cn("h-3.5 w-3.5 shrink-0", isActive ? "text-white" : "text-slate-500")} />
@@ -230,49 +231,48 @@ export function FirestoreTabsLayout() {
                           {isMobile ? tab.projectId : tab.label}
                         </span>
                       </TabsTrigger>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`Close tab ${tab.label}`}
-                        title={`Close tab ${tab.label}`}
-                        className={cn(
-                          "absolute top-1/2 right-1 z-10 h-5 w-5 -translate-y-1/2 rounded-md transition-opacity",
-                          isActive
-                            ? "opacity-100 text-white/90 hover:bg-white/20 hover:text-white"
-                            : "opacity-0 text-muted-foreground group-hover:opacity-100 hover:bg-background hover:text-foreground",
-                        )}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          removeTab(tab.id)
-                        }}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
+                      <span title={`Close tab ${tab.label}`}>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label={`Close tab ${tab.label}`}
+                          className={cn(
+                            "absolute top-1/2 right-1 z-10 h-5 w-5 -translate-y-1/2 rounded-md transition-opacity",
+                            isActive
+                              ? "opacity-100 text-white/90 hover:bg-white/20 hover:text-white"
+                              : "opacity-0 text-muted-foreground group-hover:opacity-100 hover:bg-background hover:text-foreground",
+                          )}
+                          onPress={() => removeTab(tab.id)}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </span>
                     </div>
                   )
                 })}
               </TabsList>
 
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                className="h-8 w-8 shrink-0 rounded-lg text-muted-foreground hover:bg-background hover:text-foreground"
-                onClick={() => setAddDialogOpen(true)}
-                aria-label="Add tab"
-                title="Add tab"
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
+              <span title="Add tab">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="h-8 w-8 shrink-0 rounded-lg text-muted-foreground hover:bg-background hover:text-foreground"
+                  onPress={() => setAddDialogOpen(true)}
+                  aria-label="Add tab"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </span>
             </div>
           </div>
 
           {openTabs.map((tab) => (
             <TabsContent
               key={tab.id}
-              value={tab.id}
-              forceMount
+              id={tab.id}
+              shouldForceMount
               className={cn("min-h-0 flex-1 overflow-hidden bg-background", tab.id === activeValue ? "flex" : "hidden")}
             >
               <FirestorePage tab={tab} />

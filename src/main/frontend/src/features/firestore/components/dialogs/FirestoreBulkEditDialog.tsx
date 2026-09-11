@@ -5,7 +5,6 @@ import { Play, Plus, ScanEye, X } from "lucide-react"
 import { Button } from "@/shadcn/components/ui/button"
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -156,8 +155,7 @@ export function FirestoreBulkEditDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+    <Dialog isOpen={open} onOpenChange={onOpenChange} className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Bulk edit {paths.length} document(s)</DialogTitle>
           <DialogDescription>
@@ -168,7 +166,7 @@ export function FirestoreBulkEditDialog({
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <Label className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Set fields</Label>
-            <Button variant="ghost" size="sm" onClick={addSetRow}>
+            <Button variant="ghost" size="sm" onPress={addSetRow}>
               <Plus className="size-3.5" />
               Add field
             </Button>
@@ -182,13 +180,13 @@ export function FirestoreBulkEditDialog({
                   placeholder="field"
                   className="flex-1 font-mono text-sm"
                 />
-                <Select value={row.type} onValueChange={(value) => updateSetRow(row.id, "type", value)}>
+                <Select selectedKey={row.type} onSelectionChange={(key) => updateSetRow(row.id, "type", key as SetType)}>
                   <SelectTrigger className="w-28">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {SET_TYPES.map((type) => (
-                      <SelectItem key={type} value={type}>{type}</SelectItem>
+                      <SelectItem key={type} id={type}>{type}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -199,7 +197,7 @@ export function FirestoreBulkEditDialog({
                   disabled={row.type === "null"}
                   className="flex-1 text-sm"
                 />
-                <Button variant="ghost" size="icon-sm" onClick={() => removeSetRow(row.id)}>
+                <Button variant="ghost" size="icon-sm" onPress={() => removeSetRow(row.id)}>
                   <X className="size-4" />
                 </Button>
               </div>
@@ -250,16 +248,15 @@ export function FirestoreBulkEditDialog({
         ) : null}
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => void run(true)} disabled={busy}>
+          <Button variant="outline" onPress={() => void run(true)} isDisabled={busy}>
             <ScanEye data-icon="inline-start" />
             Dry run
           </Button>
-          <Button variant="destructive" onClick={() => void run(false)} disabled={busy}>
+          <Button variant="destructive" onPress={() => void run(false)} isDisabled={busy}>
             <Play data-icon="inline-start" />
             Apply to {paths.length}
           </Button>
         </DialogFooter>
-      </DialogContent>
     </Dialog>
   )
 }

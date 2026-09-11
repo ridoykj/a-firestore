@@ -14,7 +14,7 @@ import { Input } from "@/shadcn/components/ui/input"
 import { Label } from "@/shadcn/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/shadcn/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shadcn/components/ui/select"
-import { Sheet, SheetContent, SheetHeader } from "@/shadcn/components/ui/sheet"
+import { Sheet, SheetHeader } from "@/shadcn/components/ui/sheet"
 import { Spinner } from "@/shadcn/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shadcn/components/ui/table"
 import {
@@ -600,12 +600,13 @@ export function FirestoreToFirestoreImportDialog({
   }
 
   return (
-    <Sheet open={open} onOpenChange={handleOpenChange}>
-      <SheetContent
-        side="right"
-        showCloseButton={false}
-        className="w-[90%]! sm:w-[85%]! sm:max-w-[85%]! p-0 gap-0 flex flex-col overflow-hidden shadow-2xl"
-      >
+    <Sheet
+      isOpen={open}
+      onOpenChange={handleOpenChange}
+      side="right"
+      showCloseButton={false}
+      className="w-[90%]! sm:w-[85%]! sm:max-w-[85%]! p-0 gap-0 flex flex-col overflow-hidden shadow-2xl"
+    >
         <SheetHeader className="p-3 border-b border-border">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
             <div className="flex items-start justify-between w-full sm:w-auto">
@@ -618,9 +619,9 @@ export function FirestoreToFirestoreImportDialog({
               <Button
                 variant="ghost"
                 size="icon-lg"
-                onClick={() => handleOpenChange(false)}
+                onPress={() => handleOpenChange(false)}
                 className="sm:hidden -mr-1.5 rounded-full text-muted-foreground shrink-0"
-                disabled={step === "EXECUTE"}
+                isDisabled={step === "EXECUTE"}
               >
                 <X className="w-5 h-5" />
               </Button>
@@ -630,9 +631,9 @@ export function FirestoreToFirestoreImportDialog({
               <Button
                 variant="outline"
                 size="icon-lg"
-                onClick={() => handleOpenChange(false)}
+                onPress={() => handleOpenChange(false)}
                 className="rounded-full hover:bg-muted text-muted-foreground transition-colors ml-2 hidden sm:inline-flex"
-                disabled={step === "EXECUTE"}
+                isDisabled={step === "EXECUTE"}
               >
                 <X className="w-5 h-5" />
               </Button>
@@ -666,13 +667,16 @@ export function FirestoreToFirestoreImportDialog({
                 <div className="rounded-lg border bg-card p-4">
                   <Label className="text-sm font-medium">Source Credentials</Label>
                   <div className="mt-2 grid gap-3">
-                    <Select value={useCustomCredentials ? "custom" : "global"} onValueChange={handleCredentialsMode}>
+                    <Select
+                      selectedKey={useCustomCredentials ? "custom" : "global"}
+                      onSelectionChange={(key) => handleCredentialsMode(String(key))}
+                    >
                       <SelectTrigger className="h-9">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="global">Use global credentials</SelectItem>
-                        <SelectItem value="custom">Upload source credentials</SelectItem>
+                        <SelectItem id="global">Use global credentials</SelectItem>
+                        <SelectItem id="custom">Upload source credentials</SelectItem>
                       </SelectContent>
                     </Select>
 
@@ -711,16 +715,17 @@ export function FirestoreToFirestoreImportDialog({
                         {projectsQuery.isFetching ? <Spinner className="inline-block h-3 w-3" /> : null}
                       </Label>
                       <Select
-                        value={sourceProjectId || undefined}
-                        onValueChange={handleProjectChange}
-                        disabled={!sourceCredentialsReady || projectsQuery.isFetching || projects.length === 0}
+                        selectedKey={sourceProjectId || null}
+                        onSelectionChange={(key) => handleProjectChange(key === null ? "" : String(key))}
+                        isDisabled={!sourceCredentialsReady || projectsQuery.isFetching || projects.length === 0}
+                        placeholder={sourceCredentialsReady ? "Load projects" : "Upload credentials"}
                       >
                         <SelectTrigger className="h-9">
-                          <SelectValue placeholder={sourceCredentialsReady ? "Load projects" : "Upload credentials"} />
+                          <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
                           {projects.map((project) => (
-                            <SelectItem key={project} value={project}>
+                            <SelectItem key={project} id={project}>
                               {project}
                             </SelectItem>
                           ))}
@@ -734,17 +739,18 @@ export function FirestoreToFirestoreImportDialog({
                         {databasesQuery.isFetching ? <Spinner className="inline-block h-3 w-3" /> : null}
                       </Label>
                       <Select
-                        value={sourceDatabaseId || "__default__"}
-                        onValueChange={handleDatabaseChange}
-                        disabled={!sourceProjectId || databasesQuery.isFetching}
+                        selectedKey={sourceDatabaseId || "__default__"}
+                        onSelectionChange={(key) => handleDatabaseChange(String(key))}
+                        isDisabled={!sourceProjectId || databasesQuery.isFetching}
+                        placeholder={normalizedDatabaseLabel}
                       >
                         <SelectTrigger className="h-9">
-                          <SelectValue placeholder={normalizedDatabaseLabel} />
+                          <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__default__">(default)</SelectItem>
+                          <SelectItem id="__default__">(default)</SelectItem>
                           {databases.map((database) => (
-                            <SelectItem key={database} value={database}>
+                            <SelectItem key={database} id={database}>
                               {database}
                             </SelectItem>
                           ))}
@@ -794,8 +800,8 @@ export function FirestoreToFirestoreImportDialog({
                       size="sm"
                       variant="outline"
                       className="h-8 sm:w-auto"
-                      disabled={isPathLoading}
-                      onClick={() => void handleLoadFirebasePath()}
+                      isDisabled={isPathLoading}
+                      onPress={() => void handleLoadFirebasePath()}
                     >
                       {isPathLoading ? <Spinner data-icon="inline-start" /> : null}
                       Load
@@ -829,8 +835,8 @@ export function FirestoreToFirestoreImportDialog({
                         size="sm"
                         variant="outline"
                         className="h-8 sm:w-auto"
-                        disabled={!currentPathIsCollection || isSearching}
-                        onClick={() => void runDocumentSearch(documentSearch.trim())}
+                        isDisabled={!currentPathIsCollection || isSearching}
+                        onPress={() => void runDocumentSearch(documentSearch.trim())}
                       >
                         {isSearching ? <Spinner data-icon="inline-start" /> : null}
                         Search
@@ -841,8 +847,8 @@ export function FirestoreToFirestoreImportDialog({
                           size="sm"
                           variant="ghost"
                           className="h-8"
-                          disabled={isSearching}
-                          onClick={() => {
+                          isDisabled={isSearching}
+                          onPress={() => {
                             setDocumentSearch("")
                             void runDocumentSearch("")
                           }}
@@ -911,14 +917,14 @@ export function FirestoreToFirestoreImportDialog({
                   <Label className="text-sm font-medium">Conflict Resolution</Label>
                   <RadioGroup
                     value={conflictResolution}
-                    onValueChange={(value) => setConflictResolution(value as ConflictResolution)}
+                    onChange={(value) => setConflictResolution(value as ConflictResolution)}
                     className="mt-3 space-y-3"
                   >
                     <div
                       className={`flex cursor-pointer items-start space-x-3 rounded-md border p-4 transition-colors hover:bg-muted/50 ${conflictResolution === "MERGE" ? "border-primary bg-muted/20" : ""}`}
                       onClick={() => setConflictResolution("MERGE")}
                     >
-                      <RadioGroupItem value="MERGE" id="merge" className="mt-0.5" checked={conflictResolution === "MERGE"} />
+                      <RadioGroupItem value="MERGE" id="merge" className="mt-0.5" />
                       <div className="grid gap-1.5">
                         <Label htmlFor="merge" className="cursor-pointer font-medium leading-none">Merge Data</Label>
                         <p className="text-sm text-muted-foreground">
@@ -930,7 +936,7 @@ export function FirestoreToFirestoreImportDialog({
                       className={`flex cursor-pointer items-start space-x-3 rounded-md border p-4 transition-colors hover:bg-muted/50 ${conflictResolution === "OVERWRITE" ? "border-primary bg-muted/20" : ""}`}
                       onClick={() => setConflictResolution("OVERWRITE")}
                     >
-                      <RadioGroupItem value="OVERWRITE" id="overwrite" className="mt-0.5" checked={conflictResolution === "OVERWRITE"} />
+                      <RadioGroupItem value="OVERWRITE" id="overwrite" className="mt-0.5" />
                       <div className="grid gap-1.5">
                         <Label htmlFor="overwrite" className="cursor-pointer font-medium leading-none">Overwrite (Replace)</Label>
                         <p className="text-sm text-muted-foreground">
@@ -970,8 +976,8 @@ export function FirestoreToFirestoreImportDialog({
                 </div>
                 <Button
                   variant="outline"
-                  onClick={() => void cancelCopy()}
-                  disabled={!activeJobId || cancelling}
+                  onPress={() => void cancelCopy()}
+                  isDisabled={!activeJobId || cancelling}
                 >
                   {cancelling ? "Cancelling..." : "Cancel copy"}
                 </Button>
@@ -983,36 +989,36 @@ export function FirestoreToFirestoreImportDialog({
         <div className="flex flex-col-reverse sm:flex-row sm:flex-wrap items-center sm:justify-between gap-3 border-t border-border px-4 py-4 sm:px-6 shrink-0 bg-background">
           <div className="w-full sm:w-auto">
             {step !== "AUTH" && step !== "EXECUTE" ? (
-              <Button variant="outline" onClick={handleBack} className="w-full sm:w-auto">
+              <Button variant="outline" onPress={handleBack} className="w-full sm:w-auto">
                 Back
               </Button>
             ) : null}
           </div>
 
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center w-full sm:w-auto">
-            <Button variant="ghost" onClick={() => handleOpenChange(false)} disabled={step === "EXECUTE"} className="w-full sm:w-auto">
+            <Button variant="ghost" onPress={() => handleOpenChange(false)} isDisabled={step === "EXECUTE"} className="w-full sm:w-auto">
               Cancel
             </Button>
 
             {step === "AUTH" ? (
-              <Button onClick={() => void proceedToSelect()} disabled={!sourceProjectId || initFirestoreMutation.isPending} className="w-full sm:w-auto shadow-sm">
+              <Button onPress={() => void proceedToSelect()} isDisabled={!sourceProjectId || initFirestoreMutation.isPending} className="w-full sm:w-auto shadow-sm">
                 {initFirestoreMutation.isPending ? <Spinner data-icon="inline-start" /> : null}
                 Continue
               </Button>
             ) : null}
 
             {step === "SELECT" ? (
-              <Button onClick={() => setStep("SUMMARY")} disabled={selectedPaths.size === 0} className="w-full sm:w-auto shadow-sm">
+              <Button onPress={() => setStep("SUMMARY")} isDisabled={selectedPaths.size === 0} className="w-full sm:w-auto shadow-sm">
                 Review Selection
               </Button>
             ) : null}
 
-            {step === "SUMMARY" ? <Button onClick={() => setStep("CONFLICT")} className="w-full sm:w-auto shadow-sm">Set Conflict Policy</Button> : null}
+            {step === "SUMMARY" ? <Button onPress={() => setStep("CONFLICT")} className="w-full sm:w-auto shadow-sm">Set Conflict Policy</Button> : null}
 
             {step === "CONFLICT" ? (
               <Button
                 variant={conflictResolution === "OVERWRITE" ? "destructive" : "default"}
-                onClick={() => void executeCopy()}
+                onPress={() => void executeCopy()}
                 className="w-full sm:w-auto shadow-sm"
               >
                 Confirm & Import
@@ -1020,7 +1026,6 @@ export function FirestoreToFirestoreImportDialog({
             ) : null}
           </div>
         </div>
-      </SheetContent>
     </Sheet>
   )
 }

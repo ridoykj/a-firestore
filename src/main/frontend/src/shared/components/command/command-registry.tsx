@@ -90,7 +90,7 @@ export function CommandRegistryProvider({ children }: { children: React.ReactNod
   return (
     <CommandRegistryContext.Provider value={value}>
       {children}
-      <CommandDialog open={open} onOpenChange={setOpen}>
+      <CommandDialog isOpen={open} onOpenChange={setOpen}>
         <CommandInput placeholder="Type a command or search..." />
         <CommandList>
           <CommandEmpty>No commands found.</CommandEmpty>

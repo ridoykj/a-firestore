@@ -5,7 +5,6 @@ import { DatabaseBackup, Download, ScanEye, Upload } from "lucide-react"
 import { Button } from "@/shadcn/components/ui/button"
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -167,8 +166,7 @@ export function FirestoreBackupDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+    <Dialog isOpen={open} onOpenChange={onOpenChange} className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <DatabaseBackup className="size-5 text-primary" />
@@ -180,18 +178,15 @@ export function FirestoreBackupDialog({
         </DialogHeader>
 
         <ToggleGroup
-          type="single"
-          value={mode}
-          onValueChange={(value) => {
-            if (value === "backup" || value === "restore") {
-              setMode(value)
-            }
-          }}
+          selectionMode="single"
+          disallowEmptySelection
+          selectedKeys={[mode]}
+          onSelectionChange={(keys) => setMode([...keys][0] as BackupMode)}
           variant="outline"
           className="w-full"
         >
-          <ToggleGroupItem value="backup" className="flex-1">Backup</ToggleGroupItem>
-          <ToggleGroupItem value="restore" className="flex-1">Restore</ToggleGroupItem>
+          <ToggleGroupItem id="backup" className="flex-1">Backup</ToggleGroupItem>
+          <ToggleGroupItem id="restore" className="flex-1">Restore</ToggleGroupItem>
         </ToggleGroup>
 
         {mode === "backup" ? (
@@ -242,14 +237,14 @@ export function FirestoreBackupDialog({
             </div>
             <div className="grid w-48 gap-1.5">
               <Label className="text-xs text-muted-foreground">Conflict policy</Label>
-              <Select value={conflictPolicy} onValueChange={(value) => setConflictPolicy(value as ConflictPolicy)}>
+              <Select selectedKey={conflictPolicy} onSelectionChange={(key) => setConflictPolicy(key as ConflictPolicy)}>
                 <SelectTrigger className="text-sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="MERGE">Merge</SelectItem>
-                  <SelectItem value="OVERWRITE">Overwrite (replace)</SelectItem>
-                  <SelectItem value="SKIP">Skip existing</SelectItem>
+                  <SelectItem id="MERGE">Merge</SelectItem>
+                  <SelectItem id="OVERWRITE">Overwrite (replace)</SelectItem>
+                  <SelectItem id="SKIP">Skip existing</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -264,7 +259,7 @@ export function FirestoreBackupDialog({
                 </div>
                 {progress.failed > 0 ? (
                   <ScrollArea className="mt-2">
-                    <Button variant="outline" size="sm" onClick={() => void downloadReport()}>
+                    <Button variant="outline" size="sm" onPress={() => void downloadReport()}>
                       <Download data-icon="inline-start" />
                       Download failure report
                     </Button>
@@ -277,25 +272,25 @@ export function FirestoreBackupDialog({
 
         <DialogFooter>
           {mode === "backup" ? (
-            <Button onClick={() => void downloadBackup()} disabled={busy}>
+            <Button onPress={() => void downloadBackup()} isDisabled={busy}>
               <Download data-icon="inline-start" />
               Download backup
             </Button>
           ) : (
             <>
               {activeJobId ? (
-                <Button variant="ghost" onClick={() => void cancelRestore()}>
+                <Button variant="ghost" onPress={() => void cancelRestore()}>
                   Cancel
                 </Button>
               ) : null}
-              <Button variant="outline" onClick={() => void runRestore(true)} disabled={busy || !artifact}>
+              <Button variant="outline" onPress={() => void runRestore(true)} isDisabled={busy || !artifact}>
                 <ScanEye data-icon="inline-start" />
                 Dry run
               </Button>
               <Button
                 variant={conflictPolicy === "OVERWRITE" ? "destructive" : "default"}
-                onClick={() => void runRestore(false)}
-                disabled={busy || !artifact}
+                onPress={() => void runRestore(false)}
+                isDisabled={busy || !artifact}
               >
                 <Upload data-icon="inline-start" />
                 Restore
@@ -303,7 +298,6 @@ export function FirestoreBackupDialog({
             </>
           )}
         </DialogFooter>
-      </DialogContent>
     </Dialog>
   )
 }

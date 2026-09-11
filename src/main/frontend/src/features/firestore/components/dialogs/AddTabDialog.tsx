@@ -7,7 +7,6 @@ import {
 import { Button } from "@/shadcn/components/ui/button"
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -205,8 +204,7 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+    <Dialog isOpen={open} onOpenChange={onOpenChange} className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Add Firestore Tab</DialogTitle>
           <DialogDescription>
@@ -215,21 +213,18 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
         </DialogHeader>
 
         <ToggleGroup
-          type="single"
-          value={mode}
-          onValueChange={(value) => {
-            if (value === "cloud" || value === "emulator") {
-              setMode(value)
-            }
-          }}
+          selectionMode="single"
+          disallowEmptySelection
+          selectedKeys={[mode]}
+          onSelectionChange={(keys) => setMode([...keys][0] as TabMode)}
           variant="outline"
           className="w-full"
         >
-          <ToggleGroupItem value="cloud" className="flex-1 gap-2">
+          <ToggleGroupItem id="cloud" className="flex-1 gap-2">
             <Cloud className="h-4 w-4" />
             Google Cloud
           </ToggleGroupItem>
-          <ToggleGroupItem value="emulator" className="flex-1 gap-2">
+          <ToggleGroupItem id="emulator" className="flex-1 gap-2">
             <Server className="h-4 w-4" />
             Emulator
           </ToggleGroupItem>
@@ -269,19 +264,20 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
                     </span>
                   </div>
                   <Select
-                    value={selectedProject || undefined}
-                    onValueChange={(value) => {
-                      setSelectedProject(value)
+                    selectedKey={selectedProject || null}
+                    onSelectionChange={(key) => {
+                      setSelectedProject(key === null ? "" : String(key))
                       setSelectedDatabase("")
                     }}
-                    disabled={!credentialsFile || loadingProjects || projects.length === 0}
+                    isDisabled={!credentialsFile || loadingProjects || projects.length === 0}
+                    placeholder="Select a project"
                   >
                     <SelectTrigger className="h-12 text-sm w-full min-w-0">
-                      <SelectValue placeholder="Select a project" />
+                      <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       {projects.map((project) => (
-                        <SelectItem key={project} value={project} className="text-sm pr-8">
+                        <SelectItem key={project} id={project} className="text-sm pr-8">
                           {project}
                         </SelectItem>
                       ))}
@@ -297,19 +293,20 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
                     ) : null}
                   </div>
                   <Select
-                    value={selectedDatabase || "__default__"}
-                    onValueChange={(value) => setSelectedDatabase(value === "__default__" ? "" : value)}
-                    disabled={!selectedProject || loadingDatabases || initializing}
+                    selectedKey={selectedDatabase || "__default__"}
+                    onSelectionChange={(key) => setSelectedDatabase(key === "__default__" ? "" : String(key))}
+                    isDisabled={!selectedProject || loadingDatabases || initializing}
+                    placeholder={loadingDatabases ? "Loading..." : "(default)"}
                   >
                     <SelectTrigger className="h-12 text-sm w-full min-w-0">
-                      <SelectValue placeholder={loadingDatabases ? "Loading..." : "(default)"} />
+                      <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__default__" className="text-sm pr-8">
+                      <SelectItem id="__default__" className="text-sm pr-8">
                         (default)
                       </SelectItem>
                       {databases.map((database) => (
-                        <SelectItem key={database} value={database} className="text-sm pr-8">
+                        <SelectItem key={database} id={database} className="text-sm pr-8">
                           {database}
                         </SelectItem>
                       ))}
@@ -357,14 +354,13 @@ export function AddTabDialog({ open, onOpenChange, onTabCreated }: AddTabDialogP
         )}
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onPress={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleCreateTab} disabled={!canCreate}>
+          <Button onPress={handleCreateTab} isDisabled={!canCreate}>
             {mode === "emulator" ? "Connect Emulator" : "Open Tab"}
           </Button>
         </DialogFooter>
-      </DialogContent>
     </Dialog>
   )
 }

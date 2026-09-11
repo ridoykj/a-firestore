@@ -1,7 +1,7 @@
 import * as React from "react"
 
 import { cn } from "@/shadcn/lib/utils"
-import { Button } from "@/shadcn/components/ui/button"
+import { Button, LinkButton } from "@/shadcn/components/ui/button"
 import { ChevronLeftIcon, ChevronRightIcon, MoreHorizontalIcon } from "lucide-react"
 
 function Pagination({ className, ...props }: React.ComponentProps<"nav">) {
@@ -36,7 +36,7 @@ function PaginationItem({ ...props }: React.ComponentProps<"li">) {
 type PaginationLinkProps = {
   isActive?: boolean
 } & Pick<React.ComponentProps<typeof Button>, "size"> &
-  React.ComponentProps<"a">
+  React.ComponentProps<typeof LinkButton>
 
 function PaginationLink({
   className,
@@ -45,19 +45,15 @@ function PaginationLink({
   ...props
 }: PaginationLinkProps) {
   return (
-    <Button
-      asChild
+    <LinkButton
       variant={isActive ? "outline" : "ghost"}
       size={size}
       className={cn(className)}
-    >
-      <a
-        aria-current={isActive ? "page" : undefined}
-        data-slot="pagination-link"
-        data-active={isActive}
-        {...props}
-      />
-    </Button>
+      aria-current={isActive ? "page" : undefined}
+      data-slot="pagination-link"
+      data-active={isActive}
+      {...props}
+    />
   )
 }
 

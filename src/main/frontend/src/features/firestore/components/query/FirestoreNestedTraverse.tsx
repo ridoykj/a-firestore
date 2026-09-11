@@ -4,7 +4,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/shadcn/components/ui/aler
 import { Spinner } from "@/shadcn/components/ui/spinner"
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
@@ -61,11 +60,7 @@ export function FirestoreNestedTraverse({
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 
   const scrollRef = useCallback((node: HTMLDivElement | null) => {
-    if (node) {
-      setScrollElement(node.querySelector('[data-slot="scroll-area-viewport"]') as HTMLDivElement | null)
-    } else {
-      setScrollElement(null)
-    }
+    setScrollElement(node)
   }, [])
 
   const items = useMemo(() => {
@@ -265,14 +260,17 @@ export function FirestoreNestedTraverse({
 
   if (drawerMode) {
     return (
-      <Sheet open={drawerOpen} onOpenChange={onDrawerOpenChange}>
-        <SheetContent side="left" className="w-[90vw] max-w-md p-0">
-          <SheetHeader className="border-b px-4 py-3 text-left">
-            <SheetTitle>Nested Traverse</SheetTitle>
-            <SheetDescription>Navigate nested documents and collections.</SheetDescription>
-          </SheetHeader>
-          <div className="flex min-h-0 flex-1 flex-col">{content}</div>
-        </SheetContent>
+      <Sheet
+        isOpen={drawerOpen}
+        onOpenChange={onDrawerOpenChange}
+        side="left"
+        className="w-[90vw] max-w-md p-0"
+      >
+        <SheetHeader className="border-b px-4 py-3 text-left">
+          <SheetTitle>Nested Traverse</SheetTitle>
+          <SheetDescription>Navigate nested documents and collections.</SheetDescription>
+        </SheetHeader>
+        <div className="flex min-h-0 flex-1 flex-col">{content}</div>
       </Sheet>
     )
   }
@@ -285,19 +283,20 @@ export function FirestoreNestedTraverse({
           <span className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-wider">Nested Traverse</span>
         </div>
 
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={() => {
-            setNestedIdFilter('')
-            void refreshNested(queryPath)
-          }}
-          className="text-primary"
-          title="Refresh nested browser list"
-          disabled={nestedLoading}
-        >
-          <RefreshCw className={`size-3.5 ${nestedLoading ? 'animate-spin' : ''}`} />
-        </Button>
+        <span title="Refresh nested browser list">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onPress={() => {
+              setNestedIdFilter('')
+              void refreshNested(queryPath)
+            }}
+            className="text-primary"
+            isDisabled={nestedLoading}
+          >
+            <RefreshCw className={`size-3.5 ${nestedLoading ? 'animate-spin' : ''}`} />
+          </Button>
+        </span>
       </div>
       <div className="flex min-h-0 flex-1 flex-col">{content}</div>
     </aside>

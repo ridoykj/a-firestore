@@ -18,7 +18,6 @@ import {
 } from "@/shadcn/components/ui/select"
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
@@ -97,18 +96,15 @@ export function FirestoreFilterPanel({
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Where Filters</span>
             <ToggleGroup
-              type="single"
+              selectionMode="single"
+              disallowEmptySelection
               size="sm"
               variant="outline"
-              value={filterCombinator}
-              onValueChange={(value) => {
-                if (value === "and" || value === "or") {
-                  setFilterCombinator(value)
-                }
-              }}
+              selectedKeys={[filterCombinator]}
+              onSelectionChange={(keys) => setFilterCombinator([...keys][0] as FilterCombinator)}
             >
-              <ToggleGroupItem value="and" className="px-2 text-[10px] font-bold">Match ALL</ToggleGroupItem>
-              <ToggleGroupItem value="or" className="px-2 text-[10px] font-bold">Match ANY</ToggleGroupItem>
+              <ToggleGroupItem id="and" className="px-2 text-[10px] font-bold">Match ALL</ToggleGroupItem>
+              <ToggleGroupItem id="or" className="px-2 text-[10px] font-bold">Match ANY</ToggleGroupItem>
             </ToggleGroup>
           </div>
 
@@ -136,7 +132,7 @@ export function FirestoreFilterPanel({
                         <Button
                           variant="ghost"
                           size="icon-xs"
-                          onClick={() => removeWhereFilterRow(row.id)}
+                          onPress={() => removeWhereFilterRow(row.id)}
                           className="absolute top-2 right-2 text-muted-foreground hover:text-rose-500"
                         >
                           <X className="w-3.5 h-3.5" />
@@ -157,15 +153,15 @@ export function FirestoreFilterPanel({
                           <div>
                             <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider block mb-1">Operator</span>
                             <Select
-                              value={row.operator}
-                              onValueChange={(value) => setWhereRowValue(row.id, "operator", value)}
+                              selectedKey={row.operator}
+                              onSelectionChange={(key) => setWhereRowValue(row.id, "operator", String(key))}
                             >
                               <SelectTrigger className="w-full bg-card">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
                                 {WHERE_OPERATORS.map((operator) => (
-                                  <SelectItem key={operator} value={operator}>
+                                  <SelectItem key={operator} id={operator}>
                                     {operator}
                                   </SelectItem>
                                 ))}
@@ -176,15 +172,15 @@ export function FirestoreFilterPanel({
                           <div>
                             <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider block mb-1">Type</span>
                             <Select
-                              value={row.type}
-                              onValueChange={(value) => setWhereRowValue(row.id, "type", value as WhereType)}
+                              selectedKey={row.type}
+                              onSelectionChange={(key) => setWhereRowValue(row.id, "type", key as WhereType)}
                             >
                               <SelectTrigger className="w-full bg-card">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
                                 {WHERE_TYPES.map((type) => (
-                                  <SelectItem key={type.value} value={type.value}>
+                                  <SelectItem key={type.value} id={type.value}>
                                     {type.label}
                                   </SelectItem>
                                 ))}
@@ -212,11 +208,11 @@ export function FirestoreFilterPanel({
           )}
 
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={addWhereFilterRow} className="flex-1">
+            <Button variant="outline" size="sm" onPress={addWhereFilterRow} className="flex-1">
               <Plus className="w-3.5 h-3.5" />
               Add Filter
             </Button>
-            <Button variant="outline" size="sm" onClick={addWhereOrGroup} className="flex-1">
+            <Button variant="outline" size="sm" onPress={addWhereOrGroup} className="flex-1">
               <Plus className="w-3.5 h-3.5" />
               Add OR Group
             </Button>
@@ -233,7 +229,7 @@ export function FirestoreFilterPanel({
                 <p className="text-[10px] text-muted-foreground">Query the path's collection id across all parents.</p>
               </div>
             </div>
-            <Switch checked={collectionGroup} onCheckedChange={setCollectionGroup} />
+            <Switch isSelected={collectionGroup} onChange={setCollectionGroup} />
           </div>
         </div>
 
@@ -241,9 +237,11 @@ export function FirestoreFilterPanel({
         <div className="mt-6 pt-5 border-t border-border space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground block">Order</span>
-            <Button variant="ghost" size="icon-sm" onClick={addOrderClause} className="text-primary" title="Add order clause">
-              <Plus className="w-4 h-4" />
-            </Button>
+            <span title="Add order clause">
+              <Button variant="ghost" size="icon-sm" onPress={addOrderClause} className="text-primary">
+                <Plus className="w-4 h-4" />
+              </Button>
+            </span>
           </div>
           {orderClauses.length === 0 ? (
             <p className="text-[10px] text-muted-foreground">Ordered by document ID. Add a clause to sort by fields.</p>
@@ -262,26 +260,27 @@ export function FirestoreFilterPanel({
                     />
                   </div>
                   <Select
-                    value={clause.direction}
-                    onValueChange={(value) => setOrderClauseValue(index, "direction", value as OrderDirection)}
+                    selectedKey={clause.direction}
+                    onSelectionChange={(key) => setOrderClauseValue(index, "direction", key as OrderDirection)}
                   >
                     <SelectTrigger className="w-28 bg-muted/50 font-semibold">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="desc">Descending</SelectItem>
-                      <SelectItem value="asc">Ascending</SelectItem>
+                      <SelectItem id="desc">Descending</SelectItem>
+                      <SelectItem id="asc">Ascending</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => removeOrderClause(index)}
-                    className="text-muted-foreground hover:text-rose-500"
-                    title="Remove order clause"
-                  >
-                    <X className="w-4 h-4" />
-                  </Button>
+                  <span title="Remove order clause">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onPress={() => removeOrderClause(index)}
+                      className="text-muted-foreground hover:text-rose-500"
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </span>
                 </div>
               ))}
             </div>
@@ -305,7 +304,7 @@ export function FirestoreFilterPanel({
       <div className="px-5 pb-5 mt-auto border-t border-border pt-5 shrink-0">
         <Button
           size="lg"
-          onClick={() => {
+          onPress={() => {
             onRun()
             onDrawerOpenChange?.(false)
           }}
@@ -320,17 +319,20 @@ export function FirestoreFilterPanel({
 
   if (drawerMode) {
     return (
-      <Sheet open={drawerOpen} onOpenChange={onDrawerOpenChange}>
-        <SheetContent side="right" className="w-[90vw] max-w-md p-0 flex flex-col">
-          <SheetHeader className="border-b px-4 py-3 text-left">
-            <SheetTitle className="inline-flex items-center gap-2 text-base">
-              <SlidersHorizontal className="text-primary w-5 h-5" />
-              Filter and Order
-            </SheetTitle>
-            <SheetDescription>Refine query results by filters, order, and page size.</SheetDescription>
-          </SheetHeader>
-          <div className="flex min-h-0 flex-1 flex-col">{panelBody}</div>
-        </SheetContent>
+      <Sheet
+        isOpen={drawerOpen}
+        onOpenChange={onDrawerOpenChange}
+        side="right"
+        className="w-[90vw] max-w-md p-0 flex flex-col"
+      >
+        <SheetHeader className="border-b px-4 py-3 text-left">
+          <SheetTitle className="inline-flex items-center gap-2 text-base">
+            <SlidersHorizontal className="text-primary w-5 h-5" />
+            Filter and Order
+          </SheetTitle>
+          <SheetDescription>Refine query results by filters, order, and page size.</SheetDescription>
+        </SheetHeader>
+        <div className="flex min-h-0 flex-1 flex-col">{panelBody}</div>
       </Sheet>
     )
   }
@@ -350,36 +352,39 @@ export function FirestoreFilterPanel({
               <span className="text-[10px] font-extrabold text-muted-foreground uppercase tracking-wider">Filter and Order</span>
             </div>
             <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={addWhereFilterRow}
-                className="rounded-full text-primary"
-                title="Add new filter clause"
-              >
-                <Plus className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={onToggle}
-                className="text-muted-foreground"
-                title="Hide Panel"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </Button>
+              <span title="Add new filter clause">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onPress={addWhereFilterRow}
+                  className="rounded-full text-primary"
+                >
+                  <Plus className="w-4 h-4" />
+                </Button>
+              </span>
+              <span title="Hide Panel">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onPress={onToggle}
+                  className="text-muted-foreground"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </span>
             </div>
           </>
         ) : (
-          <Button
-            variant="secondary"
-            size="icon-lg"
-            onClick={onToggle}
-            className="rounded-xl text-primary shadow-sm"
-            title="View Filter and Order panel"
-          >
-            <SlidersHorizontal className="w-5 h-5 animate-pulse" />
-          </Button>
+          <span title="View Filter and Order panel">
+            <Button
+              variant="secondary"
+              size="icon-lg"
+              onPress={onToggle}
+              className="rounded-xl text-primary shadow-sm"
+            >
+              <SlidersHorizontal className="w-5 h-5 animate-pulse" />
+            </Button>
+          </span>
         )}
       </div>
 

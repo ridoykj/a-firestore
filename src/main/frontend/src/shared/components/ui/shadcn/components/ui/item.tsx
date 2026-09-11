@@ -1,8 +1,10 @@
+"use client"
+
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { Slot } from "radix-ui"
-
 import { cn } from "@/shadcn/lib/utils"
+import { Link as LinkPrimitive, type LinkProps } from "react-aria-components"
+
 import { Separator } from "@/shadcn/components/ui/separator"
 
 function ItemGroup({ className, ...props }: React.ComponentProps<"div">) {
@@ -59,13 +61,13 @@ function Item({
   className,
   variant = "default",
   size = "default",
-  asChild = false,
   ...props
-}: React.ComponentProps<"div"> &
-  VariantProps<typeof itemVariants> & { asChild?: boolean }) {
-  const Comp = asChild ? Slot.Root : "div"
+}: Omit<LinkProps, "children"> &
+  React.HTMLAttributes<HTMLElement> &
+  VariantProps<typeof itemVariants>) {
+  const Element = "href" in props ? LinkPrimitive : "div"
   return (
-    <Comp
+    <Element
       data-slot="item"
       data-variant={variant}
       data-size={size}

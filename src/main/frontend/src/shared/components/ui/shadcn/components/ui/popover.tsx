@@ -1,48 +1,45 @@
 "use client"
 
 import * as React from "react"
-import { Popover as PopoverPrimitive } from "radix-ui"
-
 import { cn } from "@/shadcn/lib/utils"
+import {
+  DialogTrigger,
+  Heading,
+  Popover as PopoverPrimitive,
+  type DialogTriggerProps,
+  type PopoverProps as PopoverPrimitiveProps,
+} from "react-aria-components"
 
-function Popover({
-  ...props
-}: React.ComponentProps<typeof PopoverPrimitive.Root>) {
-  return <PopoverPrimitive.Root data-slot="popover" {...props} />
-}
-
-function PopoverTrigger({
-  ...props
-}: React.ComponentProps<typeof PopoverPrimitive.Trigger>) {
-  return <PopoverPrimitive.Trigger data-slot="popover-trigger" {...props} />
-}
-
-function PopoverContent({
-  className,
-  align = "center",
-  sideOffset = 4,
-  ...props
-}: React.ComponentProps<typeof PopoverPrimitive.Content>) {
+function PopoverTrigger({ children, ...props }: DialogTriggerProps) {
   return (
-    <PopoverPrimitive.Portal>
-      <PopoverPrimitive.Content
-        data-slot="popover-content"
-        align={align}
-        sideOffset={sideOffset}
-        className={cn(
-          "z-50 flex w-72 origin-(--radix-popover-content-transform-origin) flex-col gap-4 rounded-lg bg-popover p-2.5 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-hidden duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
-          className
-        )}
-        {...props}
-      />
-    </PopoverPrimitive.Portal>
+    <DialogTrigger data-slot="popover-trigger" {...props}>
+      {children}
+    </DialogTrigger>
   )
 }
 
-function PopoverAnchor({
+function Popover({
+  className,
+  placement = "bottom",
+  offset = 4,
+  crossOffset = 0,
   ...props
-}: React.ComponentProps<typeof PopoverPrimitive.Anchor>) {
-  return <PopoverPrimitive.Anchor data-slot="popover-anchor" {...props} />
+}: Omit<PopoverPrimitiveProps, "className"> & {
+  className?: string
+}) {
+  return (
+    <PopoverPrimitive
+      data-slot="popover-content"
+      placement={placement}
+      offset={offset}
+      crossOffset={crossOffset}
+      className={cn(
+        "z-50 flex w-72 origin-(--trigger-anchor-point) flex-col gap-4 rounded-lg bg-popover p-2.5 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-hidden duration-100 data-entering:animate-in data-entering:fade-in-0 data-entering:zoom-in-95 data-exiting:animate-out data-exiting:fade-out-0 data-exiting:zoom-out-95 data-[placement=bottom]:slide-in-from-top-2 data-[placement=left]:slide-in-from-right-2 data-[placement=right]:slide-in-from-left-2 data-[placement=top]:slide-in-from-bottom-2",
+        className
+      )}
+      {...props}
+    />
+  )
 }
 
 function PopoverHeader({ className, ...props }: React.ComponentProps<"div">) {
@@ -55,9 +52,12 @@ function PopoverHeader({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
-function PopoverTitle({ className, ...props }: React.ComponentProps<"h2">) {
+function PopoverTitle({
+  className,
+  ...props
+}: React.ComponentProps<typeof Heading>) {
   return (
-    <div
+    <Heading
       data-slot="popover-title"
       className={cn("text-sm font-medium", className)}
       {...props}
@@ -68,9 +68,9 @@ function PopoverTitle({ className, ...props }: React.ComponentProps<"h2">) {
 function PopoverDescription({
   className,
   ...props
-}: React.ComponentProps<"p">) {
+}: React.ComponentProps<"div">) {
   return (
-    <p
+    <div
       data-slot="popover-description"
       className={cn("text-muted-foreground", className)}
       {...props}
@@ -80,8 +80,6 @@ function PopoverDescription({
 
 export {
   Popover,
-  PopoverAnchor,
-  PopoverContent,
   PopoverDescription,
   PopoverHeader,
   PopoverTitle,

@@ -5,7 +5,7 @@ import { Badge } from "@/shadcn/components/ui/badge"
 import { ToggleGroup, ToggleGroupItem } from "@/shadcn/components/ui/toggle-group"
 import { useIsMobile } from "@/shadcn/hooks/use-mobile"
 import { useTheme } from "@/shared/components/ui/shadcn/components/theme-provider"
-import { ScrollArea, ScrollBar } from "@/shadcn/components/ui/scroll-area"
+import { ScrollArea } from "@/shadcn/components/ui/scroll-area"
 type FirestoreJsonTreeViewerProps = {
   draft: string
   onDraftChange?: (newDraft: string) => void
@@ -68,20 +68,17 @@ export function FirestoreJsonTreeViewer({ draft, onDraftChange }: FirestoreJsonT
             {onDraftChange ? "Editable" : "Read only"}
           </Badge>
           <ToggleGroup
-            type="single"
-            value={collapseMode}
+            selectionMode="single"
+            disallowEmptySelection
+            selectedKeys={[collapseMode]}
             spacing={0}
-            onValueChange={(value) => {
-              if (value) {
-                setCollapseMode(value as CollapseMode)
-              }
-            }}
+            onSelectionChange={(keys) => setCollapseMode([...keys][0] as CollapseMode)}
             className="rounded-full overflow-hidden border"
             size="sm"
           >
-            <ToggleGroupItem value="auto" >Auto</ToggleGroupItem>
-            <ToggleGroupItem value="compact" >Compact</ToggleGroupItem>
-            <ToggleGroupItem value="expand" >Expand All</ToggleGroupItem>
+            <ToggleGroupItem id="auto">Auto</ToggleGroupItem>
+            <ToggleGroupItem id="compact">Compact</ToggleGroupItem>
+            <ToggleGroupItem id="expand">Expand All</ToggleGroupItem>
           </ToggleGroup>
         </div>
       </div>
@@ -109,7 +106,6 @@ export function FirestoreJsonTreeViewer({ draft, onDraftChange }: FirestoreJsonT
             }}
           />
         </div>
-        <ScrollBar orientation="horizontal" />
       </ScrollArea>
     </div>
   )

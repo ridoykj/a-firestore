@@ -8,7 +8,6 @@ import { GcpStoreProvider } from "@/features/gcp/store/gcp-store"
 import { CommandRegistryProvider } from "@/shared/components/command/command-registry"
 import { ThemeProvider } from "@/shadcn/components/theme-provider"
 import './style.css'
-import { TooltipProvider } from "@/shadcn/components/ui/tooltip"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -42,9 +41,7 @@ createRoot(document.getElementById('root')!).render(
       <QueryClientProvider client={queryClient}>
         <GcpStoreProvider>
           <CommandRegistryProvider>
-            <TooltipProvider>
-              <RouterProvider router={router} />
-            </TooltipProvider>
+            <RouterProvider router={router} />
             {import.meta.env.DEV ? <ReactQueryDevtools initialIsOpen={false} /> : null}
           </CommandRegistryProvider>
         </GcpStoreProvider>

@@ -4,7 +4,6 @@ import { Radio, Square } from "lucide-react"
 import { Button } from "@/shadcn/components/ui/button"
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
@@ -108,8 +107,7 @@ export function FirestoreWatchDialog({
   const isLive = status === "connected" || status === "connecting"
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+    <Dialog isOpen={open} onOpenChange={handleOpenChange} className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Radio className={cn("size-5", isLive ? "text-emerald-500" : "text-muted-foreground")} />
@@ -133,12 +131,12 @@ export function FirestoreWatchDialog({
             />
           </div>
           {isLive ? (
-            <Button variant="outline" onClick={stop}>
+            <Button variant="outline" onPress={stop}>
               <Square data-icon="inline-start" />
               Stop
             </Button>
           ) : (
-            <Button onClick={start}>
+            <Button onPress={start}>
               <Radio data-icon="inline-start" />
               Watch
             </Button>
@@ -175,7 +173,6 @@ export function FirestoreWatchDialog({
             </ul>
           )}
         </ScrollArea>
-      </DialogContent>
     </Dialog>
   )
 }

@@ -5,7 +5,6 @@ import { BarChart3, ShieldCheck, Trash2 } from "lucide-react"
 import { Button } from "@/shadcn/components/ui/button"
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -104,8 +103,7 @@ export function FirestoreProfilerDialog({
     : null
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl">
+    <Dialog isOpen={open} onOpenChange={onOpenChange} className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <BarChart3 className="size-5 text-primary" />
@@ -135,7 +133,7 @@ export function FirestoreProfilerDialog({
               className="text-sm"
             />
           </div>
-          <Button onClick={() => void runProfile()} disabled={busy}>
+          <Button onPress={() => void runProfile()} isDisabled={busy}>
             {busy ? "Sampling..." : "Profile"}
           </Button>
         </div>
@@ -199,17 +197,16 @@ export function FirestoreProfilerDialog({
 
         <DialogFooter>
           {rulesExist ? (
-            <Button variant="outline" onClick={removeRules}>
+            <Button variant="outline" onPress={removeRules}>
               <Trash2 data-icon="inline-start" />
               Clear rules
             </Button>
           ) : null}
-          <Button variant="secondary" onClick={saveDerivedRules} disabled={!profile}>
+          <Button variant="secondary" onPress={saveDerivedRules} isDisabled={!profile}>
             <ShieldCheck data-icon="inline-start" />
             Derive &amp; save rules
           </Button>
         </DialogFooter>
-      </DialogContent>
     </Dialog>
   )
 }

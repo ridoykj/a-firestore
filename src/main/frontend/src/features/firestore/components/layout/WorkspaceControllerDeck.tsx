@@ -4,7 +4,6 @@ import { Button } from "@/shadcn/components/ui/button"
 import { Input } from "@/shadcn/components/ui/input"
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
@@ -92,39 +91,42 @@ export function WorkspaceControllerDeck({
         {/* FFP-001: Drawer triggers for narrow layouts */}
         {drawerMode && (
           <div className="flex items-center gap-1">
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-lg"
-              aria-label="Open collections"
-              title="Open collections"
-              onClick={onOpenCollectionsDrawer}
-              className="bg-card shadow-sm"
-            >
-              <FolderTree className="w-4 h-4 text-muted-foreground" />
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-lg"
-              aria-label="Open nested browser"
-              title="Open nested browser"
-              onClick={onOpenNestedDrawer}
-              className="bg-card shadow-sm"
-            >
-              <ListTree className="w-4 h-4 text-muted-foreground" />
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-lg"
-              aria-label="Open filters"
-              title="Open filters"
-              onClick={onOpenFiltersDrawer}
-              className="bg-card shadow-sm"
-            >
-              <Filter className="w-4 h-4 text-muted-foreground" />
-            </Button>
+            <span title="Open collections">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-lg"
+                aria-label="Open collections"
+                onPress={onOpenCollectionsDrawer}
+                className="bg-card shadow-sm"
+              >
+                <FolderTree className="w-4 h-4 text-muted-foreground" />
+              </Button>
+            </span>
+            <span title="Open nested browser">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-lg"
+                aria-label="Open nested browser"
+                onPress={onOpenNestedDrawer}
+                className="bg-card shadow-sm"
+              >
+                <ListTree className="w-4 h-4 text-muted-foreground" />
+              </Button>
+            </span>
+            <span title="Open filters">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-lg"
+                aria-label="Open filters"
+                onPress={onOpenFiltersDrawer}
+                className="bg-card shadow-sm"
+              >
+                <Filter className="w-4 h-4 text-muted-foreground" />
+              </Button>
+            </span>
           </div>
         )}
 
@@ -144,8 +146,8 @@ export function WorkspaceControllerDeck({
         {/* Run Query Button */}
         <Button
           size="lg"
-          onClick={() => runQuery(0)}
-          disabled={isQuerying}
+          onPress={() => runQuery(0)}
+          isDisabled={isQuerying}
           className="px-4 font-bold shadow-md shadow-primary/10 hover:shadow-lg"
         >
           <Play className="w-3.5 h-3.5 fill-current" />
@@ -165,29 +167,28 @@ export function WorkspaceControllerDeck({
         </div>
 
         {/* Actions Dropdown */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+        <DropdownMenuTrigger>
+          <span title="More actions">
             <Button
               variant="outline"
               size="icon-lg"
               className="bg-card shadow-sm"
-              title="More actions"
             >
               <MoreVertical className="w-4 h-4 text-muted-foreground" />
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
+          </span>
+          <DropdownMenu placement="bottom end" className="w-56">
             <DropdownMenuItem
-              onClick={openCreateFromHeader}
-              disabled={crudBusy !== null || previewBusy !== null || transferBusy}
+              onAction={openCreateFromHeader}
+              isDisabled={crudBusy !== null || previewBusy !== null || transferBusy}
             >
               <Plus className="w-4 h-4 mr-2 text-blue-600" />
               <span>Create Document</span>
             </DropdownMenuItem>
 
             <DropdownMenuItem
-              onClick={onRequestDeleteSelected}
-              disabled={selectedRowCount === 0}
+              onAction={onRequestDeleteSelected}
+              isDisabled={selectedRowCount === 0}
             >
               <Trash className="w-4 h-4 mr-2 text-red-500" />
               <span>Delete Selected ({selectedRowCount})</span>
@@ -196,48 +197,48 @@ export function WorkspaceControllerDeck({
             <DropdownMenuSeparator />
 
             <DropdownMenuSub>
-              <DropdownMenuSubTrigger disabled={transferControlsDisabled()}>
+              <DropdownMenuSubTrigger isDisabled={transferControlsDisabled()}>
                 <Download className="w-4 h-4 mr-2 text-emerald-500" />
                 <span>Export</span>
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
-                <DropdownMenuItem onClick={() => exportCollectionCurrentPage("json")}>
+                <DropdownMenuItem onAction={() => exportCollectionCurrentPage("json")}>
                   JSON (current page)
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => exportCollectionCurrentPage("csv")}>
+                <DropdownMenuItem onAction={() => exportCollectionCurrentPage("csv")}>
                   CSV (current page)
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => exportCollectionFull("json")}>
+                <DropdownMenuItem onAction={() => exportCollectionFull("json")}>
                   JSON (full collection)
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => exportCollectionFull("csv")}>
+                <DropdownMenuItem onAction={() => exportCollectionFull("csv")}>
                   CSV (full collection)
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={exportSelectedJSON} disabled={selectedRowCount === 0}>
+                <DropdownMenuItem onAction={exportSelectedJSON} isDisabled={selectedRowCount === 0}>
                   JSON (selected rows)
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={exportSelectedCSV} disabled={selectedRowCount === 0}>
+                <DropdownMenuItem onAction={exportSelectedCSV} isDisabled={selectedRowCount === 0}>
                   CSV (selected rows)
                 </DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
             <DropdownMenuSub>
-              <DropdownMenuSubTrigger disabled={transferControlsDisabled()}>
+              <DropdownMenuSubTrigger isDisabled={transferControlsDisabled()}>
                 <Upload className="w-4 h-4 mr-2 text-blue-500" />
                 <span>Import</span>
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
-                <DropdownMenuItem onClick={() => requestCollectionImport("json")}>
+                <DropdownMenuItem onAction={() => requestCollectionImport("json")}>
                   Import JSON
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => requestCollectionImport("csv")}>
+                <DropdownMenuItem onAction={() => requestCollectionImport("csv")}>
                   Import CSV
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setFirestoreImportDialogOpen(true)}>
+                <DropdownMenuItem onAction={() => setFirestoreImportDialogOpen(true)}>
                   Import Firestore
                 </DropdownMenuItem>
               </DropdownMenuSubContent>
@@ -245,12 +246,12 @@ export function WorkspaceControllerDeck({
 
             <DropdownMenuSeparator />
 
-            <DropdownMenuItem onClick={() => setFilterPanelOpen(!filterPanelOpen)}>
+            <DropdownMenuItem onAction={() => setFilterPanelOpen(!filterPanelOpen)}>
               <Filter className="w-4 h-4 mr-2" />
               <span>{filterPanelOpen ? "Hide Filters" : "Show Filters"}</span>
             </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </DropdownMenu>
+        </DropdownMenuTrigger>
       </div>
     </div>
   )

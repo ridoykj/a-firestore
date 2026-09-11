@@ -10,7 +10,6 @@ import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
-  AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
@@ -19,7 +18,6 @@ import {
 import { Button } from "@/shadcn/components/ui/button"
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -32,7 +30,6 @@ import {
 } from "@/shadcn/components/ui/field"
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetFooter,
   SheetHeader,
@@ -221,12 +218,13 @@ export function FirestoreDocumentPreviewPanel({
 
   return (
     <>
-      <Sheet open={open} onOpenChange={handleSheetOpenChange} >
-        <SheetContent
-          side="right"
-          showCloseButton={false}
-          className="w-[90%]! sm:w-[85%]! sm:max-w-[85%]! p-0 gap-0 flex flex-col overflow-y-auto shadow-2xl"
-        >
+      <Sheet
+        isOpen={open}
+        onOpenChange={handleSheetOpenChange}
+        side="right"
+        showCloseButton={false}
+        className="w-[90%]! sm:w-[85%]! sm:max-w-[85%]! p-0 gap-0 flex flex-col overflow-y-auto shadow-2xl"
+      >
           <SheetHeader className="p-3">
             <SheetTitle className="sr-only">Document Preview</SheetTitle>
             <SheetDescription className="sr-only">
@@ -244,96 +242,92 @@ export function FirestoreDocumentPreviewPanel({
                 {/* Close button on mobile positioned next to title */}
                 <Button variant="outline"
                   size="icon-lg"
-                  onClick={() => onOpenChange(false)}
+                  onPress={() => onOpenChange(false)}
                   className="sm:hidden p-1.5 -mr-1.5 rounded-full hover:bg-muted text-muted-foreground transition-colors shrink-0"
                 >
                   <X className="w-5 h-5" />
                 </Button>
               </div>
               <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="bg-card"
-                  onClick={onRefresh}
-                  disabled={isPending || transferBusy || pathIsInvalid}
-                  title="Refresh Document"
-                >
-                  <RefreshCw className={`mr-1.5 h-4 w-4 text-muted-foreground ${busyAction === "refresh" ? "animate-spin" : ""}`} />
-                  Refresh
-                </Button>
+                <span title="Refresh Document">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="bg-card"
+                    onPress={onRefresh}
+                    isDisabled={isPending || transferBusy || pathIsInvalid}
+                  >
+                    <RefreshCw className={`mr-1.5 h-4 w-4 text-muted-foreground ${busyAction === "refresh" ? "animate-spin" : ""}`} />
+                    Refresh
+                  </Button>
+                </span>
 
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="bg-card"
-                      disabled={isPending || transferBusy || pathIsInvalid}
-                    >
-                      <Download className="mr-1.5 h-4 w-4 text-emerald-500" />
-                      Export
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
+                <DropdownMenuTrigger>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="bg-card"
+                    isDisabled={isPending || transferBusy || pathIsInvalid}
+                  >
+                    <Download className="mr-1.5 h-4 w-4 text-emerald-500" />
+                    Export
+                  </Button>
+                  <DropdownMenu placement="bottom end">
                     <DropdownMenuItem
-                      onClick={() => onExportDocument("json")}
-                      disabled={pathIsInvalid || isPending || transferBusy}
+                      onAction={() => onExportDocument("json")}
+                      isDisabled={pathIsInvalid || isPending || transferBusy}
                     >
                       Export JSON
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onClick={() => onExportDocument("csv")}
-                      disabled={pathIsInvalid || isPending || transferBusy}
+                      onAction={() => onExportDocument("csv")}
+                      isDisabled={pathIsInvalid || isPending || transferBusy}
                     >
                       Export CSV
                     </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                  </DropdownMenu>
+                </DropdownMenuTrigger>
 
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="bg-card"
-                      disabled={isPending || transferBusy || pathIsInvalid}
-                    >
-                      <Upload className="mr-1.5 h-4 w-4 text-blue-500" />
-                      Import
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
+                <DropdownMenuTrigger>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="bg-card"
+                    isDisabled={isPending || transferBusy || pathIsInvalid}
+                  >
+                    <Upload className="mr-1.5 h-4 w-4 text-blue-500" />
+                    Import
+                  </Button>
+                  <DropdownMenu placement="bottom end">
                     <DropdownMenuItem
-                      onClick={() => onImportDocument("json")}
-                      disabled={pathIsInvalid || isPending || transferBusy}
+                      onAction={() => onImportDocument("json")}
+                      isDisabled={pathIsInvalid || isPending || transferBusy}
                     >
                       Import JSON
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onClick={() => onImportDocument("csv")}
-                      disabled={pathIsInvalid || isPending || transferBusy}
+                      onAction={() => onImportDocument("csv")}
+                      isDisabled={pathIsInvalid || isPending || transferBusy}
                     >
                       Import CSV
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem disabled>
+                    <DropdownMenuItem isDisabled>
                       Full replace upsert mode
                     </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                  </DropdownMenu>
+                </DropdownMenuTrigger>
 
                 {/* Close button on desktop in the toolbar */}
                 <Button
                   variant="outline"
                   size="icon-lg"
-                  onClick={() => onOpenChange(false)}
+                  onPress={() => onOpenChange(false)}
                   className="rounded-full hover:bg-muted text-muted-foreground transition-colors ml-2 hidden sm:inline-flex"
-                  // className="hidden sm:inline-flex ml-2 rounded-full hover:bg-muted text-muted-foreground transition-colors"
-                  disabled={isPending}
+                  isDisabled={isPending}
                 > <X className="w-5 h-5" /></Button>
               </div>
             </div>
@@ -344,28 +338,27 @@ export function FirestoreDocumentPreviewPanel({
             {renderHeavyContent ? (
             <FieldGroup className="min-h-0 flex-1">
               <Tabs
-                defaultValue="tree"
-                value={activeTab}
-                onValueChange={(value) => onActiveTabChange(value as PreviewTab)}
+                selectedKey={activeTab}
+                onSelectionChange={(key) => onActiveTabChange(key as PreviewTab)}
                 className="flex flex-col min-h-0 flex-1 gap-3"
               >
                 <TabsList className="h-9">
-                  <TabsTrigger value="tree">
+                  <TabsTrigger id="tree">
                     <FolderTree data-icon="inline-start" />
                     Tree
                   </TabsTrigger>
-                  <TabsTrigger value="graph">
+                  <TabsTrigger id="graph">
                     <Network data-icon="inline-start" />
                     Graph
                   </TabsTrigger>
-                  <TabsTrigger value="json">
+                  <TabsTrigger id="json">
                     <FileJson data-icon="inline-start" />
                     JSON
                   </TabsTrigger>
                 </TabsList>
 
                 <TabsContent
-                  value="tree"
+                  id="tree"
                   className="flex min-h-0 flex-1 flex-col"
                 >
                   <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center"><Spinner className="w-8 h-8 text-muted-foreground/50" /></div>}>
@@ -374,7 +367,7 @@ export function FirestoreDocumentPreviewPanel({
                 </TabsContent>
 
                 <TabsContent
-                  value="graph"
+                  id="graph"
                   className="min-h-0 flex-1 flex-col"
                 >
                   <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center"><Spinner className="w-8 h-8 text-muted-foreground/50" /></div>}>
@@ -382,7 +375,7 @@ export function FirestoreDocumentPreviewPanel({
                   </Suspense>
                 </TabsContent>
 
-                <TabsContent value="json" className="flex min-h-0 flex-1 flex-col gap-3">
+                <TabsContent id="json" className="flex min-h-0 flex-1 flex-col gap-3">
                   <Field
                     className="min-h-0 flex-1"
                     data-invalid={payloadMissing || jsonHasValidationErrors}
@@ -393,8 +386,8 @@ export function FirestoreDocumentPreviewPanel({
                         type="button"
                         size="xs"
                         variant="outline"
-                        onClick={handleFormatJson}
-                        disabled={isPending}
+                        onPress={handleFormatJson}
+                        isDisabled={isPending}
                       >
                         <WandSparkles data-icon="inline-start" />
                         Format JSON
@@ -434,24 +427,21 @@ export function FirestoreDocumentPreviewPanel({
                 Save mode
               </span>
               <ToggleGroup
-                type="single"
-                value={saveMode}
-                onValueChange={(value) => {
-                  if (value === "MERGE" || value === "REPLACE") {
-                    onSaveModeChange(value)
-                  }
-                }}
+                selectionMode="single"
+                disallowEmptySelection
+                selectedKeys={[saveMode]}
+                onSelectionChange={(keys) => onSaveModeChange([...keys][0] as WriteMode)}
                 spacing={0}
                 size="sm"
-                disabled={isPending}
+                isDisabled={isPending}
                 className="grid grid-cols-2 rounded-md overflow-hidden border bg-card"
                 aria-label="Save mode"
               >
-                <ToggleGroupItem value="MERGE" title="Merge: only submitted fields change; removed fields are deleted explicitly">
-                  Merge
+                <ToggleGroupItem id="MERGE">
+                  <span title="Merge: only submitted fields change; removed fields are deleted explicitly">Merge</span>
                 </ToggleGroupItem>
-                <ToggleGroupItem value="REPLACE" title="Replace: the draft becomes the entire document">
-                  Replace
+                <ToggleGroupItem id="REPLACE">
+                  <span title="Replace: the draft becomes the entire document">Replace</span>
                 </ToggleGroupItem>
               </ToggleGroup>
               <p className="text-xs leading-relaxed text-muted-foreground text-pretty">
@@ -513,8 +503,8 @@ export function FirestoreDocumentPreviewPanel({
                 variant="outline"
                 size="sm"
                 className="justify-center border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                onClick={openDeleteConfirm}
-                disabled={isPending || pathIsInvalid}
+                onPress={openDeleteConfirm}
+                isDisabled={isPending || pathIsInvalid}
               >
                 {busyAction === "delete" ? <Spinner className="mr-1.5" /> : <Trash2 data-icon="inline-start" />}
                 {busyAction === "delete" ? "Deleting..." : "Delete document"}
@@ -528,24 +518,21 @@ export function FirestoreDocumentPreviewPanel({
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-semibold text-foreground">Save mode:</span>
               <ToggleGroup
-                type="single"
-                value={saveMode}
-                onValueChange={(value) => {
-                  if (value === "MERGE" || value === "REPLACE") {
-                    onSaveModeChange(value)
-                  }
-                }}
+                selectionMode="single"
+                disallowEmptySelection
+                selectedKeys={[saveMode]}
+                onSelectionChange={(keys) => onSaveModeChange([...keys][0] as WriteMode)}
                 spacing={0}
                 size="sm"
-                disabled={isPending}
+                isDisabled={isPending}
                 className="rounded-md overflow-hidden border"
                 aria-label="Save mode"
               >
-                <ToggleGroupItem value="MERGE" title="Merge: only submitted fields change; removed fields are deleted explicitly">
-                  Merge
+                <ToggleGroupItem id="MERGE">
+                  <span title="Merge: only submitted fields change; removed fields are deleted explicitly">Merge</span>
                 </ToggleGroupItem>
-                <ToggleGroupItem value="REPLACE" title="Replace: the draft becomes the entire document">
-                  Replace
+                <ToggleGroupItem id="REPLACE">
+                  <span title="Replace: the draft becomes the entire document">Replace</span>
                 </ToggleGroupItem>
               </ToggleGroup>
               <span>
@@ -573,8 +560,8 @@ export function FirestoreDocumentPreviewPanel({
                 variant="destructive"
                 size="sm"
                 className="lg:hidden"
-                onClick={openDeleteConfirm}
-                disabled={isPending || pathIsInvalid}
+                onPress={openDeleteConfirm}
+                isDisabled={isPending || pathIsInvalid}
               >
                 {busyAction === "delete" ? <Spinner className="mr-1.5" /> : null}
                 {busyAction === "delete" ? "Deleting..." : "Delete Doc"}
@@ -595,15 +582,15 @@ export function FirestoreDocumentPreviewPanel({
               </span>
             </div>
             <div className="flex w-full sm:w-auto flex-row items-center gap-2">
-              <Button type="button" variant="outline" className="flex-1 sm:flex-none" onClick={closePanel} disabled={isPending}>
+              <Button type="button" variant="outline" className="flex-1 sm:flex-none" onPress={closePanel} isDisabled={isPending}>
                 Cancel
               </Button>
               <Button
                 type="button"
                 className="flex-1 sm:flex-none"
                 variant={saveMode === "REPLACE" ? "destructive" : "default"}
-                onClick={handleSave}
-                disabled={isPending || jsonHasValidationErrors}
+                onPress={handleSave}
+                isDisabled={isPending || jsonHasValidationErrors}
               >
                 {busyAction === "update" ? <Spinner className="mr-1.5" /> : null}
                 {busyAction === "update"
@@ -614,28 +601,25 @@ export function FirestoreDocumentPreviewPanel({
               </Button>
             </div>
           </SheetFooter>
-        </SheetContent>
       </Sheet>
 
-      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this document?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This action permanently deletes the current document.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isPending}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={handleDeleteConfirm}
-              disabled={isPending}
-            >
-              Confirm Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
+      <AlertDialog isOpen={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen} size="sm">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete this document?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This action permanently deletes the current document.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel isDisabled={isPending}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            onPress={handleDeleteConfirm}
+            isDisabled={isPending}
+          >
+            Confirm Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
       </AlertDialog>
     </>
   )

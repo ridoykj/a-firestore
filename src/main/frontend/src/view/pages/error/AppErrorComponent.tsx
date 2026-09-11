@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router"
-import { Button } from "@/shadcn/components/ui/button"
+import type * as React from "react"
+import { LinkButton } from "@/shadcn/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/shadcn/components/ui/card"
 
 const AppErrorComponent = () => {
@@ -14,9 +15,10 @@ const AppErrorComponent = () => {
           <p className="text-sm text-muted-foreground">
             Sorry, the page you are looking for does not exist. It might have been moved or deleted.
           </p>
-          <Button asChild>
-            <Link to="/">Go Back to Home</Link>
-          </Button>
+          <LinkButton href="/"
+            render={(props) => <Link to="/" {...(props as React.ComponentPropsWithRef<"a">)} />}>
+            Go Back to Home
+          </LinkButton>
         </CardContent>
       </Card>
     </div>
