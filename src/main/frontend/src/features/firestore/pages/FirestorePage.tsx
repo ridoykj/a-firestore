@@ -15,7 +15,6 @@ import {
   type OrderClause,
   type OrderDirection,
   type PreviewCloseIntent,
-  type PreviewEditorTheme,
   type PreviewValidationSummary,
   type QueryResponse,
   type TransferFormat,
@@ -47,6 +46,7 @@ import {
 } from "@/shadcn/components/ui/alert-dialog"
 import { useMediaQuery } from "@/shadcn/hooks/use-media-query"
 import { useIsMobile } from "@/shadcn/hooks/use-mobile"
+import { useTheme } from "@/shared/components/ui/shadcn/components/theme-provider"
 import { useGcpStore, type ProjectTab } from "@/features/gcp/store/gcp-store"
 import {
   loadQueryState,
@@ -130,8 +130,6 @@ type FirestorePageProps = {
   tab: ProjectTab
 }
 
-const PREVIEW_THEME_STORAGE_KEY = "firestore-preview-editor-theme"
-
 const EMPTY_PREVIEW_VALIDATION: PreviewValidationSummary = {
   errorCount: 0,
   warningCount: 0,
@@ -142,20 +140,9 @@ const NESTED_PAGE_SIZE = 25
 // Stable no-op so the results component's effect deps don't change every render.
 const noopFilterMatchCountChange = () => { }
 
-function loadInitialPreviewTheme(): PreviewEditorTheme {
-  if (typeof window === "undefined") {
-    return "dark"
-  }
-
-  const storedTheme = window.localStorage.getItem(PREVIEW_THEME_STORAGE_KEY)
-  if (storedTheme === "light" || storedTheme === "dark") {
-    return storedTheme
-  }
-  return "dark"
-}
-
 export default function FirestorePage({ tab }: FirestorePageProps) {
   const queryClient = useQueryClient()
+  const { resolvedTheme } = useTheme()
   const isMobile = useIsMobile()
   const isNarrowDesktop = useMediaQuery("(max-width: 1280px)")
   const drawerMode = isMobile || isNarrowDesktop
@@ -273,9 +260,6 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
   const [previewBusy, setPreviewBusy] = useState<PreviewBusy>(null)
   const [previewValidation, setPreviewValidation] =
     useState<PreviewValidationSummary>(EMPTY_PREVIEW_VALIDATION)
-  const [previewEditorTheme, setPreviewEditorTheme] = useState<PreviewEditorTheme>(
-    loadInitialPreviewTheme,
-  )
   const [previewDiscardOpen, setPreviewDiscardOpen] = useState(false)
   const [pendingPreviewIntent, setPendingPreviewIntent] = useState<PendingPreviewIntent | null>(
     null,
@@ -1428,13 +1412,6 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
     clearPreviewSelection()
   }
 
-  function handlePreviewEditorThemeChange(nextTheme: PreviewEditorTheme) {
-    setPreviewEditorTheme(nextTheme)
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(PREVIEW_THEME_STORAGE_KEY, nextTheme)
-    }
-  }
-
   async function handlePreviewRefresh() {
     const normalizedPath = normalizePath(previewSelection?.documentPath ?? "")
     if (!normalizedPath) return
@@ -1922,8 +1899,7 @@ export default function FirestorePage({ tab }: FirestorePageProps) {
                     activeTab={previewActiveTab}
                     onActiveTabChange={setPreviewActiveTab}
                     busyAction={previewBusy}
-                    editorTheme={previewEditorTheme}
-                    onEditorThemeChange={handlePreviewEditorThemeChange}
+                    editorTheme={resolvedTheme}
                     validation={previewValidation}
                     onValidationChange={setPreviewValidation}
                     onUpdate={(formattedDraft) => void handlePreviewUpdate(formattedDraft)}

@@ -44,13 +44,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shadcn/components/ui
 import { ToggleGroup, ToggleGroupItem } from "@/shadcn/components/ui/toggle-group"
 import { normalizePath, pathIsCollection } from "@/features/firestore/api/firestore-utils"
 import {
+  CheckCircle2,
   Download,
   FileJson,
   FolderTree,
-  Moon,
   Network,
   RefreshCw,
-  Sun,
+  Trash2,
   Upload,
   WandSparkles,
   X
@@ -84,8 +84,8 @@ type FirestoreDocumentPreviewPanelProps = {
   activeTab: PreviewTab
   onActiveTabChange: (value: PreviewTab) => void
   busyAction: PreviewBusy
+  /** Follows the app's global theme (see `useTheme`) — this panel has no theme control of its own. */
   editorTheme: PreviewEditorTheme
-  onEditorThemeChange: (value: PreviewEditorTheme) => void
   validation: PreviewValidationSummary
   onValidationChange: (summary: PreviewValidationSummary) => void
   onOpenChange: (open: boolean) => void
@@ -113,7 +113,6 @@ export function FirestoreDocumentPreviewPanel({
   onActiveTabChange,
   busyAction,
   editorTheme,
-  onEditorThemeChange,
   validation,
   onValidationChange,
   onOpenChange,
@@ -144,6 +143,11 @@ export function FirestoreDocumentPreviewPanel({
   const pathIsInvalid = !normalizedPath || pathIsCollection(normalizedPath)
   const payloadMissing = attemptedJsonSubmit && !draft.trim()
   const jsonHasValidationErrors = validation.errorCount > 0
+
+  const addedCount = writePreview?.addedFields.length ?? 0
+  const changedCount = writePreview?.changedFields.length ?? 0
+  const deletedCount = writePreview?.deletedFields.length ?? 0
+  const hasPendingChanges = addedCount + changedCount + deletedCount > 0
 
   function closePanel() {
     if (isPending) {
@@ -322,29 +326,6 @@ export function FirestoreDocumentPreviewPanel({
                   </DropdownMenuContent>
                 </DropdownMenu>
 
-                <ToggleGroup
-                  type="single"
-                  value={editorTheme}
-                  onValueChange={(value) => {
-                    if (value) {
-                      onEditorThemeChange(value as PreviewEditorTheme)
-                    }
-                  }}
-                  // variant="outline"
-                  spacing={0}
-                  size="default"
-                  disabled={isPending}
-                  className="sm:ml-2 rounded-full overflow-hidden border"
-                  aria-label="Editor theme"
-                >
-                  <ToggleGroupItem value="light" title="Light Theme" aria-label="Light theme">
-                    <Sun className="w-3.5 h-3.5" />
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="dark" title="Dark Theme" aria-label="Dark theme">
-                    <Moon className="w-3.5 h-3.5" />
-                  </ToggleGroupItem>
-                </ToggleGroup>
-
                 {/* Close button on desktop in the toolbar */}
                 <Button
                   variant="outline"
@@ -358,7 +339,8 @@ export function FirestoreDocumentPreviewPanel({
             </div>
           </SheetHeader>
 
-          <div className="min-h-0 flex flex-1 flex-col px-4 py-1 sm:px-6">
+          <div className="min-h-0 flex flex-1 overflow-hidden">
+          <div className="min-h-0 flex flex-1 min-w-0 flex-col px-4 py-1 sm:px-6">
             {renderHeavyContent ? (
             <FieldGroup className="min-h-0 flex-1">
               <Tabs
@@ -444,8 +426,105 @@ export function FirestoreDocumentPreviewPanel({
             )}
           </div>
 
-          {/* FFP-102: explicit, labeled save mode with a preview of the affected fields */}
-          <div className="border-t px-4 py-2 sm:px-6 text-xs text-muted-foreground space-y-1">
+          {/* FFP-102: save mode, the pending-change preview, and the delete action, grouped as a
+              persistent side panel on wide screens; folded back under the tabs below lg. */}
+          <aside className="hidden lg:flex w-64 shrink-0 flex-col gap-4 overflow-y-auto border-l bg-muted/20 p-4">
+            <div className="flex flex-col gap-2.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Save mode
+              </span>
+              <ToggleGroup
+                type="single"
+                value={saveMode}
+                onValueChange={(value) => {
+                  if (value === "MERGE" || value === "REPLACE") {
+                    onSaveModeChange(value)
+                  }
+                }}
+                spacing={0}
+                size="sm"
+                disabled={isPending}
+                className="grid grid-cols-2 rounded-md overflow-hidden border bg-card"
+                aria-label="Save mode"
+              >
+                <ToggleGroupItem value="MERGE" title="Merge: only submitted fields change; removed fields are deleted explicitly">
+                  Merge
+                </ToggleGroupItem>
+                <ToggleGroupItem value="REPLACE" title="Replace: the draft becomes the entire document">
+                  Replace
+                </ToggleGroupItem>
+              </ToggleGroup>
+              <p className="text-xs leading-relaxed text-muted-foreground text-pretty">
+                {saveMode === "MERGE"
+                  ? "Merge updates the submitted fields and deletes removed fields explicitly."
+                  : "Replace makes this draft the entire document; omitted fields are removed."}
+              </p>
+            </div>
+
+            <div className="h-px bg-border" />
+
+            <div className="flex flex-col gap-2.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Pending changes
+              </span>
+              <div className="grid grid-cols-3 gap-1.5">
+                <div className="flex flex-col items-center gap-0.5 rounded-lg border bg-card px-1.5 py-2">
+                  <span className="font-mono text-sm font-semibold leading-none">{addedCount}</span>
+                  <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <span className="size-1.5 rounded-full bg-emerald-500" />
+                    Added
+                  </span>
+                </div>
+                <div className="flex flex-col items-center gap-0.5 rounded-lg border bg-card px-1.5 py-2">
+                  <span className="font-mono text-sm font-semibold leading-none">{changedCount}</span>
+                  <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <span className="size-1.5 rounded-full bg-amber-500" />
+                    Changed
+                  </span>
+                </div>
+                <div className="flex flex-col items-center gap-0.5 rounded-lg border bg-card px-1.5 py-2">
+                  <span className="font-mono text-sm font-semibold leading-none">{deletedCount}</span>
+                  <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <span className="size-1.5 rounded-full bg-destructive" />
+                    Deleted
+                  </span>
+                </div>
+              </div>
+              {writePreviewError ? (
+                <p className="text-xs text-destructive">{writePreviewError}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground" data-testid="write-preview-summary">
+                  {`This save will add ${addedCount}, change ${changedCount}, and delete ${deletedCount} field(s).`}
+                  {writePreview && writePreview.deletedFields.length > 0
+                    ? ` Deleting: ${writePreview.deletedFields.join(", ")}`
+                    : ""}
+                </p>
+              )}
+            </div>
+
+            <div className="h-px bg-border" />
+
+            <div className="flex flex-col gap-2.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Danger zone
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="justify-center border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={openDeleteConfirm}
+                disabled={isPending || pathIsInvalid}
+              >
+                {busyAction === "delete" ? <Spinner className="mr-1.5" /> : <Trash2 data-icon="inline-start" />}
+                {busyAction === "delete" ? "Deleting..." : "Delete document"}
+              </Button>
+            </div>
+          </aside>
+          </div>
+
+          {/* Below lg, the aside folds back under the tabs so save mode and delete stay reachable. */}
+          <div className="border-t px-4 py-2 sm:px-6 text-xs text-muted-foreground space-y-1 lg:hidden">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-semibold text-foreground">Save mode:</span>
               <ToggleGroup
@@ -478,8 +557,8 @@ export function FirestoreDocumentPreviewPanel({
             {writePreviewError ? (
               <p className="text-destructive">{writePreviewError}</p>
             ) : writePreview ? (
-              <p data-testid="write-preview-summary">
-                {`This save will add ${writePreview.addedFields.length}, change ${writePreview.changedFields.length}, and delete ${writePreview.deletedFields.length} field(s).`}
+              <p>
+                {`This save will add ${addedCount}, change ${changedCount}, and delete ${deletedCount} field(s).`}
                 {writePreview.deletedFields.length > 0
                   ? ` Deleting: ${writePreview.deletedFields.join(", ")}`
                   : ""}
@@ -488,16 +567,33 @@ export function FirestoreDocumentPreviewPanel({
           </div>
 
           <SheetFooter className="border-t sm:flex-row sm:flex-wrap items-center sm:justify-between gap-3 px-4 py-2 sm:px-6 shrink-0 ">
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              onClick={openDeleteConfirm}
-              disabled={isPending || pathIsInvalid}
-            >
-              {busyAction === "delete" ? <Spinner className="mr-1.5" /> : null}
-              {busyAction === "delete" ? "Deleting..." : "Delete Doc"}
-            </Button>
+            <div className="flex w-full sm:w-auto flex-wrap items-center gap-3">
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                className="lg:hidden"
+                onClick={openDeleteConfirm}
+                disabled={isPending || pathIsInvalid}
+              >
+                {busyAction === "delete" ? <Spinner className="mr-1.5" /> : null}
+                {busyAction === "delete" ? "Deleting..." : "Delete Doc"}
+              </Button>
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                {hasPendingChanges ? (
+                  <>
+                    <span className="size-1.5 rounded-full bg-amber-500" />
+                    {addedCount + changedCount + deletedCount} pending change
+                    {addedCount + changedCount + deletedCount === 1 ? "" : "s"}
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="size-3.5 text-emerald-500" />
+                    No unsaved changes
+                  </>
+                )}
+              </span>
+            </div>
             <div className="flex w-full sm:w-auto flex-row items-center gap-2">
               <Button type="button" variant="outline" className="flex-1 sm:flex-none" onClick={closePanel} disabled={isPending}>
                 Cancel
